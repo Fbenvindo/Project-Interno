@@ -41,6 +41,7 @@ const dataCadastroModel = require('./models/dataCadastro');
 const comercialModel = require('./models/comercial');
 const checklistsModel = require('./models/checklists');
 const checklistItemsModel = require('./models/checklistItems');
+const consumoAguaModel = require('./models/consumoAgua');
 
 
 if (cluster.isMaster) {
@@ -1397,6 +1398,59 @@ app.patch('/api/pavimentos/:id', async (req, res) => {
 app.delete('/api/pavimentos/:id', async (req, res) => {
   try {
     await pool.query('DELETE FROM pavimentos WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Consumo de Água (hidráulica) - cálculo de demanda e dimensionamento de reservatório
+app.post('/api/consumo_agua', async (req, res) => {
+  try {
+    const c = await consumoAguaModel.createCalculo(req.body);
+    res.json(c);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Support query-style access: /api/consumo_agua?empreendimento_id=1
+app.get('/api/consumo_agua', async (req, res) => {
+  try {
+    const empId = req.query.empreendimento_id;
+    if (empId) {
+      const rows = await consumoAguaModel.listCalculosByEmpreendimento(empId);
+      return res.json(rows);
+    }
+    const result = await pool.query('SELECT * FROM consumo_agua_calculos ORDER BY empreendimento_id, id');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/consumo_agua/:id', async (req, res) => {
+  try {
+    const c = await consumoAguaModel.getCalculo(req.params.id);
+    if (!c) return res.status(404).json({ error: 'Não encontrado' });
+    res.json(c);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/consumo_agua/:id', async (req, res) => {
+  try {
+    const updated = await consumoAguaModel.updateCalculo(req.params.id, req.body);
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/consumo_agua/:id', async (req, res) => {
+  try {
+    await consumoAguaModel.deleteCalculo(req.params.id);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

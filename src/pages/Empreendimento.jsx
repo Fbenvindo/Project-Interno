@@ -25,6 +25,7 @@ import GestaoTab from "../components/empreendimento/GestaoTab";
 import PRETab from "../components/empreendimento/PRETab";
 import CadastroTab from "../components/empreendimento/CadastroTab";
 import ControleOSTab from "../components/empreendimento/ControleOSTab";
+import ConsumoAguaTab from "../components/empreendimento/ConsumoAguaTab";
 import ChecklistCadastroTab from "@/pages/ChecklistCadastro";
 import { ActivityTimerContext } from "@/components/contexts/ActivityTimerContext";
 
@@ -40,7 +41,8 @@ export default function EmpreendimentoPage() {
     atividades_projeto: { data: [], loaded: false, loading: false },
     gestao: { data: [], loaded: false, loading: false },
     controle_os: { data: [], loaded: false, loading: false },
-    checklists: { data: [], loaded: false, loading: false }
+    checklists: { data: [], loaded: false, loading: false },
+    consumo_agua: { data: [], loaded: false, loading: false }
   });
 
   const [sharedData, setSharedData] = useState({
@@ -104,7 +106,7 @@ export default function EmpreendimentoPage() {
 
   const visibleTabsForUser = useMemo(() => {
     if (canEdit) {
-      return ['documentos', 'cadastro', 'pavimentos', 'atividades_projeto', 'pre', 'controle_os', 'gestao'];
+      return ['documentos', 'cadastro', 'pavimentos', 'atividades_projeto', 'pre', 'controle_os', 'consumo_agua', 'gestao'];
     }
     // Padrão/Apoio: visualização de Documentos, Cadastro, Pavimentos e PRE
     return ['documentos', 'cadastro', 'pavimentos', 'pre'];
@@ -245,6 +247,10 @@ export default function EmpreendimentoPage() {
         data = {};
           break;
 
+      case 'consumo_agua':
+        data = {};
+        break;
+
         default:
           break;
       }
@@ -301,7 +307,8 @@ export default function EmpreendimentoPage() {
       atividades_projeto: { data: [], loaded: false, loading: false },
       gestao: { data: [], loaded: false, loading: false },
       controle_os: { data: [], loaded: false, loading: false },
-      checklists: { data: [], loaded: false, loading: false }
+      checklists: { data: [], loaded: false, loading: false },
+      consumo_agua: { data: [], loaded: false, loading: false }
     });
     // mark shared data stale and trigger an immediate reload to avoid
     // race conditions where state updates are not visible to subsequent checks
@@ -356,7 +363,7 @@ export default function EmpreendimentoPage() {
   const isGestaoLoading = sharedData.loading || tabData.documentos.loading || tabData.pavimentos.loading;
   const isGestaoLoaded = sharedData.loaded && tabData.documentos.loaded && tabData.pavimentos.loaded;
   const tabsGridClass = canEdit
-    ? (hasAccessToGestao ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-8' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-7')
+    ? (hasAccessToGestao ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-9' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-8')
     : 'grid-cols-4';
 
   return (
@@ -373,6 +380,7 @@ export default function EmpreendimentoPage() {
             {visibleTabsForUser.includes('atividades_projeto') && <TabsTrigger value="atividades_projeto">Atividades do Projeto</TabsTrigger>}
             {visibleTabsForUser.includes('pre') && <TabsTrigger value="pre">PRE</TabsTrigger>}
             {visibleTabsForUser.includes('controle_os') && <TabsTrigger value="controle_os">Controle OS</TabsTrigger>}
+            {visibleTabsForUser.includes('consumo_agua') && <TabsTrigger value="consumo_agua">Consumo de Água</TabsTrigger>}
             {hasAccessToGestao && visibleTabsForUser.includes('gestao') && (
               <TabsTrigger value="gestao">Gestão</TabsTrigger>
             )}
@@ -485,6 +493,15 @@ export default function EmpreendimentoPage() {
                 atividades={sharedData.atividades || []}
               />
             ) : null)}
+          </TabsContent>
+
+          <TabsContent value="consumo_agua">
+            {mountedTabs.has('consumo_agua') && (
+              <ConsumoAguaTab
+                empreendimentoId={empreendimento?.id}
+                readOnly={!canEdit}
+              />
+            )}
           </TabsContent>
 
           {hasAccessToGestao && (

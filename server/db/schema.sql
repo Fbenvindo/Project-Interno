@@ -257,6 +257,20 @@ CREATE TABLE IF NOT EXISTS pavimentos (
   escala VARCHAR(50)
 );
 
+-- Cálculo de consumo de água (hidráulica) - dimensionamento de demanda e reservatório
+CREATE TABLE IF NOT EXISTS consumo_agua_calculos (
+  id SERIAL PRIMARY KEY,
+  empreendimento_id INTEGER REFERENCES empreendimentos(id) ON DELETE CASCADE,
+  nome VARCHAR(255) DEFAULT 'Cálculo de Consumo de Água',
+  itens JSONB DEFAULT '[]'::jsonb,
+  dias_autonomia NUMERIC(6,2) DEFAULT 1,
+  reserva_incendio_litros NUMERIC(14,2) DEFAULT 0,
+  percentual_reservatorio_inferior NUMERIC(5,2) DEFAULT 40,
+  observacoes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- Atas de reunião
 CREATE TABLE IF NOT EXISTS atas_reuniao (
   id SERIAL PRIMARY KEY,

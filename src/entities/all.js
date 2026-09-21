@@ -181,6 +181,7 @@ export const PlanejamentoAtividade = createEntity('planejamentos');
 export const Execucao = createEntity('execucoes');
 export const PlanejamentoDocumento = createEntity('planejamento_documentos');
 export const Pavimento = createEntity('pavimentos');
+export const ConsumoAguaCalculo = createEntity('consumo_agua');
 export const AtaReuniao = createEntity('atas_reuniao');
 export const NotificacaoAtividade = createEntity('notificacoes');
 export const AtividadeFuncao = createEntity('atividade-funcoes');
