@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ConsumoAguaCalculo } from "@/entities/all";
-import { Plus, Trash2, Save, Loader2, Droplets, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Save, Loader2, Droplets, RefreshCw, ChevronUp, ChevronDown } from "lucide-react";
 
 // Valores de referência de mercado para consumo per capita/unidade (L/dia),
 // usados na ausência de dado específico do projeto (NBR 5626 / prática de
@@ -114,6 +114,18 @@ export default function ConsumoAguaTab({ empreendimentoId, readOnly = false }) {
     setDirty(true);
   };
 
+  const moveItem = (id, direction) => {
+    setItens(prev => {
+      const index = prev.findIndex(it => it.id === id);
+      const targetIndex = index + direction;
+      if (index === -1 || targetIndex < 0 || targetIndex >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+      return next;
+    });
+    setDirty(true);
+  };
+
   const handleSave = async () => {
     if (!empreendimentoId) return;
     setIsSaving(true);
@@ -182,11 +194,11 @@ export default function ConsumoAguaTab({ empreendimentoId, readOnly = false }) {
                   <TableHead className="w-32">Quantidade</TableHead>
                   <TableHead className="w-40">Consumo per capita (L/dia)</TableHead>
                   <TableHead className="w-36 text-right">Subtotal (L/dia)</TableHead>
-                  {!readOnly && <TableHead className="w-10" />}
+                  {!readOnly && <TableHead className="w-36" />}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {itens.map((it) => (
+                {itens.map((it, index) => (
                   <TableRow key={it.id}>
                     <TableCell>
                       <Input
@@ -227,9 +239,27 @@ export default function ConsumoAguaTab({ empreendimentoId, readOnly = false }) {
                     </TableCell>
                     {!readOnly && (
                       <TableCell>
-                        <Button variant="ghost" size="icon" onClick={() => removeItem(it.id)}>
-                          <Trash2 className="w-4 h-4 text-red-500" />
-                        </Button>
+                        <div className="flex items-center">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            disabled={index === 0}
+                            onClick={() => moveItem(it.id, -1)}
+                          >
+                            <ChevronUp className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            disabled={index === itens.length - 1}
+                            onClick={() => moveItem(it.id, 1)}
+                          >
+                            <ChevronDown className="w-4 h-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => removeItem(it.id)}>
+                            <Trash2 className="w-4 h-4 text-red-500" />
+                          </Button>
+                        </div>
                       </TableCell>
                     )}
                   </TableRow>
