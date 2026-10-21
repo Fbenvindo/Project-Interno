@@ -601,3 +601,6 @@ CREATE TABLE IF NOT EXISTS ifc_modelos (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ifc_modelos_empreendimento ON ifc_modelos(empreendimento_id);
+-- Levantamento por ambiente extraído do modelo (áreas, fechamentos, aberturas, equipamentos)
+ALTER TABLE ifc_modelos ADD COLUMN IF NOT EXISTS levantamento JSONB;
+ALTER TABLE ifc_modelos ADD COLUMN IF NOT EXISTS levantamento_em TIMESTAMPTZ;

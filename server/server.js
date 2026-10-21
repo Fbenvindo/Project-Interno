@@ -224,7 +224,7 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Vary', 'Origin');
   }
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-File-Name, X-File-Description');
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
@@ -605,6 +605,35 @@ app.get('/api/modelos-ifc/:id/arquivo', async (req, res) => {
     res.send(row.conteudo);
   } catch (err) {
     console.error('GET /api/modelos-ifc/:id/arquivo error', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/modelos-ifc/:id/levantamento', async (req, res) => {
+  try {
+    if (!(await getSessionUser(req))) return res.status(401).json({ error: 'Sessão inválida ou expirada.' });
+    const row = await ifcModelosModel.getLevantamento(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Modelo não encontrado.' });
+    res.json({ levantamento: row.levantamento, levantamento_em: row.levantamento_em });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/modelos-ifc/:id/levantamento', async (req, res) => {
+  try {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: 'Sessão inválida ou expirada.' });
+    if (!canEditIfc(user)) return res.status(403).json({ error: 'Sem permissão para salvar o levantamento.' });
+    const levantamento = req.body?.levantamento;
+    if (!levantamento || !Array.isArray(levantamento.ambientes)) {
+      return res.status(400).json({ error: 'Levantamento inválido.' });
+    }
+    const row = await ifcModelosModel.saveLevantamento(req.params.id, levantamento);
+    if (!row) return res.status(404).json({ error: 'Modelo não encontrado.' });
+    res.json({ levantamento_em: row.levantamento_em });
+  } catch (err) {
+    console.error('PUT /api/modelos-ifc/:id/levantamento error', err);
     res.status(500).json({ error: err.message });
   }
 });

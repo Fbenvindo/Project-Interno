@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { IfcAPI } from 'web-ifc';
+import { IfcAPI, IFCSPACE } from 'web-ifc';
 import wasmUrl from 'web-ifc/web-ifc.wasm?url';
 
 const HIGHLIGHT_MATERIAL = new THREE.MeshLambertMaterial({
@@ -10,6 +10,26 @@ const HIGHLIGHT_MATERIAL = new THREE.MeshLambertMaterial({
   side: THREE.DoubleSide,
   depthTest: true,
 });
+
+// Ambiente selecionado é desenhado por cima das paredes para ficar visível
+const SPACE_HIGHLIGHT_MATERIAL = new THREE.MeshBasicMaterial({
+  color: 0x2563eb,
+  transparent: true,
+  opacity: 0.35,
+  side: THREE.DoubleSide,
+  depthTest: false,
+  depthWrite: false,
+});
+
+const SPACE_MATERIAL = new THREE.MeshLambertMaterial({
+  color: 0x22c55e,
+  transparent: true,
+  opacity: 0.25,
+  side: THREE.DoubleSide,
+  depthWrite: false,
+});
+
+export const isSpaceType = (type) => String(type || '').toUpperCase() === 'IFCSPACE';
 
 let ifcApiPromise = null;
 
@@ -38,6 +58,7 @@ export class IfcViewerEngine {
     this.typeById = new Map();
     this.materialCache = new Map();
     this.selectedId = null;
+    this.tree = null;
     this.modelGroup = new THREE.Group();
 
     this.scene = new THREE.Scene();
@@ -139,58 +160,71 @@ export class IfcViewerEngine {
     if (modelID < 0) throw new Error('Não foi possível abrir o arquivo IFC.');
     this.modelID = modelID;
 
-    const matrix = new THREE.Matrix4();
     let lastReport = 0;
     this.api.StreamAllMeshes(modelID, (flatMesh, index, total) => {
-      const id = flatMesh.expressID;
-      const placed = flatMesh.geometries;
-      for (let i = 0; i < placed.size(); i++) {
-        const pg = placed.get(i);
-        const geomData = this.api.GetGeometry(modelID, pg.geometryExpressID);
-        const verts = this.api.GetVertexArray(geomData.GetVertexData(), geomData.GetVertexDataSize());
-        const indices = this.api.GetIndexArray(geomData.GetIndexData(), geomData.GetIndexDataSize());
-
-        // Cada vértice tem 6 floats: posição (x, y, z) e normal (nx, ny, nz)
-        const interleaved = new THREE.InterleavedBuffer(new Float32Array(verts), 6);
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.InterleavedBufferAttribute(interleaved, 3, 0));
-        geometry.setAttribute('normal', new THREE.InterleavedBufferAttribute(interleaved, 3, 3));
-        geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
-        geomData.delete();
-
-        const mesh = new THREE.Mesh(geometry, this._getMaterial(pg.color));
-        matrix.fromArray(pg.flatTransformation);
-        mesh.applyMatrix4(matrix);
-        mesh.matrixAutoUpdate = false;
-        mesh.updateMatrix();
-        mesh.userData.expressID = id;
-        mesh.userData.baseMaterial = mesh.material;
-        this.modelGroup.add(mesh);
-
-        if (!this.meshesById.has(id)) this.meshesById.set(id, []);
-        this.meshesById.get(id).push(mesh);
-      }
-      if (!this.typeById.has(id)) {
-        this.typeById.set(id, this.api.GetNameFromTypeCode(this.api.GetLineType(modelID, id)));
-      }
+      this._addFlatMesh(flatMesh);
       const percent = Math.round(((index + 1) / total) * 100);
       if (percent - lastReport >= 5) {
         lastReport = percent;
         onProgress?.({ stage: 'Gerando geometria...', percent });
       }
     });
+    // Ambientes (IfcSpace) não vêm no StreamAllMeshes; ficam ocultos por padrão
+    this.api.StreamAllMeshesWithTypes(modelID, [IFCSPACE], (flatMesh) => {
+      this._addFlatMesh(flatMesh, SPACE_MATERIAL).forEach((m) => { m.visible = false; });
+    });
 
     onProgress?.({ stage: 'Montando estrutura...', percent: 100 });
     const spatial = await this.api.properties.getSpatialStructure(modelID, false);
     const tree = await this._decorateTree(spatial);
+    this.tree = tree;
     this.fitToView();
 
     return {
       tree,
       schema: this.api.GetModelSchema(modelID),
-      elementCount: this.meshesById.size,
+      elementCount: [...this.typeById.values()].filter((t) => !isSpaceType(t)).length,
       types: this._countTypes(),
     };
+  }
+
+  _addFlatMesh(flatMesh, material = null) {
+    const modelID = this.modelID;
+    const id = flatMesh.expressID;
+    const placed = flatMesh.geometries;
+    const matrix = new THREE.Matrix4();
+    const created = [];
+    for (let i = 0; i < placed.size(); i++) {
+      const pg = placed.get(i);
+      const geomData = this.api.GetGeometry(modelID, pg.geometryExpressID);
+      const verts = this.api.GetVertexArray(geomData.GetVertexData(), geomData.GetVertexDataSize());
+      const indices = this.api.GetIndexArray(geomData.GetIndexData(), geomData.GetIndexDataSize());
+
+      // Cada vértice tem 6 floats: posição (x, y, z) e normal (nx, ny, nz)
+      const interleaved = new THREE.InterleavedBuffer(new Float32Array(verts), 6);
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.InterleavedBufferAttribute(interleaved, 3, 0));
+      geometry.setAttribute('normal', new THREE.InterleavedBufferAttribute(interleaved, 3, 3));
+      geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
+      geomData.delete();
+
+      const mesh = new THREE.Mesh(geometry, material || this._getMaterial(pg.color));
+      matrix.fromArray(pg.flatTransformation);
+      mesh.applyMatrix4(matrix);
+      mesh.matrixAutoUpdate = false;
+      mesh.updateMatrix();
+      mesh.userData.expressID = id;
+      mesh.userData.baseMaterial = mesh.material;
+      this.modelGroup.add(mesh);
+      created.push(mesh);
+
+      if (!this.meshesById.has(id)) this.meshesById.set(id, []);
+      this.meshesById.get(id).push(mesh);
+    }
+    if (!this.typeById.has(id)) {
+      this.typeById.set(id, this.api.GetNameFromTypeCode(this.api.GetLineType(modelID, id)));
+    }
+    return created;
   }
 
   async _decorateTree(node) {
@@ -288,11 +322,21 @@ export class IfcViewerEngine {
 
   select(expressID) {
     if (this.selectedId != null) {
-      for (const m of this.meshesById.get(this.selectedId) || []) m.material = m.userData.baseMaterial;
+      for (const m of this.meshesById.get(this.selectedId) || []) {
+        m.material = m.userData.baseMaterial;
+        m.renderOrder = 0;
+        if (m.userData.tempVisible) { m.visible = false; m.userData.tempVisible = false; }
+      }
     }
     this.selectedId = expressID;
     if (expressID != null) {
-      for (const m of this.meshesById.get(expressID) || []) m.material = HIGHLIGHT_MATERIAL;
+      const highlight = isSpaceType(this.typeById.get(expressID)) ? SPACE_HIGHLIGHT_MATERIAL : HIGHLIGHT_MATERIAL;
+      for (const m of this.meshesById.get(expressID) || []) {
+        m.material = highlight;
+        m.renderOrder = highlight === SPACE_HIGHLIGHT_MATERIAL ? 10 : 0;
+        // Um ambiente oculto aparece enquanto estiver selecionado
+        if (!m.visible) { m.visible = true; m.userData.tempVisible = true; }
+      }
     }
   }
 
@@ -313,17 +357,29 @@ export class IfcViewerEngine {
     }
   }
 
+  // Ambientes só aparecem quando são o único item pedido (ex.: um ambiente clicado na árvore)
   setElementsVisible(ids, visible) {
-    for (const id of ids) (this.meshesById.get(id) || []).forEach((m) => { m.visible = visible; });
+    for (const id of ids) {
+      const show = visible && (ids.length === 1 || !isSpaceType(this.typeById.get(id)));
+      (this.meshesById.get(id) || []).forEach((m) => { m.visible = show; });
+    }
   }
 
   isolate(ids) {
     const keep = new Set(ids);
-    for (const [id, meshes] of this.meshesById) meshes.forEach((m) => { m.visible = keep.has(id); });
+    for (const [id, meshes] of this.meshesById) {
+      const show = keep.has(id) && (ids.length === 1 || !isSpaceType(this.typeById.get(id)));
+      meshes.forEach((m) => { m.visible = show; });
+    }
   }
 
+  // Mostra todos os elementos; os ambientes continuam ocultos
   showAll() {
-    this.modelGroup.children.forEach((m) => { m.visible = true; });
+    for (const [id, meshes] of this.meshesById) {
+      const visible = !isSpaceType(this.typeById.get(id));
+      meshes.forEach((m) => { m.visible = visible; m.userData.tempVisible = false; });
+    }
+    if (this.selectedId != null) this.select(this.selectedId);
   }
 
   fitToView() {
@@ -362,6 +418,7 @@ export class IfcViewerEngine {
     this.modelGroup.clear();
     this.meshesById.clear();
     this.typeById.clear();
+    this.tree = null;
     if (this.api && this.modelID != null) this.api.CloseModel(this.modelID);
     this.modelID = null;
   }

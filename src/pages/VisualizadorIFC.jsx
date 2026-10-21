@@ -11,11 +11,12 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  ArrowLeft, Box, ChevronDown, ChevronRight, Eye, EyeOff, FileUp, Focus, Layers, Loader2, Maximize, Save, Search, X,
+  ArrowLeft, Box, ChevronDown, ChevronRight, ClipboardList, Eye, EyeOff, FileUp, Focus, Layers, Loader2, Maximize, Save, Search, X,
 } from 'lucide-react';
-import { IfcViewerEngine } from '@/components/ifc/ifcViewerEngine';
+import { IfcViewerEngine, isSpaceType } from '@/components/ifc/ifcViewerEngine';
+import LevantamentoDialog from '@/components/ifc/LevantamentoDialog';
 import { ActivityTimerContext } from '@/components/contexts/ActivityTimerContext';
-import { downloadModeloIfc, getModeloIfc, uploadModeloIfc } from '@/api/ifcModelos';
+import { downloadModeloIfc, getModeloIfc, saveLevantamentoIfc, uploadModeloIfc } from '@/api/ifcModelos';
 import { createPageUrl } from '@/utils';
 
 const TYPE_LABELS = {
@@ -135,6 +136,8 @@ export default function VisualizadorIFC() {
   const [localFile, setLocalFile] = useState(null);
   const [savedModelo, setSavedModelo] = useState(null);
   const [saveOpen, setSaveOpen] = useState(false);
+  const [levantamentoOpen, setLevantamentoOpen] = useState(false);
+  const [levantamento, setLevantamento] = useState(null);
   const [searchParams] = useSearchParams();
   const modeloParam = searchParams.get('modelo');
   const { hasPermission } = useContext(ActivityTimerContext) || {};
@@ -171,11 +174,19 @@ export default function VisualizadorIFC() {
     setHidden(new Set());
     setHiddenTypes(new Set());
     setSearch('');
+    setLevantamento(null);
   };
+
+  // Ambientes (IfcSpace) começam ocultos e aparecem desmarcados em Categorias
+  const spaceTypes = useMemo(
+    () => new Set((model?.types || []).map((t) => t.type).filter(isSpaceType)),
+    [model]
+  );
 
   const loadIntoEngine = useCallback(async (source) => {
     const result = await engineRef.current.load(source, setLoading);
     setModel(result);
+    setHiddenTypes(new Set(result.types.map((t) => t.type).filter(isSpaceType)));
     // Expande automaticamente até o nível dos pavimentos
     const initial = new Set();
     const walk = (n, d) => { if (d < 3) { initial.add(n.expressID); n.children.forEach((c) => walk(c, d + 1)); } };
@@ -292,13 +303,20 @@ export default function VisualizadorIFC() {
     engineRef.current?.isolate(selectedIds);
     const keep = new Set(selectedIds);
     setHidden(new Set(collectIds(model.tree).filter((id) => !keep.has(id))));
-    setHiddenTypes(new Set());
-  }, [selectedIds, model]);
+    setHiddenTypes(new Set(spaceTypes));
+  }, [selectedIds, model, spaceTypes]);
 
   const showAll = useCallback(() => {
     engineRef.current?.showAll();
     setHidden(new Set());
-    setHiddenTypes(new Set());
+    setHiddenTypes(new Set(spaceTypes));
+  }, [spaceTypes]);
+
+  const focusSpace = useCallback((id) => {
+    setLevantamentoOpen(false);
+    setSelectedId(id);
+    engineRef.current?.select(id);
+    engineRef.current?.focus([id]);
   }, []);
 
   const term = search.trim().toLowerCase();
@@ -361,6 +379,9 @@ export default function VisualizadorIFC() {
         </Button>
         <Button variant="outline" onClick={showAll} disabled={!model}>
           <Eye className="w-4 h-4 mr-2" /> Mostrar tudo
+        </Button>
+        <Button variant="outline" onClick={() => setLevantamentoOpen(true)} disabled={!model || !!loading}>
+          <ClipboardList className="w-4 h-4 mr-2" /> Levantamento
         </Button>
       </div>
 
@@ -481,11 +502,33 @@ export default function VisualizadorIFC() {
         <SalvarNoEmpreendimentoDialog
           file={localFile}
           onClose={() => setSaveOpen(false)}
-          onSaved={(modelo) => {
+          onSaved={async (modelo) => {
             setSaveOpen(false);
             setLocalFile(null);
             setSavedModelo(modelo);
+            // Um levantamento já gerado para o arquivo local vai junto com o modelo
+            if (levantamento) {
+              try {
+                const r = await saveLevantamentoIfc(modelo.id, levantamento);
+                setSavedModelo({ ...modelo, levantamento_em: r.levantamento_em });
+              } catch (err) {
+                setError(`Modelo salvo, mas o levantamento não: ${err.message}`);
+              }
+            }
           }}
+        />
+      )}
+      {model && (
+        <LevantamentoDialog
+          open={levantamentoOpen}
+          onClose={() => setLevantamentoOpen(false)}
+          engine={engineRef.current}
+          fileName={fileName}
+          savedModelo={savedModelo}
+          canSave={canSave}
+          levantamento={levantamento}
+          onLevantamento={setLevantamento}
+          onFocusSpace={focusSpace}
         />
       )}
     </div>

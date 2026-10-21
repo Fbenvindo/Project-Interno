@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Box, Download, Eye, FileUp, Loader2, Trash2 } from 'lucide-react';
+import { Box, ClipboardList, Download, Eye, FileUp, Loader2, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -155,6 +155,12 @@ export default function ModelosIFCTab({ empreendimentoId, readOnly }) {
                     {m.created_at && <> · {format(new Date(m.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</>}
                     {m.enviado_por_nome && <> · {m.enviado_por_nome}</>}
                   </p>
+                  {m.levantamento_em && (
+                    <p className="text-xs text-emerald-700 flex items-center gap-1 mt-0.5">
+                      <ClipboardList className="w-3.5 h-3.5" />
+                      Levantamento por ambiente salvo em {format(new Date(m.levantamento_em), 'dd/MM/yyyy', { locale: ptBR })}
+                    </p>
+                  )}
                 </div>
                 <div className="flex gap-2 shrink-0">
                   <Button size="sm" onClick={() => openViewer(m)}>

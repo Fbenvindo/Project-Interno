@@ -74,6 +74,22 @@ export async function downloadModeloIfc(id, { total, onProgress } = {}) {
   return data;
 }
 
+export async function getLevantamentoIfc(id) {
+  const res = await fetch(`${getApiOrigin()}/api/modelos-ifc/${id}/levantamento`, { headers: authHeaders(), cache: 'no-store' });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+export async function saveLevantamentoIfc(id, levantamento) {
+  const res = await fetch(`${getApiOrigin()}/api/modelos-ifc/${id}/levantamento`, {
+    method: 'PUT',
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ levantamento }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
 export async function deleteModeloIfc(id) {
   const res = await fetch(`${getApiOrigin()}/api/modelos-ifc/${id}`, { method: 'DELETE', headers: authHeaders() });
   if (!res.ok && res.status !== 404) throw new Error(await readError(res));

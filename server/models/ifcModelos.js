@@ -21,6 +21,8 @@ function ensureTable() {
         )
       `);
       await pool.query('CREATE INDEX IF NOT EXISTS idx_ifc_modelos_empreendimento ON ifc_modelos(empreendimento_id)');
+      await pool.query('ALTER TABLE ifc_modelos ADD COLUMN IF NOT EXISTS levantamento JSONB');
+      await pool.query('ALTER TABLE ifc_modelos ADD COLUMN IF NOT EXISTS levantamento_em TIMESTAMPTZ');
     })().catch((err) => {
       ensurePromise = null;
       throw err;
@@ -30,7 +32,7 @@ function ensureTable() {
 }
 
 // Colunas de listagem: nunca inclui o conteúdo binário
-const LIST_COLUMNS = 'id, empreendimento_id, nome, descricao, tamanho_bytes, tamanho_comprimido, enviado_por, enviado_por_nome, created_at';
+const LIST_COLUMNS = 'id, empreendimento_id, nome, descricao, tamanho_bytes, tamanho_comprimido, enviado_por, enviado_por_nome, created_at, levantamento_em';
 
 async function listByEmpreendimento(empreendimentoId) {
   await ensureTable();
@@ -63,10 +65,25 @@ async function createModelo({ empreendimento_id, nome, descricao = null, tamanho
   return res.rows[0];
 }
 
+async function getLevantamento(id) {
+  await ensureTable();
+  const res = await pool.query('SELECT levantamento, levantamento_em FROM ifc_modelos WHERE id = $1', [id]);
+  return res.rows[0] || null;
+}
+
+async function saveLevantamento(id, levantamento) {
+  await ensureTable();
+  const res = await pool.query(
+    'UPDATE ifc_modelos SET levantamento = $2, levantamento_em = NOW() WHERE id = $1 RETURNING levantamento_em',
+    [id, levantamento]
+  );
+  return res.rows[0] || null;
+}
+
 async function deleteModelo(id) {
   await ensureTable();
   const res = await pool.query('DELETE FROM ifc_modelos WHERE id = $1', [id]);
   return res.rowCount > 0;
 }
 
-module.exports = { listByEmpreendimento, getById, getConteudo, createModelo, deleteModelo };
+module.exports = { listByEmpreendimento, getById, getConteudo, createModelo, deleteModelo, getLevantamento, saveLevantamento };
