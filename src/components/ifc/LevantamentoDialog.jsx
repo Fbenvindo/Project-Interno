@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
-  AlertTriangle, ChevronDown, ChevronRight, ClipboardList, FileJson, FileSpreadsheet, Focus, Loader2, RefreshCw,
+  AlertTriangle, ChevronDown, ChevronRight, ClipboardList, FileJson, FileSpreadsheet, Focus, Loader2, RefreshCw, Wind,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CATEGORIAS_SANITARIAS, ORIENTACOES, gerarLevantamento } from '@/components/ifc/ifcLevantamento';
 import { exportarLevantamentoExcel, exportarLevantamentoJson } from '@/components/ifc/levantamentoExport';
 import { getLevantamentoIfc, saveLevantamentoIfc } from '@/api/ifcModelos';
+import CfdDialog from '@/components/ifc/CfdDialog';
 
 const fmt = (v, casas = 2) => (v == null || Number.isNaN(Number(v))
   ? '—'
@@ -134,6 +135,7 @@ export default function LevantamentoDialog({
   const [carregandoSalvo, setCarregandoSalvo] = useState(false);
   const [abertos, setAbertos] = useState(new Set());
   const [exportando, setExportando] = useState(false);
+  const [cfdAmbiente, setCfdAmbiente] = useState(null);
 
   useEffect(() => { setSalvoEm(savedModelo?.levantamento_em || null); }, [savedModelo]);
 
@@ -302,7 +304,7 @@ export default function LevantamentoDialog({
                       <th className="py-2 pr-3 font-medium text-right">Portas</th>
                       <th className="py-2 pr-3 font-medium text-right">Sanit.</th>
                       <th className="py-2 pr-3 font-medium text-right" title="Parte do contorno do ambiente associada a um elemento construtivo">Contorno</th>
-                      <th className="w-10" />
+                      <th className="w-20" />
                     </tr>
                   </thead>
                   <tbody>
@@ -332,7 +334,7 @@ export default function LevantamentoDialog({
                             <td className={`py-2 pr-3 text-right tabular-nums ${a.fechamento_identificado_pct != null && a.fechamento_identificado_pct < 70 ? 'text-amber-600' : ''}`}>
                               {a.fechamento_identificado_pct != null ? `${a.fechamento_identificado_pct}%` : '—'}
                             </td>
-                            <td className="py-1 pr-2">
+                            <td className="py-1 pr-2 whitespace-nowrap">
                               <Button
                                 size="icon"
                                 variant="ghost"
@@ -340,6 +342,15 @@ export default function LevantamentoDialog({
                                 onClick={(e) => { e.stopPropagation(); onFocusSpace(a.id); }}
                               >
                                 <Focus className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                title="Exportar caso de CFD (OpenFOAM)"
+                                disabled={!engine?.hasGeometry(a.id)}
+                                onClick={(e) => { e.stopPropagation(); setCfdAmbiente(a); }}
+                              >
+                                <Wind className="w-4 h-4" />
                               </Button>
                             </td>
                           </tr>
@@ -392,6 +403,7 @@ export default function LevantamentoDialog({
             </Tabs>
           </div>
         )}
+        {cfdAmbiente && <CfdDialog ambiente={cfdAmbiente} engine={engine} onClose={() => setCfdAmbiente(null)} />}
       </DialogContent>
     </Dialog>
   );

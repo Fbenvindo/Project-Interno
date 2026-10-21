@@ -147,7 +147,7 @@ function lerNorteVerdadeiro(api, modelID) {
 }
 
 // Na cena, o plano IFC (x, y) vira (x, -z). Azimute: 0° = norte verdadeiro, sentido horário.
-function azimute(normal, norte) {
+export function azimute(normal, norte) {
   const px = normal.x;
   const py = -normal.z;
   const len = Math.hypot(px, py);
@@ -157,7 +157,7 @@ function azimute(normal, norte) {
   return (THREE.MathUtils.radToDeg(Math.atan2(leste, nort)) + 360) % 360;
 }
 
-const setorDe = (az) => (az == null ? null : ORIENTACOES[Math.round(az / 45) % 8]);
+export const setorDe = (az) => (az == null ? null : ORIENTACOES[Math.round(az / 45) % 8]);
 
 function indexarRelacoes(api, modelID) {
   const idx = {
@@ -284,16 +284,12 @@ const valorUtil = (nome, valor) => {
   return true;
 };
 
-export async function gerarLevantamento(engine, { onProgress } = {}) {
+// Estruturas compartilhadas pelo levantamento e pela exportação para CFD
+export function criarContexto(engine) {
   const { api, modelID } = engine;
   if (!api || modelID == null) throw new Error('Nenhum modelo carregado.');
-
-  const avisos = [];
   const un = lerUnidades(api, modelID);
   const norte = lerNorteVerdadeiro(api, modelID);
-  if (!norte.definido) {
-    avisos.push('O arquivo não define o norte verdadeiro (TrueNorth). As orientações consideram o norte de projeto (eixo Y do modelo).');
-  }
   const rel = indexarRelacoes(api, modelID);
 
   const tipoIfc = (id) => String(engine.typeById.get(id) || api.GetNameFromTypeCode(api.GetLineType(modelID, id)) || '').toUpperCase();
@@ -463,6 +459,95 @@ export async function gerarLevantamento(engine, { onProgress } = {}) {
     return raycaster.intersectObjects(meshes, false).length % 2 === 1;
   };
 
+  // Triângulos (em coordenadas da cena) da superfície de um ambiente, com normais para fora
+  const triangulosDoEspaco = (sid) => {
+    let volumeComSinal = 0;
+    const triangulos = [];
+    for (const mesh of malhasEspacos.get(sid) || []) {
+      const pos = mesh.geometry.getAttribute('position');
+      const index = mesh.geometry.getIndex();
+      const n = index ? index.count : pos.count;
+      for (let k = 0; k + 2 < n; k += 3) {
+        const ia = index ? index.getX(k) : k;
+        const ib = index ? index.getX(k + 1) : k + 1;
+        const ic = index ? index.getX(k + 2) : k + 2;
+        const va = new THREE.Vector3().fromBufferAttribute(pos, ia).applyMatrix4(mesh.matrixWorld);
+        const vb = new THREE.Vector3().fromBufferAttribute(pos, ib).applyMatrix4(mesh.matrixWorld);
+        const vc = new THREE.Vector3().fromBufferAttribute(pos, ic).applyMatrix4(mesh.matrixWorld);
+        volumeComSinal += va.dot(new THREE.Vector3().crossVectors(vb, vc)) / 6;
+        triangulos.push([va, vb, vc]);
+      }
+    }
+    // Volume com sinal negativo indica triângulos orientados para dentro
+    if (volumeComSinal < 0) triangulos.forEach((t) => { const tmp = t[1]; t[1] = t[2]; t[2] = tmp; });
+    return { triangulos, volume: Math.abs(volumeComSinal) };
+  };
+
+  const candidatosDoEspaco = (sid) => {
+    const zona = caixas.get(sid).clone().expandByScalar(2.6);
+    const elementos = malhasElementos.filter((e) => e.box.intersectsBox(zona)).map((e) => e.mesh);
+    const espacos = [];
+    for (const [outro, ms] of malhasEspacos) {
+      if (outro !== sid && caixas.get(outro).intersectsBox(zona)) espacos.push(...ms);
+    }
+    return { elementos, espacos };
+  };
+
+  const tipoDaFace = (normal) => (normal.y < -0.7 ? 'Piso' : normal.y > 0.7 ? 'Teto' : 'Parede');
+
+  // Raio a partir de um ponto da superfície do ambiente, para fora: primeiro elemento construtivo
+  // atingido e, continuando, se existe outro ambiente do outro lado
+  const origemRaio = new THREE.Vector3();
+  const lancarRaio = (ponto, normal, tipoFace, candidatos) => {
+    origemRaio.copy(ponto).addScaledVector(normal, -START_OFFSET);
+    raycaster.set(origemRaio, normal);
+    raycaster.far = START_OFFSET + ELEMENT_DEPTH[tipoFace];
+    let elemento = null;
+    const acabamentos = [];
+    for (const hit of raycaster.intersectObjects(candidatos.elementos, false)) {
+      const eid = hit.object.userData.expressID;
+      const classe = classeFechamento(eid);
+      if (classe === 'revestimento') continue;
+      if (classe === 'acabamento') {
+        // Laje de acabamento só vale para o piso; parede de acabamento só para a parede
+        const ehLaje = /SLAB|ROOF|FOOTING/.test(tipoIfc(eid));
+        if ((tipoFace === 'Piso' && ehLaje) || (tipoFace === 'Parede' && !ehLaje)) acabamentos.push(eid);
+        continue;
+      }
+      if (classe) { elemento = { id: eid, classe }; break; }
+    }
+
+    raycaster.far = START_OFFSET + NEIGHBOR_DEPTH[tipoFace];
+    const vizinhoHit = candidatos.espacos.length ? raycaster.intersectObjects(candidatos.espacos, false).find((h) => h.distance > 0.01) : null;
+    const vizinho = vizinhoHit ? vizinhoHit.object.userData.expressID : null;
+
+    let condicao;
+    if (vizinho != null) condicao = 'Interna';
+    else if (tipoFace === 'Parede') condicao = elemento ? 'Externa' : 'Sem elemento';
+    else if (tipoFace === 'Teto') condicao = 'Cobertura / exterior';
+    else condicao = 'Solo / exterior';
+    return { elemento, acabamentos, vizinho, condicao };
+  };
+
+  return {
+    api, modelID, un, norte, rel, tipoIfc, lerPsets, acharProp, acharPrimeiro, infoElemento, classeFechamento,
+    espacosIds, caixas, malhasElementos, malhasEspacos, revestimentos, pavimentoDe, elevacaoPavimento, rotuloEspaco,
+    raycaster, pontoDentro, triangulosDoEspaco, candidatosDoEspaco, tipoDaFace, lancarRaio,
+  };
+}
+
+export async function gerarLevantamento(engine, { onProgress } = {}) {
+  const ctx = criarContexto(engine);
+  const {
+    api, modelID, un, norte, rel, tipoIfc, lerPsets, acharProp, acharPrimeiro, infoElemento,
+    espacosIds, caixas, malhasEspacos, revestimentos, pavimentoDe, elevacaoPavimento, rotuloEspaco,
+    pontoDentro, triangulosDoEspaco, candidatosDoEspaco, tipoDaFace, lancarRaio,
+  } = ctx;
+  const avisos = [];
+  if (!norte.definido) {
+    avisos.push('O arquivo não define o norte verdadeiro (TrueNorth). As orientações consideram o norte de projeto (eixo Y do modelo).');
+  }
+
   // ---- Equipamentos: associação a ambientes ----
   onProgress?.({ etapa: 'Localizando equipamentos...', percentual: 0 });
   const equipamentosPorEspaco = new Map();
@@ -512,7 +597,6 @@ export async function gerarLevantamento(engine, { onProgress } = {}) {
   const ac = new THREE.Vector3();
   const normal = new THREE.Vector3();
   const ponto = new THREE.Vector3();
-  const origem = new THREE.Vector3();
   const GOLDEN = 0.6180339887;
 
   for (let i = 0; i < espacosIds.length; i++) {
@@ -576,35 +660,11 @@ export async function gerarLevantamento(engine, { onProgress } = {}) {
     }
 
     if (meshes.length) {
-      // Volume com sinal decide se as normais dos triângulos apontam para fora
-      let volumeComSinal = 0;
-      const triangulos = [];
-      for (const mesh of meshes) {
-        const pos = mesh.geometry.getAttribute('position');
-        const index = mesh.geometry.getIndex();
-        const n = index ? index.count : pos.count;
-        for (let k = 0; k + 2 < n; k += 3) {
-          const ia = index ? index.getX(k) : k;
-          const ib = index ? index.getX(k + 1) : k + 1;
-          const ic = index ? index.getX(k + 2) : k + 2;
-          const va = new THREE.Vector3().fromBufferAttribute(pos, ia).applyMatrix4(mesh.matrixWorld);
-          const vb = new THREE.Vector3().fromBufferAttribute(pos, ib).applyMatrix4(mesh.matrixWorld);
-          const vc = new THREE.Vector3().fromBufferAttribute(pos, ic).applyMatrix4(mesh.matrixWorld);
-          volumeComSinal += va.dot(new THREE.Vector3().crossVectors(vb, vc)) / 6;
-          triangulos.push([va, vb, vc]);
-        }
-      }
-      const sinal = volumeComSinal < 0 ? -1 : 1;
-      ambiente.volume_geometrico_m3 = Math.abs(volumeComSinal);
+      const { triangulos, volume } = triangulosDoEspaco(sid);
+      ambiente.volume_geometrico_m3 = volume;
       const caixa = caixas.get(sid);
       ambiente.pe_direito_geometrico_m = caixa.max.y - caixa.min.y;
-
-      const zona = caixa.clone().expandByScalar(2.6);
-      const candidatosElem = malhasElementos.filter((e) => e.box.intersectsBox(zona)).map((e) => e.mesh);
-      const candidatosEsp = [];
-      for (const [outro, ms] of malhasEspacos) {
-        if (outro !== sid && caixas.get(outro).intersectsBox(zona)) candidatosEsp.push(...ms);
-      }
+      const candidatos = candidatosDoEspaco(sid);
 
       const sup = new Map();
       const abert = new Map();
@@ -618,8 +678,8 @@ export async function gerarLevantamento(engine, { onProgress } = {}) {
         normal.crossVectors(ab, ac);
         const areaTri = normal.length() / 2;
         if (areaTri < 1e-4) continue;
-        normal.multiplyScalar(sinal / (areaTri * 2));
-        const tipoFace = normal.y < -0.7 ? 'Piso' : normal.y > 0.7 ? 'Teto' : 'Parede';
+        normal.multiplyScalar(1 / (areaTri * 2));
+        const tipoFace = tipoDaFace(normal);
         if (tipoFace === 'Piso') ambiente.area_geometrica_m2 += areaTri;
         const az = tipoFace === 'Parede' ? azimute(normal, norte) : null;
         const setor = setorDe(az);
@@ -635,34 +695,10 @@ export async function gerarLevantamento(engine, { onProgress } = {}) {
           b.copy(vb).multiplyScalar(sr * (1 - r2));
           c.copy(vc).multiplyScalar(sr * r2);
           ponto.copy(a).add(b).add(c);
-          origem.copy(ponto).addScaledVector(normal, -START_OFFSET);
           areaAmostrada += pesoAmostra;
 
-          raycaster.set(origem, normal);
-          raycaster.far = START_OFFSET + ELEMENT_DEPTH[tipoFace];
-          let elemento = null;
-          for (const hit of raycaster.intersectObjects(candidatosElem, false)) {
-            const eid = hit.object.userData.expressID;
-            const classe = classeFechamento(eid);
-            if (classe === 'revestimento') continue;
-            if (classe === 'acabamento') {
-              // Laje de acabamento só vale para o piso; parede de acabamento só para a parede
-              const ehLaje = /SLAB|ROOF|FOOTING/.test(tipoIfc(eid));
-              if ((tipoFace === 'Piso' && ehLaje) || (tipoFace === 'Parede' && !ehLaje)) acabamentosVistos[tipoFace].add(eid);
-              continue;
-            }
-            if (classe) { elemento = { id: eid, classe }; break; }
-          }
-
-          raycaster.far = START_OFFSET + NEIGHBOR_DEPTH[tipoFace];
-          const vizinhoHit = candidatosEsp.length ? raycaster.intersectObjects(candidatosEsp, false).find((h) => h.distance > 0.01) : null;
-          const vizinho = vizinhoHit ? vizinhoHit.object.userData.expressID : null;
-
-          let condicao;
-          if (vizinho != null) condicao = 'Interna';
-          else if (tipoFace === 'Parede') condicao = elemento ? 'Externa' : 'Sem elemento';
-          else if (tipoFace === 'Teto') condicao = 'Cobertura / exterior';
-          else condicao = 'Solo / exterior';
+          const { elemento, acabamentos, vizinho, condicao } = lancarRaio(ponto, normal, tipoFace, candidatos);
+          acabamentos.forEach((eid) => acabamentosVistos[tipoFace].add(eid));
           if (elemento) areaComElemento += pesoAmostra;
 
           if (elemento && elemento.classe !== 'vedacao') {
