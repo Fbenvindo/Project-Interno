@@ -41,6 +41,8 @@ const dataCadastroModel = require('./models/dataCadastro');
 const comercialModel = require('./models/comercial');
 const checklistsModel = require('./models/checklists');
 const checklistItemsModel = require('./models/checklistItems');
+const ifcModelosModel = require('./models/ifcModelos');
+const zlib = require('zlib');
 
 
 if (cluster.isMaster) {
@@ -222,8 +224,8 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Vary', 'Origin');
   }
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-File-Name, X-File-Description');
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
@@ -492,6 +494,157 @@ app.patch('/api/empreendimentos/:id', async (req, res) => {
 app.delete('/api/empreendimentos/:id', async (req, res) => {
   try {
     await empreendimentoModel.deleteEmpreendimento(req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Modelos IFC (BIM) do empreendimento
+const IFC_MAX_BYTES = 150 * 1024 * 1024;
+const IFC_NIVEL_EDICAO = 3; // coordenador, mesma regra do frontend (hasPermission('coordenador'))
+const PERFIS_NIVEL = { direcao: 6, gestao: 5, lider: 4, coordenador: 3, apoio: 2, consultor: 1, user: 1 };
+
+async function getSessionUser(req) {
+  const payload = verifySessionToken(getBearerToken(req));
+  if (!payload?.sub) return null;
+  const fixedAdmin = getFixedAdminConfig();
+  if (String(payload.sub) === 'fixed-admin' && String(payload.email || '').toLowerCase() === fixedAdmin.email) {
+    return { id: null, nome: fixedAdmin.user.nome, isAdmin: true, nivel: Infinity };
+  }
+  const user = toPublicUser(await usersModel.getUserById(payload.sub));
+  if (!user) return null;
+  return {
+    id: user.id,
+    nome: user.nome || user.email,
+    isAdmin: user.role === 'admin',
+    nivel: PERFIS_NIVEL[user.perfil] || 1,
+  };
+}
+
+const canEditIfc = (user) => user && (user.isAdmin || user.nivel >= IFC_NIVEL_EDICAO);
+
+app.get('/api/empreendimentos/:id/modelos-ifc', async (req, res) => {
+  try {
+    if (!(await getSessionUser(req))) return res.status(401).json({ error: 'Sessão inválida ou expirada.' });
+    res.json(await ifcModelosModel.listByEmpreendimento(req.params.id));
+  } catch (err) {
+    console.error('GET /api/empreendimentos/:id/modelos-ifc error', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post(
+  '/api/empreendimentos/:id/modelos-ifc',
+  express.raw({ type: 'application/octet-stream', limit: IFC_MAX_BYTES }),
+  async (req, res) => {
+    try {
+      const user = await getSessionUser(req);
+      if (!user) return res.status(401).json({ error: 'Sessão inválida ou expirada.' });
+      if (!canEditIfc(user)) return res.status(403).json({ error: 'Sem permissão para enviar modelos.' });
+
+      const empreendimento = await empreendimentoModel.getEmpreendimentoById(req.params.id);
+      if (!empreendimento) return res.status(404).json({ error: 'Empreendimento não encontrado.' });
+
+      const body = req.body;
+      if (!Buffer.isBuffer(body) || body.length === 0) {
+        return res.status(400).json({ error: 'Arquivo vazio ou enviado em formato inválido.' });
+      }
+      if (!body.subarray(0, 64).toString('latin1').includes('ISO-10303-21')) {
+        return res.status(400).json({ error: 'O arquivo não parece ser um IFC válido.' });
+      }
+
+      const nome = decodeURIComponent(String(req.headers['x-file-name'] || 'modelo.ifc')).slice(0, 255);
+      const descricao = req.headers['x-file-description']
+        ? decodeURIComponent(String(req.headers['x-file-description'])).slice(0, 2000)
+        : null;
+      const conteudo = await new Promise((resolve, reject) => {
+        zlib.gzip(body, { level: 6 }, (err, out) => (err ? reject(err) : resolve(out)));
+      });
+
+      const modelo = await ifcModelosModel.createModelo({
+        empreendimento_id: empreendimento.id,
+        nome,
+        descricao,
+        tamanho_bytes: body.length,
+        conteudo,
+        enviado_por: user.id,
+        enviado_por_nome: user.nome,
+      });
+      res.status(201).json(modelo);
+    } catch (err) {
+      console.error('POST /api/empreendimentos/:id/modelos-ifc error', err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+app.get('/api/modelos-ifc/:id', async (req, res) => {
+  try {
+    if (!(await getSessionUser(req))) return res.status(401).json({ error: 'Sessão inválida ou expirada.' });
+    const modelo = await ifcModelosModel.getById(req.params.id);
+    if (!modelo) return res.status(404).json({ error: 'Modelo não encontrado.' });
+    res.json(modelo);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/modelos-ifc/:id/arquivo', async (req, res) => {
+  try {
+    if (!(await getSessionUser(req))) return res.status(401).json({ error: 'Sessão inválida ou expirada.' });
+    const row = await ifcModelosModel.getConteudo(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Modelo não encontrado.' });
+    // O conteúdo já está em gzip: o navegador descompacta sozinho via Content-Encoding
+    res.set({
+      'Content-Type': 'application/octet-stream',
+      'Content-Encoding': 'gzip',
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(row.nome)}`,
+      'Cache-Control': 'private, no-store',
+    });
+    res.send(row.conteudo);
+  } catch (err) {
+    console.error('GET /api/modelos-ifc/:id/arquivo error', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/modelos-ifc/:id/levantamento', async (req, res) => {
+  try {
+    if (!(await getSessionUser(req))) return res.status(401).json({ error: 'Sessão inválida ou expirada.' });
+    const row = await ifcModelosModel.getLevantamento(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Modelo não encontrado.' });
+    res.json({ levantamento: row.levantamento, levantamento_em: row.levantamento_em });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/modelos-ifc/:id/levantamento', async (req, res) => {
+  try {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: 'Sessão inválida ou expirada.' });
+    if (!canEditIfc(user)) return res.status(403).json({ error: 'Sem permissão para salvar o levantamento.' });
+    const levantamento = req.body?.levantamento;
+    if (!levantamento || !Array.isArray(levantamento.ambientes)) {
+      return res.status(400).json({ error: 'Levantamento inválido.' });
+    }
+    const row = await ifcModelosModel.saveLevantamento(req.params.id, levantamento);
+    if (!row) return res.status(404).json({ error: 'Modelo não encontrado.' });
+    res.json({ levantamento_em: row.levantamento_em });
+  } catch (err) {
+    console.error('PUT /api/modelos-ifc/:id/levantamento error', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/modelos-ifc/:id', async (req, res) => {
+  try {
+    const user = await getSessionUser(req);
+    if (!user) return res.status(401).json({ error: 'Sessão inválida ou expirada.' });
+    if (!canEditIfc(user)) return res.status(403).json({ error: 'Sem permissão para excluir modelos.' });
+    const deleted = await ifcModelosModel.deleteModelo(req.params.id);
+    if (!deleted) return res.status(404).json({ error: 'Modelo não encontrado.' });
     res.status(204).end();
   } catch (err) {
     res.status(500).json({ error: err.message });

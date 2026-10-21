@@ -1,7 +1,7 @@
 import React, { useContext } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { Building2, Settings, Home, Users, Zap, Calendar, BarChart3, Briefcase, FileText, Calculator, LogOut } from "lucide-react";
+import { Building2, Settings, Home, Users, Zap, Calendar, BarChart3, Briefcase, FileText, Calculator, LogOut, Box } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -103,6 +103,14 @@ const LayoutComponent = ({ children, currentPageName }) => {
       title: "Atividades Rápidas",
       url: createPageUrl("AtividadesRapidas"),
       icon: Zap,
+      show: true
+    });
+
+    // Visualizador IFC: todos os usuários
+    items.push({
+      title: "Visualizador IFC",
+      url: createPageUrl("VisualizadorIFC"),
+      icon: Box,
       show: true
     });
 
