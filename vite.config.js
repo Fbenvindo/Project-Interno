@@ -71,7 +71,8 @@ export default defineConfig({
             }
           },
           {
-            urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+            // Arquivos IFC podem ter centenas de MB: ficam fora do cache offline
+            urlPattern: ({ url }) => url.pathname.startsWith('/api/') && !url.pathname.includes('/modelos-ifc'),
             handler: 'NetworkFirst',
             options: {
               cacheName: 'api-cache',

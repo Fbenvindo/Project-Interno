@@ -128,11 +128,12 @@ export class IfcViewerEngine {
     return mat;
   }
 
-  async load(file, onProgress) {
+  // source: File/Blob local ou os bytes do arquivo (Uint8Array) já baixados
+  async load(source, onProgress) {
     this.api = await getIfcApi();
     this.clear();
 
-    const data = new Uint8Array(await file.arrayBuffer());
+    const data = source instanceof Uint8Array ? source : new Uint8Array(await source.arrayBuffer());
     onProgress?.({ stage: 'Lendo arquivo...', percent: 0 });
     const modelID = this.api.OpenModel(data, { COORDINATE_TO_ORIGIN: true });
     if (modelID < 0) throw new Error('Não foi possível abrir o arquivo IFC.');

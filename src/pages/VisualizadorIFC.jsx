@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -6,10 +7,16 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  Box, ChevronDown, ChevronRight, Eye, EyeOff, FileUp, Focus, Layers, Loader2, Maximize, Search, X,
+  ArrowLeft, Box, ChevronDown, ChevronRight, Eye, EyeOff, FileUp, Focus, Layers, Loader2, Maximize, Save, Search, X,
 } from 'lucide-react';
 import { IfcViewerEngine } from '@/components/ifc/ifcViewerEngine';
+import { ActivityTimerContext } from '@/components/contexts/ActivityTimerContext';
+import { downloadModeloIfc, getModeloIfc, uploadModeloIfc } from '@/api/ifcModelos';
+import { createPageUrl } from '@/utils';
 
 const TYPE_LABELS = {
   IFCPROJECT: 'Projeto',
@@ -124,6 +131,14 @@ export default function VisualizadorIFC() {
   const [hiddenTypes, setHiddenTypes] = useState(new Set());
   const [search, setSearch] = useState('');
   const [dragOver, setDragOver] = useState(false);
+  // Arquivo aberto do computador (pode ser salvo) ou modelo salvo em um empreendimento
+  const [localFile, setLocalFile] = useState(null);
+  const [savedModelo, setSavedModelo] = useState(null);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [searchParams] = useSearchParams();
+  const modeloParam = searchParams.get('modelo');
+  const { hasPermission } = useContext(ActivityTimerContext) || {};
+  const canSave = !!hasPermission?.('coordenador');
 
   const loadProperties = useCallback(async (id) => {
     const engine = engineRef.current;
@@ -149,36 +164,77 @@ export default function VisualizadorIFC() {
 
   useEffect(() => { loadProperties(selectedId); }, [selectedId, loadProperties]);
 
-  const openFile = useCallback(async (file) => {
-    if (!file) return;
-    if (!/\.ifc$/i.test(file.name)) {
-      setError('Selecione um arquivo com extensão .ifc');
-      return;
-    }
+  const resetView = () => {
     setError(null);
     setModel(null);
     setSelectedId(null);
     setHidden(new Set());
     setHiddenTypes(new Set());
     setSearch('');
+  };
+
+  const loadIntoEngine = useCallback(async (source) => {
+    const result = await engineRef.current.load(source, setLoading);
+    setModel(result);
+    // Expande automaticamente até o nível dos pavimentos
+    const initial = new Set();
+    const walk = (n, d) => { if (d < 3) { initial.add(n.expressID); n.children.forEach((c) => walk(c, d + 1)); } };
+    walk(result.tree, 0);
+    setExpanded(initial);
+  }, []);
+
+  const openFile = useCallback(async (file) => {
+    if (!file) return;
+    if (!/\.ifc$/i.test(file.name)) {
+      setError('Selecione um arquivo com extensão .ifc');
+      return;
+    }
+    resetView();
+    setSavedModelo(null);
+    setLocalFile(file);
     setFileName(file.name);
     setLoading({ stage: 'Carregando leitor IFC...', percent: 0 });
     try {
-      const result = await engineRef.current.load(file, setLoading);
-      setModel(result);
-      // Expande automaticamente até o nível dos pavimentos
-      const initial = new Set();
-      const walk = (n, d) => { if (d < 3) { initial.add(n.expressID); n.children.forEach((c) => walk(c, d + 1)); } };
-      walk(result.tree, 0);
-      setExpanded(initial);
+      await loadIntoEngine(file);
     } catch (err) {
       console.error('Erro ao carregar IFC:', err);
       setError(err?.message || 'Falha ao carregar o arquivo IFC.');
       setFileName(null);
+      setLocalFile(null);
     } finally {
       setLoading(null);
     }
-  }, []);
+  }, [loadIntoEngine]);
+
+  // Abre um modelo salvo quando a página recebe ?modelo=ID (vindo da aba Modelos BIM)
+  useEffect(() => {
+    if (!modeloParam) return undefined;
+    let cancelled = false;
+    (async () => {
+      resetView();
+      setLocalFile(null);
+      setLoading({ stage: 'Buscando modelo...', percent: 0 });
+      try {
+        const meta = await getModeloIfc(modeloParam);
+        if (cancelled) return;
+        setSavedModelo(meta);
+        setFileName(meta.nome);
+        const data = await downloadModeloIfc(meta.id, {
+          total: Number(meta.tamanho_bytes),
+          onProgress: (percent) => { if (!cancelled) setLoading({ stage: 'Baixando modelo...', percent }); },
+        });
+        if (cancelled) return;
+        await loadIntoEngine(data);
+      } catch (err) {
+        if (cancelled) return;
+        console.error('Erro ao abrir modelo salvo:', err);
+        setError(err?.message || 'Falha ao abrir o modelo salvo.');
+      } finally {
+        if (!cancelled) setLoading(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [modeloParam, loadIntoEngine]);
 
   const handleSelect = useCallback((id) => {
     setSelectedId(id);
@@ -266,6 +322,7 @@ export default function VisualizadorIFC() {
                 <>
                   {fileName}
                   {model && <> · {model.schema} · {model.elementCount} elementos com geometria</>}
+                  {savedModelo?.descricao && <> · {savedModelo.descricao}</>}
                 </>
               ) : 'Abra um arquivo .ifc para navegar pelo modelo'}
             </p>
@@ -278,9 +335,21 @@ export default function VisualizadorIFC() {
           className="hidden"
           onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ''; }}
         />
+        {savedModelo && (
+          <Button variant="ghost" asChild>
+            <Link to={`${createPageUrl('Empreendimento')}?id=${savedModelo.empreendimento_id}`}>
+              <ArrowLeft className="w-4 h-4 mr-2" /> Empreendimento
+            </Link>
+          </Button>
+        )}
         <Button onClick={() => fileInputRef.current?.click()} disabled={!!loading}>
           <FileUp className="w-4 h-4 mr-2" /> Abrir IFC
         </Button>
+        {canSave && localFile && model && (
+          <Button variant="outline" onClick={() => setSaveOpen(true)}>
+            <Save className="w-4 h-4 mr-2" /> Salvar no empreendimento
+          </Button>
+        )}
         <Button variant="outline" onClick={() => engineRef.current?.fitToView()} disabled={!model}>
           <Maximize className="w-4 h-4 mr-2" /> Enquadrar
         </Button>
@@ -408,6 +477,17 @@ export default function VisualizadorIFC() {
           </ScrollArea>
         </div>
       </div>
+      {saveOpen && localFile && (
+        <SalvarNoEmpreendimentoDialog
+          file={localFile}
+          onClose={() => setSaveOpen(false)}
+          onSaved={(modelo) => {
+            setSaveOpen(false);
+            setLocalFile(null);
+            setSavedModelo(modelo);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -433,5 +513,73 @@ function PropertyGroup({ title, rows }) {
         </table>
       )}
     </div>
+  );
+}
+
+function SalvarNoEmpreendimentoDialog({ file, onClose, onSaved }) {
+  const { allEmpreendimentos = [] } = useContext(ActivityTimerContext) || {};
+  const [empreendimentoId, setEmpreendimentoId] = useState('');
+  const [descricao, setDescricao] = useState('');
+  const [percent, setPercent] = useState(null);
+  const [error, setError] = useState(null);
+
+  const opcoes = useMemo(
+    () => [...allEmpreendimentos].sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''))),
+    [allEmpreendimentos]
+  );
+
+  const salvar = async () => {
+    if (!empreendimentoId) return;
+    setError(null);
+    setPercent(0);
+    try {
+      const modelo = await uploadModeloIfc(empreendimentoId, file, {
+        descricao: descricao.trim() || undefined,
+        onProgress: setPercent,
+      });
+      onSaved(modelo);
+    } catch (err) {
+      setError(err.message || 'Erro ao salvar o modelo.');
+      setPercent(null);
+    }
+  };
+
+  const saving = percent !== null;
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Salvar modelo no empreendimento</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600 break-all">{file.name}</p>
+          <div className="space-y-1">
+            <Label>Empreendimento</Label>
+            <Select value={empreendimentoId} onValueChange={setEmpreendimentoId} disabled={saving}>
+              <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
+              <SelectContent>
+                {opcoes.map((e) => (
+                  <SelectItem key={e.id} value={String(e.id)}>{e.nome}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label>Descrição (opcional)</Label>
+            <Input value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Ex.: Arquitetura rev. 03" disabled={saving} />
+          </div>
+          {saving && <Progress value={percent} />}
+          {error && <p className="text-sm text-red-600">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancelar</Button>
+          <Button onClick={salvar} disabled={!empreendimentoId || saving}>
+            {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+            Salvar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

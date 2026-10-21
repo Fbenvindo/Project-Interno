@@ -585,3 +585,19 @@ CREATE TABLE IF NOT EXISTS atividades_genericas (
 
 ALTER TABLE atividades_genericas ADD COLUMN IF NOT EXISTS id SERIAL;
 ALTER TABLE atividades_genericas ADD COLUMN IF NOT EXISTS usuario_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+
+-- Modelos IFC (BIM) por empreendimento. O arquivo é guardado compactado com gzip.
+CREATE TABLE IF NOT EXISTS ifc_modelos (
+  id SERIAL PRIMARY KEY,
+  empreendimento_id INTEGER NOT NULL REFERENCES empreendimentos(id) ON DELETE CASCADE,
+  nome VARCHAR(255) NOT NULL,
+  descricao TEXT,
+  tamanho_bytes BIGINT NOT NULL,
+  tamanho_comprimido BIGINT NOT NULL,
+  conteudo BYTEA NOT NULL,
+  enviado_por INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  enviado_por_nome VARCHAR(255),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ifc_modelos_empreendimento ON ifc_modelos(empreendimento_id);
