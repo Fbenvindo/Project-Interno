@@ -94,7 +94,7 @@ const val = (x) => {
   return null;
 };
 
-const semAcento = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const semAcento = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 const yieldToUi = () => new Promise((r) => setTimeout(r, 0));
 
@@ -109,7 +109,7 @@ function idsOf(api, modelID, type) {
 const refId = (r) => (r && typeof r === 'object' ? r.value : r);
 const refIds = (list) => (Array.isArray(list) ? list.map(refId).filter((v) => v != null) : []);
 
-function lerUnidades(api, modelID) {
+export function lerUnidades(api, modelID) {
   const dims = { LENGTHUNIT: 1, AREAUNIT: 2, VOLUMEUNIT: 3 };
   const escalas = {};
   const siScale = (u, dim) => (PREFIXOS_SI[val(u?.Prefix)] ?? 1) ** dim;

@@ -15,6 +15,9 @@ import {
 } from 'lucide-react';
 import { IfcViewerEngine, isSpaceType } from '@/components/ifc/ifcViewerEngine';
 import LevantamentoDialog from '@/components/ifc/LevantamentoDialog';
+import PainelAxonometria from '@/components/ifc/PainelAxonometria';
+import VistasSalvas from '@/components/ifc/VistasSalvas';
+import { capturarVista, exportarBcf, exportarPdf, exportarPng } from '@/components/ifc/axonometriaExport';
 import { ActivityTimerContext } from '@/components/contexts/ActivityTimerContext';
 import { downloadModeloIfc, getModeloIfc, saveLevantamentoIfc, uploadModeloIfc } from '@/api/ifcModelos';
 import { createPageUrl } from '@/utils';
@@ -138,9 +141,13 @@ export default function VisualizadorIFC() {
   const [saveOpen, setSaveOpen] = useState(false);
   const [levantamentoOpen, setLevantamentoOpen] = useState(false);
   const [levantamento, setLevantamento] = useState(null);
+  // Vistas axonométricas salvas do modelo aberto; "sinalVista" avisa o painel para reler o estado do motor
+  const [vistas, setVistas] = useState([]);
+  const [sinalVista, setSinalVista] = useState(0);
+  const [exportandoVistas, setExportandoVistas] = useState(false);
   const [searchParams] = useSearchParams();
   const modeloParam = searchParams.get('modelo');
-  const { hasPermission } = useContext(ActivityTimerContext) || {};
+  const { hasPermission, user } = useContext(ActivityTimerContext) || {};
   const canSave = !!hasPermission?.('coordenador');
 
   const loadProperties = useCallback(async (id) => {
@@ -175,7 +182,79 @@ export default function VisualizadorIFC() {
     setHiddenTypes(new Set());
     setSearch('');
     setLevantamento(null);
+    setVistas([]);
   };
+
+  // As vistas ficam guardadas no navegador por arquivo (só o estado; as imagens são refeitas ao exportar)
+  const chaveVistas = fileName ? `ifc_vistas_${fileName}` : null;
+  useEffect(() => {
+    if (!model || !chaveVistas) return;
+    try {
+      const salvas = JSON.parse(localStorage.getItem(chaveVistas) || '[]');
+      if (Array.isArray(salvas)) setVistas(salvas);
+    } catch { /* armazenamento indisponível */ }
+  }, [model, chaveVistas]);
+
+  const atualizarVistas = useCallback((novas) => {
+    setVistas(novas);
+    if (!chaveVistas) return;
+    try {
+      localStorage.setItem(chaveVistas, JSON.stringify(novas.map(({ id, nome, nivelNome, criadaEm, estado }) => ({ id, nome, nivelNome, criadaEm, estado }))));
+    } catch { /* armazenamento indisponível */ }
+  }, [chaveVistas]);
+
+  const salvarVista = useCallback((nomeSugerido, nivelNome) => {
+    const nome = window.prompt('Nome da vista', nomeSugerido);
+    if (!nome) return;
+    const vista = capturarVista(engineRef.current, { nome, nivelNome, selecionado: selectedId });
+    atualizarVistas([...vistas, vista]);
+  }, [vistas, selectedId, atualizarVistas]);
+
+  const restaurarVista = useCallback(async (vista) => {
+    await engineRef.current?.aplicarEstadoVista(vista.estado);
+    setSinalVista((n) => n + 1);
+  }, []);
+
+  // Vistas carregadas de outra sessão não têm imagem: aplica a vista e captura de novo
+  const comCaptura = useCallback(async (lista) => {
+    const engine = engineRef.current;
+    const estadoAtual = engine.estadoVista();
+    const prontas = [];
+    for (const v of lista) {
+      if (v.imagem && v.bcf) { prontas.push(v); continue; }
+      await engine.aplicarEstadoVista(v.estado);
+      await new Promise((r) => requestAnimationFrame(r));
+      prontas.push({ ...capturarVista(engine, { nome: v.nome, nivelNome: v.nivelNome, selecionado: null }), id: v.id, criadaEm: v.criadaEm });
+    }
+    await engine.aplicarEstadoVista(estadoAtual);
+    setSinalVista((n) => n + 1);
+    return prontas;
+  }, []);
+
+  const exportarVistas = useCallback(async (tipo, lista) => {
+    setExportandoVistas(true);
+    try {
+      const prontas = await comCaptura(lista);
+      if (prontas.some((v, i) => v !== lista[i])) {
+        const porId = new Map(prontas.map((v) => [v.id, v]));
+        setVistas((atuais) => atuais.map((v) => porId.get(v.id) || v));
+      }
+      if (tipo === 'pdf') await exportarPdf(prontas, fileName);
+      else if (tipo === 'bcf') await exportarBcf(prontas, { arquivo: fileName, ifcProjeto: engineRef.current.projetoGlobalId(), autor: user?.nome || user?.email });
+      else exportarPng(prontas[0], fileName);
+    } catch (err) {
+      console.error('Erro ao exportar vistas:', err);
+      setError(`Falha ao exportar: ${err.message}`);
+    } finally {
+      setExportandoVistas(false);
+    }
+  }, [comCaptura, fileName, user]);
+
+  const exportarVistaAtual = useCallback(async (tipo, nome, nivelNome) => {
+    const vista = capturarVista(engineRef.current, { nome, nivelNome, selecionado: selectedId });
+    if (tipo === 'png') exportarPng(vista, fileName);
+    else await exportarPdf([vista], fileName);
+  }, [fileName, selectedId]);
 
   // Ambientes (IfcSpace) começam ocultos e aparecem desmarcados em Categorias
   const spaceTypes = useMemo(
@@ -380,10 +459,39 @@ export default function VisualizadorIFC() {
         <Button variant="outline" onClick={showAll} disabled={!model}>
           <Eye className="w-4 h-4 mr-2" /> Mostrar tudo
         </Button>
-        <Button variant="outline" onClick={() => setLevantamentoOpen(true)} disabled={!model || !!loading}>
+        <Button
+          variant="outline"
+          onClick={() => {
+            // O levantamento trabalha sobre a geometria montada, sem filtro de nível nem explosão
+            engineRef.current?.restaurarGeometria();
+            setSinalVista((n) => n + 1);
+            setLevantamentoOpen(true);
+          }}
+          disabled={!model || !!loading}
+        >
           <ClipboardList className="w-4 h-4 mr-2" /> Levantamento
         </Button>
       </div>
+
+      {model?.distantes?.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <span>
+            {model.distantes.length === 1 ? '1 elemento está' : `${model.distantes.length} elementos estão`} muito longe do restante do modelo
+            (o mais distante a {Math.round(model.distantes[0].distancia)} m). Pode ser um erro de modelagem; ele não entra no enquadramento.
+          </span>
+          {model.distantes.slice(0, 5).map((d) => (
+            <Button
+              key={d.id}
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={() => { handleSelect(d.id); engineRef.current?.focus([d.id]); }}
+            >
+              Ver #{d.id} ({typeLabel(d.tipo)}, {Math.round(d.distancia)} m)
+            </Button>
+          ))}
+        </div>
+      )}
 
       {error && (
         <div className="flex items-center justify-between rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -395,9 +503,10 @@ export default function VisualizadorIFC() {
       <div className="flex flex-1 min-h-0 gap-3">
         <div className="w-72 shrink-0 flex flex-col rounded-lg border bg-white min-h-0">
           <Tabs defaultValue="arvore" className="flex flex-col flex-1 min-h-0">
-            <TabsList className="m-2 grid grid-cols-2">
+            <TabsList className="m-2 grid grid-cols-3">
               <TabsTrigger value="arvore">Estrutura</TabsTrigger>
               <TabsTrigger value="categorias">Categorias</TabsTrigger>
+              <TabsTrigger value="vistas">Vistas{vistas.length ? ` (${vistas.length})` : ''}</TabsTrigger>
             </TabsList>
             <TabsContent value="arvore" className="flex flex-col flex-1 min-h-0 mt-0 data-[state=inactive]:hidden">
               <div className="px-2 pb-2 relative">
@@ -430,6 +539,19 @@ export default function VisualizadorIFC() {
                 )}
               </ScrollArea>
             </TabsContent>
+            <TabsContent value="vistas" className="flex flex-col flex-1 min-h-0 mt-0 data-[state=inactive]:hidden">
+              <ScrollArea className="flex-1">
+                <VistasSalvas
+                  vistas={vistas}
+                  ocupado={exportandoVistas}
+                  onRestaurar={restaurarVista}
+                  onExcluir={(v) => atualizarVistas(vistas.filter((x) => x.id !== v.id))}
+                  onPng={(v) => exportarVistas('png', [v])}
+                  onPdf={() => exportarVistas('pdf', vistas)}
+                  onBcf={() => exportarVistas('bcf', vistas)}
+                />
+              </ScrollArea>
+            </TabsContent>
             <TabsContent value="categorias" className="flex flex-col flex-1 min-h-0 mt-0 data-[state=inactive]:hidden">
               <ScrollArea className="flex-1 px-3 pb-2">
                 {model?.types.map(({ type, count }) => (
@@ -451,6 +573,15 @@ export default function VisualizadorIFC() {
           onDrop={onDrop}
         >
           <div ref={containerRef} className="absolute inset-0" />
+          {model && !loading && (
+            <PainelAxonometria
+              engine={engineRef.current}
+              niveis={model.niveis || []}
+              sinal={sinalVista}
+              onSalvarVista={salvarVista}
+              onExportarAtual={exportarVistaAtual}
+            />
+          )}
           {!model && !loading && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 pointer-events-none">
               <FileUp className="w-10 h-10 mb-2 text-slate-400" />
