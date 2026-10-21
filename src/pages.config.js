@@ -70,6 +70,7 @@ const Propostas = lazy(() => import('./pages/Propostas'));
 const Relatorios = lazy(() => import('./pages/Relatorios'));
 const SeletorPlanejamento = lazy(() => import('./pages/SeletorPlanejamento'));
 const Usuarios = lazy(() => import('./pages/Usuarios'));
+const VisualizadorIFC = lazy(() => import('./pages/VisualizadorIFC'));
 
 export const PAGES = {
     "AnaliseConcepcaoPlanejamento": AnaliseConcepcaoPlanejamento,
@@ -91,6 +92,7 @@ export const PAGES = {
     "Relatorios": Relatorios,
     "SeletorPlanejamento": SeletorPlanejamento,
     "Usuarios": Usuarios,
+    "VisualizadorIFC": VisualizadorIFC,
 }
 
 export const pagesConfig = {
