@@ -4,11 +4,12 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..auth import exigir_dono, usuario_atual
 from ..cronograma import gerar_tarefas
 from ..database import get_db
 from ..estoque import movimentar
 from ..fotos import ler_foto, salvar_foto
-from ..models import Prestador, Recurso, Tarefa
+from ..models import Prestador, Recurso, Tarefa, Usuario
 from ..schemas import ConcluirIn
 from ..serializacao import tarefa_out
 from ..visao import ImagemInvalida, analisar
@@ -19,9 +20,10 @@ ORDEM_PERIODO = {"manha": 0, "tarde": 1, "noite": 2, "qualquer": 3}
 LIMITE_DIAS = 366
 
 
-def obter(db: Session, tarefa_id: int) -> Tarefa:
+def obter(db: Session, tarefa_id: int, usuario: Usuario) -> Tarefa:
+    """Busca a tarefa; o prestador só enxerga as tarefas atribuídas a ele."""
     t = db.get(Tarefa, tarefa_id)
-    if t is None:
+    if t is None or (usuario.papel == "prestador" and t.prestador_id != usuario.prestador_id):
         raise HTTPException(404, "Tarefa não encontrada")
     return t
 
@@ -33,8 +35,11 @@ def _exigir_aberta(t: Tarefa) -> None:
 
 @router.get("/cronograma")
 def cronograma(inicio: date | None = None, fim: date | None = None, prestador_id: int | None = None,
-               status: str | None = None, db: Session = Depends(get_db)):
+               status: str | None = None, usuario: Usuario = Depends(usuario_atual),
+               db: Session = Depends(get_db)):
     """Lista as tarefas do período, lançando automaticamente as que faltarem."""
+    if usuario.papel == "prestador":
+        prestador_id = usuario.prestador_id
     inicio = inicio or date.today()
     fim = fim or inicio + timedelta(days=6)
     if fim < inicio or (fim - inicio).days > LIMITE_DIAS:
@@ -53,7 +58,7 @@ def cronograma(inicio: date | None = None, fim: date | None = None, prestador_id
     return [tarefa_out(t) for t in tarefas]
 
 
-@router.post("/cronograma/gerar")
+@router.post("/cronograma/gerar", dependencies=[Depends(exigir_dono)])
 def gerar(dias: int = 30, db: Session = Depends(get_db)):
     if not 1 <= dias <= LIMITE_DIAS:
         raise HTTPException(422, f"dias deve estar entre 1 e {LIMITE_DIAS}")
@@ -62,19 +67,21 @@ def gerar(dias: int = 30, db: Session = Depends(get_db)):
 
 
 @router.get("/painel")
-def painel(db: Session = Depends(get_db)):
+def painel(usuario: Usuario = Depends(usuario_atual), db: Session = Depends(get_db)):
     hoje = date.today()
     gerar_tarefas(db, hoje)
-    tarefas = db.scalars(select(Tarefa).where(Tarefa.data == hoje)).unique().all()
+    dono = usuario.papel == "dono"
+    filtro = [] if dono else [Tarefa.prestador_id == usuario.prestador_id]
+    tarefas = db.scalars(select(Tarefa).where(Tarefa.data == hoje, *filtro)).unique().all()
     contagem = {s: 0 for s in ("pendente", "em_andamento", "concluida", "cancelada")}
     for t in tarefas:
         contagem[t.status] = contagem.get(t.status, 0) + 1
     atrasadas = db.scalars(select(Tarefa).where(
-        Tarefa.data < hoje, Tarefa.status.in_(("pendente", "em_andamento"))
+        Tarefa.data < hoje, Tarefa.status.in_(("pendente", "em_andamento")), *filtro
     )).unique().all()
     alertas = db.scalars(select(Recurso).where(
         Recurso.ativo.is_(True), Recurso.estoque_atual <= Recurso.estoque_minimo
-    )).all()
+    )).all() if dono else []
     return {
         "data": hoje,
         "tarefas_hoje": contagem,
@@ -88,13 +95,13 @@ def painel(db: Session = Depends(get_db)):
 
 
 @router.get("/tarefas/{tarefa_id}")
-def detalhar(tarefa_id: int, db: Session = Depends(get_db)):
-    return tarefa_out(obter(db, tarefa_id), detalhada=True)
+def detalhar(tarefa_id: int, usuario: Usuario = Depends(usuario_atual), db: Session = Depends(get_db)):
+    return tarefa_out(obter(db, tarefa_id, usuario), detalhada=True)
 
 
 @router.post("/tarefas/{tarefa_id}/iniciar")
-def iniciar(tarefa_id: int, db: Session = Depends(get_db)):
-    t = obter(db, tarefa_id)
+def iniciar(tarefa_id: int, usuario: Usuario = Depends(usuario_atual), db: Session = Depends(get_db)):
+    t = obter(db, tarefa_id, usuario)
     _exigir_aberta(t)
     t.status = "em_andamento"
     t.iniciada_em = t.iniciada_em or datetime.now()
@@ -103,8 +110,9 @@ def iniciar(tarefa_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/tarefas/{tarefa_id}/prestador/{prestador_id}")
-def trocar_prestador(tarefa_id: int, prestador_id: int, db: Session = Depends(get_db)):
-    t = obter(db, tarefa_id)
+def trocar_prestador(tarefa_id: int, prestador_id: int,
+                     usuario: Usuario = Depends(exigir_dono), db: Session = Depends(get_db)):
+    t = obter(db, tarefa_id, usuario)
     _exigir_aberta(t)
     if db.get(Prestador, prestador_id) is None:
         raise HTTPException(404, "Prestador não encontrado")
@@ -115,9 +123,10 @@ def trocar_prestador(tarefa_id: int, prestador_id: int, db: Session = Depends(ge
 
 
 @router.post("/tarefas/{tarefa_id}/foto")
-async def enviar_foto(tarefa_id: int, foto: UploadFile = File(...), db: Session = Depends(get_db)):
+async def enviar_foto(tarefa_id: int, foto: UploadFile = File(...),
+                      usuario: Usuario = Depends(usuario_atual), db: Session = Depends(get_db)):
     """Recebe a foto da execução e roda a análise de visão computacional."""
-    t = obter(db, tarefa_id)
+    t = obter(db, tarefa_id, usuario)
     _exigir_aberta(t)
     dados = await foto.read()
     try:
@@ -137,9 +146,10 @@ async def enviar_foto(tarefa_id: int, foto: UploadFile = File(...), db: Session 
 
 
 @router.post("/tarefas/{tarefa_id}/concluir")
-def concluir(tarefa_id: int, dados: ConcluirIn | None = None, db: Session = Depends(get_db)):
+def concluir(tarefa_id: int, dados: ConcluirIn | None = None,
+             usuario: Usuario = Depends(usuario_atual), db: Session = Depends(get_db)):
     """Conclui a tarefa e baixa do estoque os materiais utilizados."""
-    t = obter(db, tarefa_id)
+    t = obter(db, tarefa_id, usuario)
     _exigir_aberta(t)
     dados = dados or ConcluirIn()
 
@@ -174,8 +184,8 @@ def concluir(tarefa_id: int, dados: ConcluirIn | None = None, db: Session = Depe
 
 
 @router.post("/tarefas/{tarefa_id}/cancelar")
-def cancelar(tarefa_id: int, db: Session = Depends(get_db)):
-    t = obter(db, tarefa_id)
+def cancelar(tarefa_id: int, usuario: Usuario = Depends(exigir_dono), db: Session = Depends(get_db)):
+    t = obter(db, tarefa_id, usuario)
     _exigir_aberta(t)
     t.status = "cancelada"
     db.commit()
@@ -183,9 +193,10 @@ def cancelar(tarefa_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/tarefas/{tarefa_id}/usar-como-referencia")
-def usar_como_referencia(tarefa_id: int, db: Session = Depends(get_db)):
+def usar_como_referencia(tarefa_id: int,
+                         usuario: Usuario = Depends(exigir_dono), db: Session = Depends(get_db)):
     """Define a foto desta execução como o padrão esperado da atividade."""
-    t = obter(db, tarefa_id)
+    t = obter(db, tarefa_id, usuario)
     if not t.foto:
         raise HTTPException(409, "A tarefa não possui foto")
     t.atividade.foto_referencia = t.foto

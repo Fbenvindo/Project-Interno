@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..auth import exigir_dono
 from ..database import get_db
 from ..models import Prestador
 from ..schemas import PrestadorIn, PrestadorOut
 
-router = APIRouter(prefix="/api/prestadores", tags=["prestadores"])
+router = APIRouter(prefix="/api/prestadores", tags=["prestadores"], dependencies=[Depends(exigir_dono)])
 
 
 def obter(db: Session, prestador_id: int) -> Prestador:

@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..auth import exigir_dono
 from ..database import get_db
 from ..estoque import lista_compras, movimentar
 from ..models import MovimentoEstoque, Recurso
 from ..schemas import MovimentoIn, MovimentoOut, RecursoCreate, RecursoIn, RecursoOut
 
-router = APIRouter(prefix="/api/recursos", tags=["recursos"])
+router = APIRouter(prefix="/api/recursos", tags=["recursos"], dependencies=[Depends(exigir_dono)])
 
 
 def obter(db: Session, recurso_id: int) -> Recurso:

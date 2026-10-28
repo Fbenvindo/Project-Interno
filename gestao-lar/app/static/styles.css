@@ -184,3 +184,12 @@ ul.materiais { padding-left: 18px; margin: 6px 0; }
 #aviso.erro { background: var(--erro); color: #fff; }
 
 .vazio { text-align: center; color: var(--suave); padding: 24px; }
+
+#usuario-topo { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+#usuario-topo[hidden] { display: none; }
+button.botao.pequeno { padding: 4px 10px; font-size: 0.85rem; }
+
+.acesso { max-width: 380px; margin: 40px auto; }
+.acesso h2 { margin-top: 0; }
+.acesso button[type=submit] { width: 100%; }
+.erro-form { color: var(--erro); min-height: 1.4em; font-size: 0.9rem; }

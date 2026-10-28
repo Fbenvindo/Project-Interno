@@ -8,14 +8,15 @@
 </head>
 <body>
   <header class="topo">
-    <h1>Gestão do Lar</h1>
-    <nav id="abas">
-      <button data-aba="hoje" class="ativa">Hoje</button>
-      <button data-aba="cronograma">Cronograma</button>
-      <button data-aba="atividades">Atividades</button>
-      <button data-aba="estoque">Estoque</button>
-      <button data-aba="prestadores">Prestadores</button>
-    </nav>
+    <div class="linha">
+      <h1>Gestão do Lar</h1>
+      <div id="usuario-topo" hidden>
+        <span id="usuario-nome" class="suave"></span>
+        <button class="botao pequeno" id="botao-senha">Senha</button>
+        <button class="botao pequeno" id="botao-sair">Sair</button>
+      </div>
+    </div>
+    <nav id="abas"></nav>
   </header>
 
   <main id="conteudo"></main>

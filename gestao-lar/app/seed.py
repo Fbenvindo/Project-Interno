@@ -7,7 +7,13 @@ from sqlalchemy import select
 from .cronograma import gerar_tarefas
 from .database import SessionLocal, criar_tabelas
 from .estoque import movimentar
-from .models import Atividade, AtividadeRecurso, Prestador, Recurso
+from .auth import gerar_hash
+from .models import Atividade, AtividadeRecurso, Prestador, Recurso, Usuario
+
+# Apenas para demonstração: troque as senhas antes de usar de verdade.
+SENHA_DONO_DEMO = "dono123"
+SENHA_PRESTADOR_DEMO = "123456"
+LOGINS_PRESTADORES = {"Maria Souza": "maria", "João Lima": "joao", "Carlos Reis": "carlos"}
 
 PRESTADORES = [
     {"nome": "Maria Souza", "funcao": "Diarista", "telefone": "(11) 99999-0001", "custo_hora": 30},
@@ -88,6 +94,14 @@ def popular() -> None:
         prestadores = {p["nome"]: Prestador(**p) for p in PRESTADORES}
         db.add_all(prestadores.values())
 
+        criar_dono = db.scalar(select(Usuario.id).limit(1)) is None
+        if criar_dono:
+            db.add(Usuario(nome="Dono da casa", login="dono", senha_hash=gerar_hash(SENHA_DONO_DEMO), papel="dono"))
+        for nome, login in LOGINS_PRESTADORES.items():
+            if db.scalar(select(Usuario.id).where(Usuario.login == login)) is None:
+                db.add(Usuario(nome=nome, login=login, senha_hash=gerar_hash(SENHA_PRESTADOR_DEMO),
+                               papel="prestador", prestador=prestadores[nome]))
+
         recursos = {}
         for nome, categoria, unidade, estoque, minimo, custo in RECURSOS:
             r = Recurso(nome=nome, categoria=categoria, unidade=unidade, estoque_atual=0,
@@ -109,6 +123,11 @@ def popular() -> None:
 
         criadas = gerar_tarefas(db)
         print(f"Dados de exemplo criados. {criadas} tarefas lançadas para os próximos 30 dias.")
+        print("Acessos de demonstração (troque as senhas antes de usar de verdade):")
+        if criar_dono:
+            print(f"  dono   / {SENHA_DONO_DEMO}")
+        for login in LOGINS_PRESTADORES.values():
+            print(f"  {login:<6} / {SENHA_PRESTADOR_DEMO}  (prestador)")
 
 
 if __name__ == "__main__":

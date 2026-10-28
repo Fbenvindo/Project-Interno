@@ -1,7 +1,7 @@
 from datetime import date, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 TipoAtividade = Literal[
     "limpeza", "refeicao", "organizacao", "lavanderia", "manutencao",
@@ -94,3 +94,51 @@ class ConcluirIn(BaseModel):
     observacao: str | None = None
     # Quando informado, substitui o consumo padrão da atividade.
     consumo: list[ItemRecurso] | None = None
+
+
+def _normalizar_login(v):
+    return v.strip().lower() if isinstance(v, str) else v
+
+
+LoginNormalizado = Annotated[str, BeforeValidator(_normalizar_login)]
+LoginNovo = Annotated[
+    str, BeforeValidator(_normalizar_login),
+    Field(min_length=3, max_length=80, pattern=r"^[a-z0-9._@-]+$"),
+]
+Senha = Annotated[str, Field(min_length=6, max_length=128)]
+
+
+class LoginIn(BaseModel):
+    login: LoginNormalizado
+    senha: str
+
+
+class PrimeiroAcessoIn(BaseModel):
+    nome: str = Field(min_length=1, max_length=120)
+    login: LoginNovo
+    senha: Senha
+
+
+class UsuarioIn(BaseModel):
+    nome: str = Field(min_length=1, max_length=120)
+    login: LoginNovo
+    papel: Literal["dono", "prestador"]
+    prestador_id: int | None = None
+    ativo: bool = True
+    # Obrigatória na criação; na edição, vazia mantém a senha atual.
+    senha: Senha | None = None
+
+
+class UsuarioOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    nome: str
+    login: str
+    papel: str
+    prestador_id: int | None
+    ativo: bool
+
+
+class TrocarSenhaIn(BaseModel):
+    senha_atual: str
+    nova_senha: Senha

@@ -1,12 +1,17 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
 
+from .auth import usuario_atual
 from .cronograma import gerar_tarefas
-from .database import UPLOAD_DIR, SessionLocal, criar_tabelas
-from .routers import atividades, prestadores, recursos, tarefas
+from .database import UPLOAD_DIR, SessionLocal, criar_tabelas, get_db
+from .models import Atividade, Tarefa, Usuario
+from .routers import atividades, auth, prestadores, recursos, tarefas, usuarios
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -22,12 +27,32 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="Gestão do Lar",
     description="Tarefas da casa, prestadores, estoque, receitas e conferência por foto.",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
-for modulo in (prestadores, recursos, atividades, tarefas):
+for modulo in (auth, usuarios, prestadores, recursos, atividades, tarefas):
     app.include_router(modulo.router)
 
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
+@app.get("/uploads/{nome}", include_in_schema=False)
+def foto(nome: str, usuario: Usuario = Depends(usuario_atual), db: Session = Depends(get_db)):
+    """Fotos exigem login; o prestador só acessa as fotos das próprias tarefas."""
+    caminho = (UPLOAD_DIR / nome).resolve()
+    if caminho.parent != UPLOAD_DIR.resolve() or not caminho.is_file():
+        raise HTTPException(404, "Foto não encontrada")
+
+    if usuario.papel == "prestador":
+        permitida = db.scalar(
+            select(Tarefa.id)
+            .join(Atividade)
+            .where(Tarefa.prestador_id == usuario.prestador_id,
+                   or_(Tarefa.foto == nome, Atividade.foto_referencia == nome))
+            .limit(1)
+        )
+        if permitida is None:
+            raise HTTPException(404, "Foto não encontrada")
+    return FileResponse(caminho)
+
+
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

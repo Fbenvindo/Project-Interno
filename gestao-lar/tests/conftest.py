@@ -5,6 +5,7 @@ from pathlib import Path
 
 # Banco e uploads isolados para os testes; precisa ocorrer antes de importar o app.
 os.environ["LAR_DATA_DIR"] = tempfile.mkdtemp(prefix="lar_teste_")
+os.environ["LAR_PBKDF2_ITERACOES"] = "1000"  # hash de senha rápido nos testes
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import cv2  # noqa: E402
@@ -16,11 +17,23 @@ from app.database import Base, engine  # noqa: E402
 from app.main import app  # noqa: E402
 
 
+SENHA_DONO = "senha-do-dono"
+
+
 @pytest.fixture
-def client():
+def anonimo():
+    """Cliente sem login, com o banco vazio."""
     Base.metadata.drop_all(engine)
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture
+def client(anonimo):
+    """Cliente logado como dono (criado pelo primeiro acesso)."""
+    r = anonimo.post("/api/auth/primeiro-acesso", json={"nome": "Dona", "login": "dona", "senha": SENHA_DONO})
+    assert r.status_code == 201
+    return anonimo
 
 
 def cena(semente: int = 1) -> np.ndarray:

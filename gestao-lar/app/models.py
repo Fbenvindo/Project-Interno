@@ -13,6 +13,7 @@ PERIODOS = ("manha", "tarde", "noite", "qualquer")
 FREQUENCIAS = ("unica", "diaria", "semanal", "quinzenal", "mensal")
 STATUS_TAREFA = ("pendente", "em_andamento", "concluida", "cancelada")
 TIPOS_MOVIMENTO = ("entrada", "consumo", "ajuste")
+PAPEIS = ("dono", "prestador")
 
 atividade_prestadores = Table(
     "atividade_prestadores",
@@ -137,3 +138,40 @@ class MovimentoEstoque(Base):
     tarefa_id: Mapped[int | None] = mapped_column(ForeignKey("tarefas.id", ondelete="SET NULL"))
     observacao: Mapped[str | None] = mapped_column(String(255))
     criado_em: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class Usuario(Base):
+    """Acesso ao sistema. O dono gerencia tudo; o prestador vê apenas as próprias tarefas."""
+
+    __tablename__ = "usuarios"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nome: Mapped[str] = mapped_column(String(120))
+    login: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    senha_hash: Mapped[str] = mapped_column(String(200))
+    papel: Mapped[str] = mapped_column(String(20))
+    prestador_id: Mapped[int | None] = mapped_column(
+        ForeignKey("prestadores.id", ondelete="CASCADE"), unique=True
+    )
+    ativo: Mapped[bool] = mapped_column(default=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    prestador: Mapped[Prestador | None] = relationship(lazy="joined")
+
+    @property
+    def pode_entrar(self) -> bool:
+        if not self.ativo:
+            return False
+        return self.papel == "dono" or (self.prestador is not None and self.prestador.ativo)
+
+
+class Sessao(Base):
+    __tablename__ = "sessoes"
+
+    # Guardamos apenas o hash do token; o token em si fica só no cookie do navegador.
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), index=True)
+    criada_em: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    expira_em: Mapped[datetime] = mapped_column(DateTime)
+
+    usuario: Mapped[Usuario] = relationship(lazy="joined")

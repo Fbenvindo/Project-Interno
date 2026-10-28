@@ -12,12 +12,17 @@ const AVALIACOES = {
   foto_inadequada: "Foto inadequada", sem_referencia: "Sem referência",
 };
 const DIAS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+const PAPEIS = { dono: "Dono da casa", prestador: "Prestador" };
 
 const conteudo = document.getElementById("conteudo");
 const modal = document.getElementById("modal");
 const modalCorpo = document.getElementById("modal-corpo");
+const abas = document.getElementById("abas");
 let abaAtual = "hoje";
 let inicioSemana = segunda(new Date());
+let usuario = null;
+
+const ehDono = () => usuario?.papel === "dono";
 
 // ---------- utilidades ----------
 
@@ -59,20 +64,27 @@ function avisar(texto, erro = false) {
 }
 
 async function api(caminho, opcoes = {}) {
-  const config = { ...opcoes };
+  const { silencioso, ...config } = opcoes;
   if (config.json !== undefined) {
     config.body = JSON.stringify(config.json);
     config.headers = { "Content-Type": "application/json" };
     delete config.json;
   }
   const resp = await fetch(caminho, config);
+  if (resp.status === 401 && !caminho.startsWith("/api/auth/")) {
+    // Sessão expirada ou encerrada: volta para a tela de login.
+    usuario = null;
+    if (modal.open) fecharModal();
+    telaLogin("Sua sessão expirou. Entre novamente.");
+    throw new Error("Não autenticado");
+  }
   if (!resp.ok) {
     let msg = `Erro ${resp.status}`;
     try {
       const corpo = await resp.json();
       msg = typeof corpo.detail === "string" ? corpo.detail : corpo.detail.map((d) => d.msg).join("; ");
     } catch (_) { /* resposta sem JSON */ }
-    avisar(msg, true);
+    if (!silencioso) avisar(msg, true);
     throw new Error(msg);
   }
   return resp.status === 204 ? null : resp.json();
@@ -123,18 +135,143 @@ const telas = {
   atividades: telaAtividades,
   estoque: telaEstoque,
   prestadores: telaPrestadores,
+  usuarios: telaUsuarios,
 };
 
-document.getElementById("abas").addEventListener("click", (e) => {
+function abasDoUsuario() {
+  if (!ehDono()) return [["hoje", "Hoje"], ["cronograma", "Minha agenda"]];
+  return [["hoje", "Hoje"], ["cronograma", "Cronograma"], ["atividades", "Atividades"], ["estoque", "Estoque"],
+    ["prestadores", "Prestadores"], ["usuarios", "Usuários"]];
+}
+
+function desenharAbas() {
+  abas.innerHTML = abasDoUsuario()
+    .map(([id, nome]) => `<button data-aba="${id}" class="${id === abaAtual ? "ativa" : ""}">${nome}</button>`).join("");
+}
+
+abas.addEventListener("click", (e) => {
   const botao = e.target.closest("button[data-aba]");
   if (!botao) return;
   abaAtual = botao.dataset.aba;
-  document.querySelectorAll("#abas button").forEach((b) => b.classList.toggle("ativa", b === botao));
+  desenharAbas();
   atualizar();
 });
 
 function atualizar() {
   return telas[abaAtual]().catch((err) => console.error(err));
+}
+
+// ---------- Acesso ----------
+
+function mostrarCabecalho(logado) {
+  document.getElementById("usuario-topo").hidden = !logado;
+  document.getElementById("usuario-nome").textContent = logado ? `${usuario.nome} · ${PAPEIS[usuario.papel]}` : "";
+  if (!logado) abas.innerHTML = "";
+}
+
+function entrarNoApp(u) {
+  usuario = u;
+  if (!abasDoUsuario().some(([id]) => id === abaAtual)) abaAtual = "hoje";
+  mostrarCabecalho(true);
+  desenharAbas();
+  atualizar();
+}
+
+function formAcesso({ titulo, texto, campos, botao, enviar }) {
+  mostrarCabecalho(false);
+  conteudo.innerHTML = `
+    <div class="cartao acesso">
+      <h2>${titulo}</h2>
+      ${texto ? `<p class="suave">${texto}</p>` : ""}
+      <form id="form-acesso">
+        ${campos}
+        <p class="erro-form" id="erro-acesso"></p>
+        <button class="botao primario" type="submit">${botao}</button>
+      </form>
+    </div>`;
+  const form = document.getElementById("form-acesso");
+  form.querySelector("input")?.focus();
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const erro = document.getElementById("erro-acesso");
+    erro.textContent = "";
+    try {
+      await enviar(form);
+    } catch (err) {
+      erro.textContent = err.message;
+    }
+  });
+}
+
+function telaLogin(mensagem = "") {
+  formAcesso({
+    titulo: "Entrar",
+    texto: mensagem,
+    botao: "Entrar",
+    campos: `
+      <div class="campo"><label for="login">Login</label>
+        <input id="login" name="login" autocomplete="username" autocapitalize="none" required></div>
+      <div class="campo"><label for="senha">Senha</label>
+        <input id="senha" name="senha" type="password" autocomplete="current-password" required></div>`,
+    enviar: async (form) => {
+      const u = await api("/api/auth/login", {
+        method: "POST", silencioso: true, json: { login: form.login.value, senha: form.senha.value },
+      });
+      entrarNoApp(u);
+    },
+  });
+}
+
+function telaPrimeiroAcesso() {
+  formAcesso({
+    titulo: "Bem-vindo!",
+    texto: "Crie o acesso do dono da casa. Depois você poderá cadastrar os acessos dos prestadores.",
+    botao: "Criar acesso",
+    campos: `
+      <div class="campo"><label for="nome">Seu nome</label><input id="nome" name="nome" required></div>
+      <div class="campo"><label for="login">Login</label>
+        <input id="login" name="login" autocomplete="username" autocapitalize="none" minlength="3" required></div>
+      <div class="campo"><label for="senha">Senha (mínimo 6 caracteres)</label>
+        <input id="senha" name="senha" type="password" autocomplete="new-password" minlength="6" required></div>`,
+    enviar: async (form) => {
+      const u = await api("/api/auth/primeiro-acesso", {
+        method: "POST", silencioso: true,
+        json: { nome: form.nome.value.trim(), login: form.login.value, senha: form.senha.value },
+      });
+      entrarNoApp(u);
+    },
+  });
+}
+
+document.getElementById("botao-sair").addEventListener("click", async () => {
+  await api("/api/auth/logout", { method: "POST" });
+  usuario = null;
+  telaLogin();
+});
+
+document.getElementById("botao-senha").addEventListener("click", () => {
+  abrirModal(`
+    <h2>Alterar senha</h2>
+    <form id="form-senha">
+      <div class="campo"><label>Senha atual</label><input name="atual" type="password" autocomplete="current-password" required></div>
+      <div class="campo"><label>Nova senha (mínimo 6 caracteres)</label>
+        <input name="nova" type="password" autocomplete="new-password" minlength="6" required></div>
+      <div class="acoes"><button class="botao primario" type="submit">Salvar</button></div>
+    </form>`);
+  modalCorpo.querySelector("#form-senha").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    await api("/api/auth/senha", { method: "POST", json: { senha_atual: f.atual.value, nova_senha: f.nova.value } });
+    fecharModal();
+    avisar("Senha alterada. Os outros aparelhos foram desconectados.");
+  });
+});
+
+async function iniciar() {
+  const estado = await api("/api/auth/estado");
+  if (!estado.configurado) telaPrimeiroAcesso();
+  else if (!estado.usuario) telaLogin();
+  else entrarNoApp(estado.usuario);
 }
 
 // ---------- Hoje ----------
@@ -152,9 +289,9 @@ async function telaHoje() {
       <div class="cartao"><div class="suave">Pendentes</div><div class="numero">${c.pendente}</div></div>
       <div class="cartao"><div class="suave">Em andamento</div><div class="numero">${c.em_andamento}</div></div>
       <div class="cartao"><div class="suave">Concluídas</div><div class="numero">${c.concluida}</div></div>
-      <div class="cartao"><div class="suave">Estoque baixo</div><div class="numero">${painel.alertas_estoque.length}</div></div>
+      ${ehDono() ? `<div class="cartao"><div class="suave">Estoque baixo</div><div class="numero">${painel.alertas_estoque.length}</div></div>` : ""}
     </div>
-    <h2>Tarefas de hoje</h2>
+    <h2>${ehDono() ? "Tarefas de hoje" : "Minhas tarefas de hoje"}</h2>
     ${tarefas.map((t) => cartaoTarefa(t)).join("") || `<div class="vazio">Nenhuma tarefa para hoje.</div>`}
     ${painel.atrasadas.length ? `<h2>Atrasadas</h2>${painel.atrasadas.map((t) => cartaoTarefa(t, true)).join("")}` : ""}
     ${painel.alertas_estoque.length ? `
@@ -177,7 +314,7 @@ async function telaCronograma() {
 
   conteudo.innerHTML = `
     <div class="cabecalho">
-      <h2>Semana de ${inicioSemana.toLocaleDateString("pt-BR")} a ${fim.toLocaleDateString("pt-BR")}</h2>
+      <h2>${ehDono() ? "Semana" : "Minha agenda"} de ${inicioSemana.toLocaleDateString("pt-BR")} a ${fim.toLocaleDateString("pt-BR")}</h2>
       <div class="acoes" style="margin:0">
         <button class="botao" data-semana="-7">◀</button>
         <button class="botao" data-semana="0">Hoje</button>
@@ -204,7 +341,8 @@ async function abrirTarefa(id) {
   const t = await api(`/api/tarefas/${id}`);
   const aberta = !["concluida", "cancelada"].includes(t.status);
   const a = t.analise;
-  const prestadores = aberta ? await api("/api/prestadores?apenas_ativos=true") : [];
+  const dono = ehDono();
+  const prestadores = aberta && dono ? await api("/api/prestadores?apenas_ativos=true") : [];
 
   abrirModal(`
     <h2>${esc(t.atividade.nome)}</h2>
@@ -214,7 +352,7 @@ async function abrirTarefa(id) {
 
     <div class="campo">
       <label for="prestador-tarefa">Prestador</label>
-      ${aberta ? `
+      ${aberta && dono ? `
         <select id="prestador-tarefa">
           <option value="">— sem prestador —</option>
           ${prestadores.map((p) => `<option value="${p.id}" ${t.prestador?.id === p.id ? "selected" : ""}>${esc(p.nome)}</option>`).join("")}
@@ -258,7 +396,7 @@ async function abrirTarefa(id) {
       ${aberta && t.status === "pendente" ? `<button class="botao" data-acao="iniciar">Iniciar</button>` : ""}
       ${aberta ? `<label class="botao primario">📷 Tirar foto
         <input type="file" accept="image/*" capture="environment" id="foto-tarefa" hidden></label>` : ""}
-      ${t.foto ? `<button class="botao" data-acao="referencia">Usar foto como referência</button>` : ""}
+      ${t.foto && dono ? `<button class="botao" data-acao="referencia">Usar foto como referência</button>` : ""}
     </div>
     ${aberta ? `
       <div class="campo" style="margin-top:12px">
@@ -267,7 +405,7 @@ async function abrirTarefa(id) {
       </div>
       <div class="acoes">
         <button class="botao primario" data-acao="concluir">Concluir e baixar estoque</button>
-        <button class="botao perigo" data-acao="cancelar">Cancelar tarefa</button>
+        ${dono ? `<button class="botao perigo" data-acao="cancelar">Cancelar tarefa</button>` : ""}
       </div>` : ""}
   `);
 
@@ -657,4 +795,98 @@ function formPrestador(p = null) {
   });
 }
 
-atualizar();
+// ---------- Usuários ----------
+
+async function telaUsuarios() {
+  const [usuarios, prestadores] = await Promise.all([api("/api/usuarios"), api("/api/prestadores")]);
+  const nomePrestador = (id) => prestadores.find((p) => p.id === id)?.nome || "—";
+  const semAcesso = prestadores.filter((p) => !usuarios.some((u) => u.prestador_id === p.id));
+  conteudo.innerHTML = `
+    <div class="cabecalho">
+      <h2>Usuários e acessos</h2>
+      <button class="botao primario" id="novo-usuario">+ Novo acesso</button>
+    </div>
+    <p class="suave">O dono gerencia tudo. O prestador vê apenas as próprias tarefas, executa, fotografa e conclui.</p>
+    ${usuarios.map((u) => `
+      <div class="cartao clicavel" data-usuario="${u.id}">
+        <div class="linha">
+          <strong>${esc(u.nome)}</strong>
+          <span>${selo(u.papel === "dono" ? "ok" : "", PAPEIS[u.papel])} ${u.ativo ? "" : selo("erro", "Inativo")}</span>
+        </div>
+        <div class="suave">login: ${esc(u.login)}${u.papel === "prestador" ? ` · prestador: ${esc(nomePrestador(u.prestador_id))}` : ""}
+          ${u.id === usuario.id ? " · você" : ""}</div>
+      </div>`).join("")}
+    ${semAcesso.length ? `<p class="suave">Prestadores sem acesso: ${semAcesso.map((p) => esc(p.nome)).join(", ")}.</p>` : ""}
+  `;
+  document.getElementById("novo-usuario").addEventListener("click", () => formUsuario(null, prestadores, usuarios));
+  conteudo.querySelectorAll("[data-usuario]").forEach((el) => el.addEventListener("click", () =>
+    formUsuario(usuarios.find((u) => u.id === Number(el.dataset.usuario)), prestadores, usuarios)));
+}
+
+function formUsuario(u, prestadores, usuarios) {
+  const novo = !u;
+  u = u || { nome: "", login: "", papel: "prestador", prestador_id: null, ativo: true };
+  // Só aparecem prestadores ainda sem acesso (ou o já vinculado a este usuário).
+  const disponiveis = prestadores.filter((p) => p.id === u.prestador_id || !usuarios.some((x) => x.prestador_id === p.id));
+  abrirModal(`
+    <h2>${novo ? "Novo acesso" : "Editar acesso"}</h2>
+    <form id="form-usuario">
+      <div class="campos">
+        <div class="campo"><label>Papel</label><select name="papel">${opcoes(PAPEIS, u.papel)}</select></div>
+        <div class="campo" id="campo-prestador"><label>Prestador</label>
+          <select name="prestador_id">
+            <option value="">Selecione...</option>
+            ${disponiveis.map((p) => `<option value="${p.id}" ${p.id === u.prestador_id ? "selected" : ""}>${esc(p.nome)}</option>`).join("")}
+          </select></div>
+      </div>
+      <div class="campo"><label>Nome</label><input name="nome" required value="${esc(u.nome)}"></div>
+      <div class="campo"><label>Login</label>
+        <input name="login" required minlength="3" autocapitalize="none" autocomplete="off" value="${esc(u.login)}">
+        <span class="suave">Letras minúsculas, números e . _ @ -</span></div>
+      <div class="campo"><label>${novo ? "Senha" : "Nova senha (deixe em branco para manter)"}</label>
+        <input name="senha" type="password" minlength="6" autocomplete="new-password" ${novo ? "required" : ""}></div>
+      <div class="campo opcoes"><label><input type="checkbox" name="ativo" ${u.ativo ? "checked" : ""}> Acesso ativo</label></div>
+      <div class="acoes">
+        <button class="botao primario" type="submit">Salvar</button>
+        ${!novo && u.id !== usuario.id ? `<button class="botao perigo" type="button" id="excluir-usuario">Excluir</button>` : ""}
+      </div>
+    </form>
+  `);
+  const form = modalCorpo.querySelector("#form-usuario");
+  const ajustar = () => { form.querySelector("#campo-prestador").hidden = form.papel.value !== "prestador"; };
+  ajustar();
+  form.papel.addEventListener("change", ajustar);
+  // Ao escolher o prestador, sugere nome e login.
+  form.prestador_id.addEventListener("change", () => {
+    const p = prestadores.find((x) => x.id === Number(form.prestador_id.value));
+    if (!p) return;
+    if (!form.nome.value) form.nome.value = p.nome;
+    if (!form.login.value) {
+      form.login.value = p.nome.split(" ")[0].normalize("NFD").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+    }
+  });
+  form.querySelector("#excluir-usuario")?.addEventListener("click", async () => {
+    if (!confirm("Excluir este acesso?")) return;
+    await api(`/api/usuarios/${u.id}`, { method: "DELETE" });
+    fecharModal();
+    atualizar();
+  });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const papel = form.papel.value;
+    const corpo = {
+      nome: form.nome.value.trim(),
+      login: form.login.value.trim().toLowerCase(),
+      papel,
+      prestador_id: papel === "prestador" && form.prestador_id.value ? Number(form.prestador_id.value) : null,
+      ativo: form.ativo.checked,
+      senha: form.senha.value || null,
+    };
+    await api(novo ? "/api/usuarios" : `/api/usuarios/${u.id}`, { method: novo ? "POST" : "PUT", json: corpo });
+    avisar("Acesso salvo.");
+    fecharModal();
+    atualizar();
+  });
+}
+
+iniciar();

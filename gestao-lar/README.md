@@ -17,6 +17,32 @@ visão computacional (OpenCV).
 | **Estoque** | Recursos materiais com unidade, saldo, estoque mínimo e custo. Entradas, ajustes de contagem e histórico de movimentos. Lista de compras automática: consumo previsto das tarefas dos próximos dias + mínimo − saldo. |
 | **Cronograma** | Lançado automaticamente a partir da frequência de cada atividade (30 dias à frente, e sob demanda ao navegar). Editar uma atividade refaz as tarefas pendentes futuras. |
 | **Execução** | Mostra instruções e materiais (com alerta de falta no estoque), botão para tirar foto pelo celular, análise da foto, conclusão com baixa automática do estoque. |
+| **Login** | Acessos de **dono** (gerencia tudo) e **prestador** (vê e executa só as próprias tarefas). |
+
+## Login e permissões
+
+No primeiro uso, o app abre a tela **Bem-vindo!** para criar o acesso do dono da casa.
+Faça isso logo após instalar: enquanto não existir nenhum usuário, qualquer pessoa
+que abrir o app pode criar esse primeiro acesso.
+
+Depois, na aba **Usuários**, o dono cria os acessos dos prestadores (cada acesso fica
+vinculado a um cadastro de prestador) e pode criar outros donos.
+
+| | Dono | Prestador |
+| --- | :---: | :---: |
+| Ver painel e cronograma | todas as tarefas | só as próprias |
+| Iniciar, fotografar e concluir tarefa | ✓ | só as próprias |
+| Cancelar tarefa, trocar prestador, definir foto de referência | ✓ | — |
+| Atividades, receitas, estoque, prestadores e usuários | ✓ | — |
+| Ver fotos | todas | só das próprias tarefas |
+
+Detalhes de segurança:
+- Senhas guardadas com PBKDF2-SHA256 (390 mil iterações, sal aleatório).
+- Sessão em cookie `HttpOnly` / `SameSite=Lax` válido por 30 dias (marcado `Secure` sob HTTPS).
+  No banco fica só o hash do token.
+- Trocar a senha desconecta os outros aparelhos. Desativar um usuário, ou o prestador
+  vinculado a ele, encerra o acesso na hora. Excluir um prestador exclui também o acesso dele.
+- O sistema não deixa remover ou desativar o último dono ativo.
 
 ## Conferência por foto (OpenCV)
 
@@ -51,12 +77,19 @@ python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-python -m app.seed               # opcional: dados de exemplo
+python -m app.seed               # opcional: dados de exemplo (já cria os acessos abaixo)
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 - Aplicativo: http://localhost:8000 (no celular, use o IP do computador na mesma rede)
 - Documentação da API: http://localhost:8000/docs
+
+Acessos criados pelo `app.seed` (só para demonstração; troque as senhas):
+
+| Login | Senha | Papel |
+| --- | --- | --- |
+| `dono` | `dono123` | Dono |
+| `maria`, `joao`, `carlos` | `123456` | Prestadores |
 
 Banco SQLite e fotos ficam em `gestao-lar/data/` (configurável com `LAR_DATA_DIR`
 ou `LAR_DATABASE_URL`).
@@ -75,8 +108,9 @@ pytest
 ```
 gestao-lar/
 ├── app/
-│   ├── main.py          # FastAPI, rotas e arquivos estáticos
-│   ├── models.py        # Prestador, Recurso, Atividade, Tarefa, MovimentoEstoque
+│   ├── main.py          # FastAPI, rotas, fotos protegidas e arquivos estáticos
+│   ├── auth.py          # Senhas, sessões e permissões (dono x prestador)
+│   ├── models.py        # Prestador, Recurso, Atividade, Tarefa, MovimentoEstoque, Usuario, Sessao
 │   ├── cronograma.py    # Regras de frequência e lançamento automático
 │   ├── estoque.py       # Movimentos e lista de compras
 │   ├── visao.py         # Análise das fotos com OpenCV
@@ -88,7 +122,7 @@ gestao-lar/
 
 ## Próximos passos sugeridos
 
-- Login e perfis (dono da casa x prestador).
+- Limite de tentativas de login (hoje não há bloqueio por tentativas erradas).
 - Notificações (WhatsApp/push) de tarefas do dia e de estoque baixo.
 - Custos por tarefa (horas do prestador + materiais) e relatórios mensais.
 - Modelo treinado (ex.: classificação "limpo/sujo" ou detecção de objetos com YOLO)

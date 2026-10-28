@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..auth import exigir_dono
 from ..cronograma import regenerar_futuras
 from ..database import get_db
 from ..fotos import salvar_foto
@@ -10,7 +11,7 @@ from ..schemas import AtividadeIn
 from ..serializacao import atividade_out
 from ..visao import ImagemInvalida, carregar
 
-router = APIRouter(prefix="/api/atividades", tags=["atividades"])
+router = APIRouter(prefix="/api/atividades", tags=["atividades"], dependencies=[Depends(exigir_dono)])
 
 
 def obter(db: Session, atividade_id: int) -> Atividade:
