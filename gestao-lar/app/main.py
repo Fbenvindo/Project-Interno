@@ -1,3 +1,5 @@
+import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -11,7 +13,8 @@ from .auth import usuario_atual
 from .cronograma import gerar_tarefas
 from .database import UPLOAD_DIR, SessionLocal, criar_tabelas, get_db
 from .models import Atividade, Tarefa, Usuario
-from .routers import atividades, auth, prestadores, recursos, tarefas, usuarios
+from .notificacoes import agendador
+from .routers import atividades, auth, notificacoes, prestadores, recursos, tarefas, usuarios
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -21,17 +24,21 @@ async def lifespan(_: FastAPI):
     criar_tabelas()
     with SessionLocal() as db:
         gerar_tarefas(db)
+    # Resumo diário de notificações (desligável com LAR_AGENDADOR=0, ex.: nos testes).
+    tarefa = asyncio.create_task(agendador()) if os.environ.get("LAR_AGENDADOR", "1") != "0" else None
     yield
+    if tarefa:
+        tarefa.cancel()
 
 
 app = FastAPI(
     title="Gestão do Lar",
     description="Tarefas da casa, prestadores, estoque, receitas e conferência por foto.",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
-for modulo in (auth, usuarios, prestadores, recursos, atividades, tarefas):
+for modulo in (auth, usuarios, notificacoes, prestadores, recursos, atividades, tarefas):
     app.include_router(modulo.router)
 
 

@@ -175,3 +175,52 @@ class Sessao(Base):
     expira_em: Mapped[datetime] = mapped_column(DateTime)
 
     usuario: Mapped[Usuario] = relationship(lazy="joined")
+
+
+TIPOS_NOTIFICACAO = (
+    "resumo_diario", "tarefa_atribuida", "tarefa_conferir", "tarefa_concluida", "estoque_baixo", "teste",
+)
+
+
+class Notificacao(Base):
+    __tablename__ = "notificacoes"
+    # A chave evita duplicar avisos programados (ex.: um resumo por dia por usuário).
+    __table_args__ = (UniqueConstraint("usuario_id", "chave"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), index=True)
+    tipo: Mapped[str] = mapped_column(String(30))
+    titulo: Mapped[str] = mapped_column(String(160))
+    mensagem: Mapped[str] = mapped_column(Text)
+    # Destino ao tocar na notificação: "tarefa:12" ou "aba:estoque".
+    link: Mapped[str | None] = mapped_column(String(60))
+    chave: Mapped[str | None] = mapped_column(String(80))
+    lida: Mapped[bool] = mapped_column(default=False)
+    criada_em: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
+
+
+class PreferenciaNotificacao(Base):
+    __tablename__ = "preferencias_notificacao"
+
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), primary_key=True)
+    resumo_diario: Mapped[bool] = mapped_column(default=True)
+    tarefa_atribuida: Mapped[bool] = mapped_column(default=True)
+    tarefa_conferir: Mapped[bool] = mapped_column(default=True)
+    tarefa_concluida: Mapped[bool] = mapped_column(default=False)
+    estoque_baixo: Mapped[bool] = mapped_column(default=True)
+    # Além da central do app, envia para o celular (Web Push).
+    push: Mapped[bool] = mapped_column(default=True)
+
+
+class InscricaoPush(Base):
+    """Aparelho/navegador que aceitou receber notificações."""
+
+    __tablename__ = "inscricoes_push"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), index=True)
+    endpoint: Mapped[str] = mapped_column(String(600), unique=True)
+    p256dh: Mapped[str] = mapped_column(String(200))
+    auth: Mapped[str] = mapped_column(String(100))
+    aparelho: Mapped[str | None] = mapped_column(String(200))
+    criada_em: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)

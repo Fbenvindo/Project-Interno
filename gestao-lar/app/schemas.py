@@ -142,3 +142,40 @@ class UsuarioOut(BaseModel):
 class TrocarSenhaIn(BaseModel):
     senha_atual: str
     nova_senha: Senha
+
+
+class NotificacaoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    tipo: str
+    titulo: str
+    mensagem: str
+    link: str | None
+    lida: bool
+    criada_em: datetime
+
+
+class PreferenciasNotificacao(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    resumo_diario: bool = True
+    tarefa_atribuida: bool = True
+    tarefa_conferir: bool = True
+    tarefa_concluida: bool = False
+    estoque_baixo: bool = True
+    push: bool = True
+
+
+class ChavesPush(BaseModel):
+    p256dh: str = Field(min_length=1, max_length=200)
+    auth: str = Field(min_length=1, max_length=100)
+
+
+class InscricaoPushIn(BaseModel):
+    """Formato devolvido por PushSubscription.toJSON() no navegador."""
+
+    endpoint: str = Field(max_length=600, pattern=r"^https://")
+    keys: ChavesPush
+
+
+class CancelarPushIn(BaseModel):
+    endpoint: str

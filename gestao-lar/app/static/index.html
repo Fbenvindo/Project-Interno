@@ -4,6 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gestão do Lar</title>
+  <meta name="theme-color" content="#2f6fed">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icone-192.png">
+  <link rel="apple-touch-icon" href="icone-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Lar">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -12,6 +18,7 @@
       <h1>Gestão do Lar</h1>
       <div id="usuario-topo" hidden>
         <span id="usuario-nome" class="suave"></span>
+        <button class="botao pequeno sino" id="botao-notificacoes" aria-label="Notificações">🔔<span id="contador-notificacoes" hidden></span></button>
         <button class="botao pequeno" id="botao-senha">Senha</button>
         <button class="botao pequeno" id="botao-sair">Sair</button>
       </div>

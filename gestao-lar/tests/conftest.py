@@ -6,6 +6,7 @@ from pathlib import Path
 # Banco e uploads isolados para os testes; precisa ocorrer antes de importar o app.
 os.environ["LAR_DATA_DIR"] = tempfile.mkdtemp(prefix="lar_teste_")
 os.environ["LAR_PBKDF2_ITERACOES"] = "1000"  # hash de senha rápido nos testes
+os.environ["LAR_AGENDADOR"] = "0"  # sem resumo diário automático durante os testes
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import cv2  # noqa: E402
@@ -13,6 +14,7 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from app import push  # noqa: E402
 from app.database import Base, engine  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -34,6 +36,15 @@ def client(anonimo):
     r = anonimo.post("/api/auth/primeiro-acesso", json={"nome": "Dona", "login": "dona", "senha": SENHA_DONO})
     assert r.status_code == 201
     return anonimo
+
+
+@pytest.fixture(autouse=True)
+def pushes(monkeypatch):
+    """Nenhum push sai para a internet nos testes: os envios ficam registrados nesta lista."""
+    enviados = []
+    monkeypatch.setattr(push, "_enviar_webpush", lambda inscricao, dados: enviados.append((inscricao, dados)))
+    monkeypatch.setattr(push, "agendar", lambda ids, conteudo: push.enviar_agora(ids, conteudo))
+    return enviados
 
 
 def cena(semente: int = 1) -> np.ndarray:

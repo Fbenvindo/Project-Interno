@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import exigir_dono, usuario_atual
+from .. import notificacoes
 from ..cronograma import gerar_tarefas
 from ..database import get_db
 from ..estoque import movimentar
@@ -116,9 +117,13 @@ def trocar_prestador(tarefa_id: int, prestador_id: int,
     _exigir_aberta(t)
     if db.get(Prestador, prestador_id) is None:
         raise HTTPException(404, "Prestador não encontrado")
+    mudou = t.prestador_id != prestador_id
     t.prestador_id = prestador_id
-    db.commit()
+    db.flush()
     db.refresh(t)
+    if mudou:
+        notificacoes.tarefa_atribuida(db, t, usuario)
+    db.commit()
     return tarefa_out(t, detalhada=True)
 
 
@@ -175,6 +180,7 @@ def concluir(tarefa_id: int, dados: ConcluirIn | None = None,
     t.iniciada_em = t.iniciada_em or agora
     t.concluida_em = agora
     t.observacao = dados.observacao
+    notificacoes.tarefa_concluida(db, t, usuario)
     db.commit()
     resposta = tarefa_out(t, detalhada=True)
     resposta["avisos"] = (

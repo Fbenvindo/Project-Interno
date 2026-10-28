@@ -18,6 +18,7 @@ visão computacional (OpenCV).
 | **Cronograma** | Lançado automaticamente a partir da frequência de cada atividade (30 dias à frente, e sob demanda ao navegar). Editar uma atividade refaz as tarefas pendentes futuras. |
 | **Execução** | Mostra instruções e materiais (com alerta de falta no estoque), botão para tirar foto pelo celular, análise da foto, conclusão com baixa automática do estoque. |
 | **Login** | Acessos de **dono** (gerencia tudo) e **prestador** (vê e executa só as próprias tarefas). |
+| **Notificações** | Central no app (sino) e push no celular: resumo diário, tarefa atribuída, execução para conferir e estoque baixo. |
 
 ## Login e permissões
 
@@ -43,6 +44,37 @@ Detalhes de segurança:
 - Trocar a senha desconecta os outros aparelhos. Desativar um usuário, ou o prestador
   vinculado a ele, encerra o acesso na hora. Excluir um prestador exclui também o acesso dele.
 - O sistema não deixa remover ou desativar o último dono ativo.
+
+## Notificações
+
+Cada aviso aparece na **central do app** (sino no topo) e, se a pessoa ativar, também
+como **notificação no celular/computador**, mesmo com o app fechado (Web Push).
+
+| Aviso | Quem recebe | Quando |
+| --- | --- | --- |
+| Resumo diário | Prestador: as próprias tarefas do dia e atrasadas. Dono: total do dia, tarefas sem prestador, atrasadas, materiais que faltam para hoje/amanhã e estoque baixo | Todo dia às 07:00 (`LAR_HORA_RESUMO`), uma vez por dia |
+| Nova tarefa | O prestador que passou a ser responsável | Quando o dono troca o prestador de uma tarefa |
+| Conferir execução | Donos | Tarefa concluída com foto avaliada como *revisar*, *reprovada* ou *inadequada*, ou concluída sem foto numa atividade que tem referência |
+| Tarefa concluída | Donos (desligado por padrão) | Qualquer conclusão sem pendências |
+| Estoque baixo | Donos | No momento em que um produto cruza o estoque mínimo (sem repetir enquanto continuar abaixo) |
+
+Cada pessoa escolhe o que quer receber em **🔔 → Preferências**. Lá também ficam os botões
+*Ativar neste aparelho*, *Enviar teste* e, para o dono, *Enviar resumo do dia agora*.
+Notificações lidas com mais de 60 dias são apagadas automaticamente.
+
+### Push no celular
+
+- Funciona no Chrome/Edge/Firefox (Android e computador) e no Safari do iPhone/iPad
+  (iOS 16.4+), **desde que o app seja adicionado à Tela de Início** (Compartilhar →
+  Adicionar à Tela de Início) e aberto por lá.
+- Exige **HTTPS** (ou `localhost`). Acessando pelo IP da rede local via `http://`, só a central
+  do app funciona.
+- As chaves VAPID são geradas automaticamente em `data/vapid_privada.pem` no primeiro uso.
+  Guarde esse arquivo: se ele for trocado, os aparelhos precisam ativar as notificações de novo.
+- Defina `LAR_VAPID_CONTATO` com um e-mail real (`mailto:voce@exemplo.com`); alguns serviços
+  de push (como o da Apple) recusam contatos inválidos.
+- Ao sair do app, o aparelho deixa de receber os avisos daquele usuário. Isso é importante em
+  celular compartilhado.
 
 ## Conferência por foto (OpenCV)
 
@@ -91,8 +123,15 @@ Acessos criados pelo `app.seed` (só para demonstração; troque as senhas):
 | `dono` | `dono123` | Dono |
 | `maria`, `joao`, `carlos` | `123456` | Prestadores |
 
-Banco SQLite e fotos ficam em `gestao-lar/data/` (configurável com `LAR_DATA_DIR`
-ou `LAR_DATABASE_URL`).
+Banco SQLite, fotos e chaves de push ficam em `gestao-lar/data/` (configurável com
+`LAR_DATA_DIR` ou `LAR_DATABASE_URL`).
+
+| Variável | Padrão | Uso |
+| --- | --- | --- |
+| `LAR_HORA_RESUMO` | `07:00` | Horário do resumo diário |
+| `LAR_AGENDADOR` | `1` | `0` desliga o envio automático do resumo |
+| `LAR_VAPID_CONTATO` | `mailto:gestao-lar@example.com` | Contato exigido pelos serviços de push |
+| `LAR_VAPID_PRIVADA` | `data/vapid_privada.pem` | Chave privada VAPID |
 
 > Para usar a câmera do celular direto no navegador em produção, sirva o app por HTTPS.
 
@@ -113,9 +152,11 @@ gestao-lar/
 │   ├── models.py        # Prestador, Recurso, Atividade, Tarefa, MovimentoEstoque, Usuario, Sessao
 │   ├── cronograma.py    # Regras de frequência e lançamento automático
 │   ├── estoque.py       # Movimentos e lista de compras
+│   ├── notificacoes.py  # Avisos, preferências e resumo diário programado
+│   ├── push.py          # Web Push (VAPID) para celular/computador
 │   ├── visao.py         # Análise das fotos com OpenCV
 │   ├── routers/         # Endpoints REST
-│   ├── static/          # Interface web (HTML/CSS/JS, mobile-first)
+│   ├── static/          # Interface web (HTML/CSS/JS, mobile-first, PWA + service worker)
 │   └── seed.py          # Dados de exemplo
 └── tests/
 ```
@@ -123,7 +164,7 @@ gestao-lar/
 ## Próximos passos sugeridos
 
 - Limite de tentativas de login (hoje não há bloqueio por tentativas erradas).
-- Notificações (WhatsApp/push) de tarefas do dia e de estoque baixo.
+- Outros canais de notificação (WhatsApp, e-mail), que dependem de conta em serviço externo.
 - Custos por tarefa (horas do prestador + materiais) e relatórios mensais.
 - Modelo treinado (ex.: classificação "limpo/sujo" ou detecção de objetos com YOLO)
   quando houver um volume de fotos avaliadas para treinar.

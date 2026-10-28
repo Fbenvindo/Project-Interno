@@ -3,12 +3,16 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from . import notificacoes
 from .models import MovimentoEstoque, Recurso, Tarefa
 
 
 def movimentar(db: Session, recurso: Recurso, tipo: str, quantidade: float,
                tarefa_id: int | None = None, observacao: str | None = None) -> MovimentoEstoque:
-    """Registra um movimento e atualiza o saldo. Para 'ajuste', quantidade é o novo saldo."""
+    """Registra um movimento e atualiza o saldo. Para 'ajuste', quantidade é o novo saldo.
+
+    Avisa os donos quando o saldo cruza o estoque mínimo (só na passagem, sem repetir).
+    """
     if tipo == "entrada":
         delta = quantidade
     elif tipo == "consumo":
@@ -19,10 +23,13 @@ def movimentar(db: Session, recurso: Recurso, tipo: str, quantidade: float,
     else:
         raise ValueError(f"Tipo de movimento inválido: {tipo}")
 
+    estava_acima = recurso.estoque_atual > recurso.estoque_minimo
     recurso.estoque_atual = round(recurso.estoque_atual + delta, 4)
     mov = MovimentoEstoque(recurso_id=recurso.id, quantidade=delta, tipo=tipo,
                            tarefa_id=tarefa_id, observacao=observacao)
     db.add(mov)
+    if estava_acima and recurso.abaixo_minimo and recurso.ativo:
+        notificacoes.estoque_baixo(db, recurso)
     return mov
 
 

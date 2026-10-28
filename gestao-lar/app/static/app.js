@@ -166,7 +166,10 @@ function atualizar() {
 function mostrarCabecalho(logado) {
   document.getElementById("usuario-topo").hidden = !logado;
   document.getElementById("usuario-nome").textContent = logado ? `${usuario.nome} · ${PAPEIS[usuario.papel]}` : "";
-  if (!logado) abas.innerHTML = "";
+  if (!logado) {
+    abas.innerHTML = "";
+    pararNotificacoes();
+  }
 }
 
 function entrarNoApp(u) {
@@ -175,6 +178,7 @@ function entrarNoApp(u) {
   mostrarCabecalho(true);
   desenharAbas();
   atualizar();
+  iniciarNotificacoes();
 }
 
 function formAcesso({ titulo, texto, campos, botao, enviar }) {
@@ -244,6 +248,8 @@ function telaPrimeiroAcesso() {
 }
 
 document.getElementById("botao-sair").addEventListener("click", async () => {
+  // O aparelho deixa de receber os avisos deste usuário (importante em celular compartilhado).
+  await desvincularAparelho();
   await api("/api/auth/logout", { method: "POST" });
   usuario = null;
   telaLogin();
@@ -886,6 +892,230 @@ function formUsuario(u, prestadores, usuarios) {
     avisar("Acesso salvo.");
     fecharModal();
     atualizar();
+  });
+}
+
+// ---------- Notificações ----------
+
+const PREFERENCIAS = [
+  ["resumo_diario", "Resumo diário das tarefas", ["dono", "prestador"]],
+  ["tarefa_atribuida", "Nova tarefa atribuída a mim", ["prestador"]],
+  ["tarefa_conferir", "Execução para conferir (avaliação da foto ou concluída sem foto)", ["dono"]],
+  ["tarefa_concluida", "Toda tarefa concluída", ["dono"]],
+  ["estoque_baixo", "Produto abaixo do estoque mínimo", ["dono"]],
+];
+const suportaPush = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+let timerNotificacoes = null;
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch((e) => console.warn("Service worker não registrado:", e));
+  // Toque em uma notificação com o app já aberto.
+  navigator.serviceWorker.addEventListener("message", (e) => {
+    if (e.data?.abrir && usuario) seguirLink(e.data.abrir);
+  });
+}
+
+document.getElementById("botao-notificacoes").addEventListener("click", () => abrirNotificacoes());
+document.addEventListener("visibilitychange", () => { if (!document.hidden) atualizarContador(); });
+
+async function atualizarContador() {
+  if (!usuario) return;
+  try {
+    const { nao_lidas } = await api("/api/notificacoes/contagem");
+    const el = document.getElementById("contador-notificacoes");
+    el.textContent = nao_lidas > 99 ? "99+" : String(nao_lidas);
+    el.hidden = nao_lidas === 0;
+  } catch (_) { /* sem conexão: tenta de novo no próximo ciclo */ }
+}
+
+function iniciarNotificacoes() {
+  clearInterval(timerNotificacoes);
+  atualizarContador();
+  timerNotificacoes = setInterval(atualizarContador, 60000);
+  religarAparelho();
+  // Aberto a partir de uma notificação push.
+  const abrir = new URLSearchParams(location.search).get("abrir");
+  if (abrir) {
+    history.replaceState(null, "", "/");
+    seguirLink(abrir);
+  }
+}
+
+function pararNotificacoes() {
+  clearInterval(timerNotificacoes);
+  const el = document.getElementById("contador-notificacoes");
+  if (el) el.hidden = true;
+}
+
+function seguirLink(link) {
+  const [tipo, valor] = String(link).split(":");
+  if (tipo === "tarefa") {
+    abrirTarefa(Number(valor));
+  } else if (tipo === "aba" && abasDoUsuario().some(([id]) => id === valor)) {
+    if (modal.open) fecharModal();
+    abaAtual = valor;
+    desenharAbas();
+    atualizar();
+  }
+}
+
+function quando(texto) {
+  const d = new Date(texto);
+  const hoje = new Date();
+  const hora = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return d.toDateString() === hoje.toDateString() ? hora : `${d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} ${hora}`;
+}
+
+async function abrirNotificacoes() {
+  const lista = await api("/api/notificacoes");
+  abrirModal(`
+    <h2>Notificações</h2>
+    <div class="acoes" style="margin-top:0">
+      <button class="botao" id="ler-todas" ${lista.some((n) => !n.lida) ? "" : "disabled"}>Marcar todas como lidas</button>
+      <button class="botao" id="abrir-preferencias">⚙ Preferências</button>
+    </div>
+    <div style="margin-top:12px">
+      ${lista.map((n) => `
+        <div class="cartao clicavel notificacao ${n.lida ? "" : "nao-lida"}" data-notificacao="${n.id}">
+          <div class="linha"><strong>${esc(n.titulo)}</strong><span class="suave">${esc(quando(n.criada_em))}</span></div>
+          <div class="mensagem">${esc(n.mensagem)}</div>
+        </div>`).join("") || `<div class="vazio">Nenhuma notificação por enquanto.</div>`}
+    </div>
+  `);
+  modalCorpo.querySelector("#abrir-preferencias").addEventListener("click", () => abrirPreferencias());
+  modalCorpo.querySelector("#ler-todas").addEventListener("click", async () => {
+    await api("/api/notificacoes/marcar-todas-lidas", { method: "POST" });
+    atualizarContador();
+    abrirNotificacoes();
+  });
+  modalCorpo.querySelectorAll("[data-notificacao]").forEach((el) => el.addEventListener("click", async () => {
+    const n = lista.find((x) => x.id === Number(el.dataset.notificacao));
+    if (!n.lida) await api(`/api/notificacoes/${n.id}/lida`, { method: "POST" });
+    atualizarContador();
+    if (n.link) seguirLink(n.link);
+    else abrirNotificacoes();
+  }));
+}
+
+function chaveParaBytes(base64url) {
+  const base64 = (base64url + "=".repeat((4 - (base64url.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/");
+  return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+}
+
+async function inscricaoAtual() {
+  if (!suportaPush) return null;
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+
+async function ativarPush() {
+  const permissao = await Notification.requestPermission();
+  if (permissao !== "granted") {
+    avisar("Permissão negada. Libere as notificações deste site nas configurações do navegador.", true);
+    return;
+  }
+  const reg = await navigator.serviceWorker.ready;
+  const { chave_publica } = await api("/api/notificacoes/push/chave");
+  let inscricao;
+  try {
+    inscricao = await reg.pushManager.getSubscription()
+      || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: chaveParaBytes(chave_publica) });
+  } catch (e) {
+    avisar(`O navegador não conseguiu ativar as notificações (${e.message}). Tente novamente mais tarde.`, true);
+    return;
+  }
+  await api("/api/notificacoes/push/inscricao", { method: "POST", json: inscricao.toJSON() });
+  avisar("Notificações ativadas neste aparelho.");
+}
+
+async function desativarPush() {
+  const inscricao = await inscricaoAtual();
+  if (inscricao) {
+    await api("/api/notificacoes/push/cancelar", { method: "POST", json: { endpoint: inscricao.endpoint } });
+    await inscricao.unsubscribe();
+  }
+  avisar("Notificações desativadas neste aparelho.");
+}
+
+// Ao entrar: se o aparelho já tinha permissão, passa a receber os avisos de quem está logado.
+async function religarAparelho() {
+  try {
+    if (!suportaPush || Notification.permission !== "granted") return;
+    const inscricao = await inscricaoAtual();
+    if (inscricao) await api("/api/notificacoes/push/inscricao", { method: "POST", json: inscricao.toJSON() });
+  } catch (e) {
+    console.warn("Não foi possível religar o push:", e);
+  }
+}
+
+async function desvincularAparelho() {
+  try {
+    const inscricao = await inscricaoAtual();
+    if (inscricao) await api("/api/notificacoes/push/cancelar", { method: "POST", json: { endpoint: inscricao.endpoint } });
+  } catch (_) { /* sair não pode falhar por causa disso */ }
+}
+
+async function abrirPreferencias() {
+  const prefs = await api("/api/notificacoes/preferencias");
+  const inscricao = await inscricaoAtual().catch(() => null);
+  let avisoPush = "";
+  if (!window.isSecureContext) {
+    avisoPush = "Notificações no aparelho exigem que o app seja acessado por HTTPS (ou localhost).";
+  } else if (!suportaPush) {
+    avisoPush = "Este navegador não suporta notificações no aparelho. No iPhone, adicione o app à Tela de Início "
+      + "(Compartilhar → Adicionar à Tela de Início) e abra por lá.";
+  }
+  const estadoPush = inscricao ? "Ativadas neste aparelho." : suportaPush && Notification.permission === "denied"
+    ? "Bloqueadas nas configurações do navegador." : "Desativadas neste aparelho.";
+
+  abrirModal(`
+    <h2>Preferências de notificação</h2>
+    <form id="form-prefs">
+      <div class="opcoes coluna">
+        ${PREFERENCIAS.filter(([, , papeis]) => papeis.includes(usuario.papel)).map(([campo, rotulo]) => `
+          <label><input type="checkbox" name="${campo}" ${prefs[campo] ? "checked" : ""}> ${esc(rotulo)}</label>`).join("")}
+      </div>
+      <div class="secao-prefs">
+        <h3 style="margin-top:0">No celular / computador</h3>
+        ${avisoPush ? `<p class="suave">${esc(avisoPush)}</p>` : `
+          <p class="suave">${esc(estadoPush)} As notificações aparecem mesmo com o app fechado.</p>
+          <div class="opcoes coluna"><label><input type="checkbox" name="push" ${prefs.push ? "checked" : ""}>
+            Enviar avisos para os meus aparelhos</label></div>
+          <div class="acoes">
+            ${inscricao ? `<button class="botao" type="button" id="push-desativar">Desativar neste aparelho</button>`
+              : `<button class="botao primario" type="button" id="push-ativar">Ativar neste aparelho</button>`}
+            <button class="botao" type="button" id="push-teste">Enviar teste</button>
+          </div>`}
+      </div>
+      ${ehDono() ? `
+        <div class="secao-prefs">
+          <p class="suave">O resumo diário é enviado automaticamente pela manhã. Para enviá-lo agora:</p>
+          <button class="botao" type="button" id="enviar-resumo">Enviar resumo do dia agora</button>
+        </div>` : ""}
+      <div class="acoes"><button class="botao primario" type="submit">Salvar preferências</button></div>
+    </form>
+  `);
+
+  const form = modalCorpo.querySelector("#form-prefs");
+  form.querySelector("#push-ativar")?.addEventListener("click", async () => { await ativarPush(); abrirPreferencias(); });
+  form.querySelector("#push-desativar")?.addEventListener("click", async () => { await desativarPush(); abrirPreferencias(); });
+  form.querySelector("#push-teste")?.addEventListener("click", async () => {
+    const r = await api("/api/notificacoes/teste", { method: "POST" });
+    avisar(r.aparelhos ? `Teste enviado para ${r.aparelhos} aparelho(s).` : "Teste criado na central (nenhum aparelho ativado).");
+    atualizarContador();
+  });
+  form.querySelector("#enviar-resumo")?.addEventListener("click", async () => {
+    const r = await api("/api/notificacoes/resumo", { method: "POST" });
+    avisar(r.enviadas ? `Resumo enviado para ${r.enviadas} pessoa(s).` : "Todos já receberam o resumo de hoje.");
+    atualizarContador();
+  });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const corpo = { ...prefs };
+    form.querySelectorAll("input[type=checkbox]").forEach((c) => { corpo[c.name] = c.checked; });
+    await api("/api/notificacoes/preferencias", { method: "PUT", json: corpo });
+    avisar("Preferências salvas.");
+    abrirNotificacoes();
   });
 }
 

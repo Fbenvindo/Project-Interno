@@ -193,3 +193,24 @@ button.botao.pequeno { padding: 4px 10px; font-size: 0.85rem; }
 .acesso h2 { margin-top: 0; }
 .acesso button[type=submit] { width: 100%; }
 .erro-form { color: var(--erro); min-height: 1.4em; font-size: 0.9rem; }
+
+.sino { position: relative; }
+#contador-notificacoes {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--erro);
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 18px;
+  text-align: center;
+}
+#contador-notificacoes[hidden] { display: none; }
+.notificacao.nao-lida { border-left: 4px solid var(--primaria); }
+.notificacao .mensagem { white-space: pre-line; margin: 4px 0; }
+.secao-prefs { border-top: 1px solid var(--borda); padding-top: 12px; margin-top: 12px; }
+.opcoes.coluna { flex-direction: column; gap: 8px; }
