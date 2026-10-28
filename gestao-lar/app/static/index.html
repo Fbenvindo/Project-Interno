@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gestão do Lar</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topo">
+    <h1>Gestão do Lar</h1>
+    <nav id="abas">
+      <button data-aba="hoje" class="ativa">Hoje</button>
+      <button data-aba="cronograma">Cronograma</button>
+      <button data-aba="atividades">Atividades</button>
+      <button data-aba="estoque">Estoque</button>
+      <button data-aba="prestadores">Prestadores</button>
+    </nav>
+  </header>
+
+  <main id="conteudo"></main>
+
+  <dialog id="modal">
+    <div id="modal-corpo"></div>
+  </dialog>
+
+  <div id="aviso" role="status" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
