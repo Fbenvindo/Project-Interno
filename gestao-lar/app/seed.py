@@ -1,7 +1,5 @@
 """Popula o banco com dados de exemplo: python -m app.seed"""
 
-from datetime import date
-
 from sqlalchemy import select
 
 from .cronograma import gerar_tarefas
@@ -9,6 +7,7 @@ from .database import SessionLocal, criar_tabelas
 from .estoque import movimentar
 from .auth import gerar_hash
 from .models import Atividade, AtividadeRecurso, Prestador, Recurso, Usuario
+from .relogio import hoje
 
 # Apenas para demonstração: troque as senhas antes de usar de verdade.
 SENHA_DONO_DEMO = "dono123"
@@ -115,7 +114,7 @@ def popular() -> None:
             dados = dict(dados)
             nomes_prestadores = dados.pop("prestadores")
             itens = dados.pop("recursos")
-            a = Atividade(**dados, data_inicio=date.today())
+            a = Atividade(**dados, data_inicio=hoje())
             a.prestadores = [prestadores[n] for n in nomes_prestadores]
             a.recursos = [AtividadeRecurso(recurso=recursos[n], quantidade=q) for n, q in itens]
             db.add(a)

@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import os
-from datetime import date, datetime, time, timedelta
+from datetime import date, time, timedelta
 
 from sqlalchemy import delete, event, select
 from sqlalchemy.orm import Session
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from . import push
 from .database import SessionLocal
 from .models import Notificacao, PreferenciaNotificacao, Recurso, Tarefa, Usuario
+from .relogio import agora, hoje
 
 log = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ def estoque_baixo(db: Session, recurso: Recurso) -> None:
 
 def tarefa_atribuida(db: Session, tarefa: Tarefa, autor: Usuario) -> None:
     destino = usuario_do_prestador(db, tarefa.prestador_id)
-    if destino is None or destino.id == autor.id or tarefa.data < date.today():
+    if destino is None or destino.id == autor.id or tarefa.data < hoje():
         return
     notificar(
         db, [destino], "tarefa_atribuida",
@@ -155,20 +156,20 @@ def _resumo_dono(db: Session, tarefas: list[Tarefa], atrasadas: int) -> tuple[st
     return "Resumo do dia", "\n".join(linhas)
 
 
-def enviar_resumos(db: Session, hoje: date | None = None) -> int:
+def enviar_resumos(db: Session, dia: date | None = None) -> int:
     """Um resumo por usuário por dia (repetir a chamada no mesmo dia não duplica)."""
     from .cronograma import gerar_tarefas
 
-    hoje = hoje or date.today()
-    gerar_tarefas(db, hoje)
+    dia = dia or hoje()
+    gerar_tarefas(db, dia)
     ordem = {"manha": 0, "tarde": 1, "noite": 2, "qualquer": 3}
     tarefas_hoje = sorted(
-        db.scalars(select(Tarefa).where(Tarefa.data == hoje, Tarefa.status.in_(ABERTAS))).unique(),
+        db.scalars(select(Tarefa).where(Tarefa.data == dia, Tarefa.status.in_(ABERTAS))).unique(),
         key=lambda t: (ordem.get(t.periodo, 9), t.atividade.nome),
     )
-    atrasadas = db.scalars(select(Tarefa).where(Tarefa.data < hoje, Tarefa.status.in_(ABERTAS))).unique().all()
+    atrasadas = db.scalars(select(Tarefa).where(Tarefa.data < dia, Tarefa.status.in_(ABERTAS))).unique().all()
 
-    chave = f"resumo:{hoje.isoformat()}"
+    chave = f"resumo:{dia.isoformat()}"
     enviadas = 0
     for u in db.scalars(select(Usuario).where(Usuario.ativo.is_(True))).all():
         if u.papel == "prestador":
@@ -182,7 +183,7 @@ def enviar_resumos(db: Session, hoje: date | None = None) -> int:
             enviadas += len(notificar(db, [u], "resumo_diario", *resumo, link="aba:hoje", chave=chave))
 
     db.execute(delete(Notificacao).where(
-        Notificacao.lida.is_(True), Notificacao.criada_em < datetime.now() - timedelta(days=RETENCAO_DIAS)
+        Notificacao.lida.is_(True), Notificacao.criada_em < agora() - timedelta(days=RETENCAO_DIAS)
     ))
     db.commit()
     return enviadas
@@ -203,9 +204,9 @@ async def agendador(intervalo: int = 60) -> None:
     """Verifica a cada minuto se já passou do horário do resumo diário."""
     while True:
         try:
-            agora = datetime.now()
-            if agora.time() >= HORA_RESUMO and _ultimo_resumo != agora.date():
-                await asyncio.to_thread(_rodar_resumo, agora.date())
+            momento = agora()
+            if momento.time() >= HORA_RESUMO and _ultimo_resumo != momento.date():
+                await asyncio.to_thread(_rodar_resumo, momento.date())
         except Exception:  # noqa: BLE001 - o agendador não pode parar
             log.exception("Falha no agendador de notificações")
         await asyncio.sleep(intervalo)

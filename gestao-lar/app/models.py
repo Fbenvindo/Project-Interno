@@ -1,9 +1,12 @@
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Column, Date, DateTime, Float, ForeignKey, String, Table, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON, Column, Date, DateTime, Float, ForeignKey, LargeBinary, String, Table, Text, UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
+from .relogio import agora, hoje
 
 TIPOS_ATIVIDADE = (
     "limpeza", "refeicao", "organizacao", "lavanderia", "manutencao",
@@ -80,11 +83,11 @@ class Atividade(Base):
     # Dias da semana no padrão do Python (0 = segunda ... 6 = domingo), ex.: "0,2,4".
     dias_semana: Mapped[str | None] = mapped_column(String(20))
     dia_mes: Mapped[int | None]
-    data_inicio: Mapped[date] = mapped_column(Date, default=date.today)
+    data_inicio: Mapped[date] = mapped_column(Date, default=hoje)
     data_fim: Mapped[date | None] = mapped_column(Date)
     ativa: Mapped[bool] = mapped_column(default=True)
     foto_referencia: Mapped[str | None] = mapped_column(String(255))
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
 
     prestadores: Mapped[list[Prestador]] = relationship(
         secondary=atividade_prestadores, order_by=Prestador.id, lazy="selectin"
@@ -137,7 +140,7 @@ class MovimentoEstoque(Base):
     tipo: Mapped[str] = mapped_column(String(20))
     tarefa_id: Mapped[int | None] = mapped_column(ForeignKey("tarefas.id", ondelete="SET NULL"))
     observacao: Mapped[str | None] = mapped_column(String(255))
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
 
 
 class Usuario(Base):
@@ -154,7 +157,7 @@ class Usuario(Base):
         ForeignKey("prestadores.id", ondelete="CASCADE"), unique=True
     )
     ativo: Mapped[bool] = mapped_column(default=True)
-    criado_em: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
 
     prestador: Mapped[Prestador | None] = relationship(lazy="joined")
 
@@ -171,7 +174,7 @@ class Sessao(Base):
     # Guardamos apenas o hash do token; o token em si fica só no cookie do navegador.
     token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), index=True)
-    criada_em: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    criada_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
     expira_em: Mapped[datetime] = mapped_column(DateTime)
 
     usuario: Mapped[Usuario] = relationship(lazy="joined")
@@ -196,7 +199,7 @@ class Notificacao(Base):
     link: Mapped[str | None] = mapped_column(String(60))
     chave: Mapped[str | None] = mapped_column(String(80))
     lida: Mapped[bool] = mapped_column(default=False)
-    criada_em: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, index=True)
+    criada_em: Mapped[datetime] = mapped_column(DateTime, default=agora, index=True)
 
 
 class PreferenciaNotificacao(Base):
@@ -223,4 +226,24 @@ class InscricaoPush(Base):
     p256dh: Mapped[str] = mapped_column(String(200))
     auth: Mapped[str] = mapped_column(String(100))
     aparelho: Mapped[str | None] = mapped_column(String(200))
-    criada_em: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    criada_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
+
+
+class Arquivo(Base):
+    """Fotos guardadas no próprio banco (servidores serverless não têm disco persistente)."""
+
+    __tablename__ = "arquivos"
+
+    nome: Mapped[str] = mapped_column(String(80), primary_key=True)
+    tipo: Mapped[str] = mapped_column(String(40), default="image/jpeg")
+    conteudo: Mapped[bytes] = mapped_column(LargeBinary)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=agora)
+
+
+class Configuracao(Base):
+    """Valores internos do sistema (ex.: chave das notificações push)."""
+
+    __tablename__ = "configuracoes"
+
+    chave: Mapped[str] = mapped_column(String(60), primary_key=True)
+    valor: Mapped[str] = mapped_column(Text)

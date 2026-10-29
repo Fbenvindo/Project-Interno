@@ -90,6 +90,24 @@ async function api(caminho, opcoes = {}) {
   return resp.status === 204 ? null : resp.json();
 }
 
+// Reduz a foto no próprio aparelho antes do envio: fotos de celular passam de 4 MB, acima do
+// limite de upload de servidores como a Vercel, e o servidor não precisa de mais que isso.
+async function reduzirImagem(arquivo, ladoMaximo = 1600, qualidade = 0.85) {
+  try {
+    const bitmap = await createImageBitmap(arquivo, { imageOrientation: "from-image" });
+    const escala = Math.min(1, ladoMaximo / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * escala);
+    canvas.height = Math.round(bitmap.height * escala);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise((ok) => canvas.toBlob(ok, "image/jpeg", qualidade));
+    return blob || arquivo;
+  } catch (_) {
+    return arquivo; // formato que o navegador não decodifica: envia o original
+  }
+}
+
 function abrirModal(html) {
   modalCorpo.innerHTML = `<button class="botao fechar" data-fechar>✕</button>${html}`;
   if (!modal.open) modal.showModal();
@@ -428,7 +446,7 @@ async function abrirTarefa(id) {
     const arquivo = e.target.files[0];
     if (!arquivo) return;
     const form = new FormData();
-    form.append("foto", arquivo);
+    form.append("foto", await reduzirImagem(arquivo), "foto.jpg");
     avisar("Analisando a foto...");
     const r = await api(`/api/tarefas/${id}/foto`, { method: "POST", body: form });
     avisar(`Análise: ${AVALIACOES[r.avaliacao]}`);
@@ -573,7 +591,7 @@ async function formAtividade(a = null) {
 
   form.querySelector("#foto-referencia")?.addEventListener("change", async (e) => {
     const dados = new FormData();
-    dados.append("foto", e.target.files[0]);
+    dados.append("foto", await reduzirImagem(e.target.files[0]), "foto.jpg");
     const atualizada = await api(`/api/atividades/${a.id}/referencia`, { method: "POST", body: dados });
     avisar("Foto de referência salva.");
     formAtividade(atualizada);

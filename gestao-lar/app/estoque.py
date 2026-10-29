@@ -1,10 +1,11 @@
-from datetime import date, timedelta
+from datetime import timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import notificacoes
 from .models import MovimentoEstoque, Recurso, Tarefa
+from .relogio import hoje
 
 
 def movimentar(db: Session, recurso: Recurso, tipo: str, quantidade: float,
@@ -35,10 +36,10 @@ def movimentar(db: Session, recurso: Recurso, tipo: str, quantidade: float,
 
 def lista_compras(db: Session, dias: int = 7) -> list[dict]:
     """Sugere compras: consumo previsto nas tarefas pendentes + estoque mínimo - saldo."""
-    hoje = date.today()
+    dia = hoje()
     previsto: dict[int, float] = {}
     tarefas = db.scalars(select(Tarefa).where(
-        Tarefa.data.between(hoje, hoje + timedelta(days=dias)),
+        Tarefa.data.between(dia, dia + timedelta(days=dias)),
         Tarefa.status.in_(("pendente", "em_andamento")),
     )).unique()
     for t in tarefas:

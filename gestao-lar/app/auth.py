@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from fastapi import Depends, HTTPException, Request, Response
 from sqlalchemy import delete
@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from .database import get_db
 from .models import Sessao, Usuario
+from .relogio import agora
 
 COOKIE_SESSAO = "lar_sessao"
 DURACAO_SESSAO = timedelta(days=30)
@@ -49,17 +50,18 @@ def _hash_token(token: str) -> str:
 
 
 def iniciar_sessao(db: Session, usuario: Usuario, request: Request, response: Response) -> None:
-    agora = datetime.now()
-    db.execute(delete(Sessao).where(Sessao.expira_em < agora))
+    momento = agora()
+    db.execute(delete(Sessao).where(Sessao.expira_em < momento))
     token = secrets.token_urlsafe(32)
-    db.add(Sessao(token_hash=_hash_token(token), usuario_id=usuario.id, expira_em=agora + DURACAO_SESSAO))
+    db.add(Sessao(token_hash=_hash_token(token), usuario_id=usuario.id, expira_em=momento + DURACAO_SESSAO))
     db.commit()
     response.set_cookie(
         COOKIE_SESSAO, token,
         max_age=int(DURACAO_SESSAO.total_seconds()),
         httponly=True,
         samesite="lax",
-        secure=request.url.scheme == "https",
+        # Atrás de proxy (Vercel), o HTTPS termina no proxy e chega como X-Forwarded-Proto.
+        secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https",
     )
 
 
@@ -84,7 +86,7 @@ def usuario_da_requisicao(request: Request, db: Session) -> Usuario | None:
     if not token:
         return None
     sessao = db.get(Sessao, _hash_token(token))
-    if sessao is None or sessao.expira_em < datetime.now() or not sessao.usuario.pode_entrar:
+    if sessao is None or sessao.expira_em < agora() or not sessao.usuario.pode_entrar:
         return None
     return sessao.usuario
 

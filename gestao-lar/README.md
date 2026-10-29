@@ -69,8 +69,9 @@ Notificações lidas com mais de 60 dias são apagadas automaticamente.
   Adicionar à Tela de Início) e aberto por lá.
 - Exige **HTTPS** (ou `localhost`). Acessando pelo IP da rede local via `http://`, só a central
   do app funciona.
-- As chaves VAPID são geradas automaticamente em `data/vapid_privada.pem` no primeiro uso.
-  Guarde esse arquivo: se ele for trocado, os aparelhos precisam ativar as notificações de novo.
+- A chave VAPID (que identifica o servidor junto aos serviços de push) é gerada automaticamente
+  no primeiro uso e guardada no banco. Se ela for trocada, os aparelhos precisam ativar as
+  notificações de novo.
 - Defina `LAR_VAPID_CONTATO` com um e-mail real (`mailto:voce@exemplo.com`); alguns serviços
   de push (como o da Apple) recusam contatos inválidos.
 - Ao sair do app, o aparelho deixa de receber os avisos daquele usuário. Isso é importante em
@@ -101,7 +102,7 @@ ponto e com o mesmo enquadramento da referência.
 
 ## Como rodar
 
-Requer Python 3.11+.
+Requer Python 3.12+.
 
 ```bash
 cd gestao-lar
@@ -123,23 +124,71 @@ Acessos criados pelo `app.seed` (só para demonstração; troque as senhas):
 | `dono` | `dono123` | Dono |
 | `maria`, `joao`, `carlos` | `123456` | Prestadores |
 
-Banco SQLite, fotos e chaves de push ficam em `gestao-lar/data/` (configurável com
-`LAR_DATA_DIR` ou `LAR_DATABASE_URL`).
+Sem `DATABASE_URL`, o app usa um banco SQLite em `gestao-lar/data/lar.db`. As fotos ficam
+dentro do banco, reduzidas para no máximo 1600 px (cerca de 150 a 400 KB cada).
 
 | Variável | Padrão | Uso |
 | --- | --- | --- |
-| `LAR_HORA_RESUMO` | `07:00` | Horário do resumo diário |
+| `DATABASE_URL` (ou `LAR_DATABASE_URL`) | SQLite em `data/` | Banco PostgreSQL, ex.: a URL do Neon |
+| `LAR_FUSO` | `America/Sao_Paulo` | Fuso da casa ("hoje", horários e resumo diário) |
+| `LAR_HORA_RESUMO` | `07:00` | Horário do resumo diário (servidor comum; na Vercel quem manda é o cron) |
 | `LAR_AGENDADOR` | `1` | `0` desliga o envio automático do resumo |
+| `CRON_SECRET` | — | Segredo exigido em `/api/cron/resumo` (Cron da Vercel) |
 | `LAR_VAPID_CONTATO` | `mailto:gestao-lar@example.com` | Contato exigido pelos serviços de push |
-| `LAR_VAPID_PRIVADA` | `data/vapid_privada.pem` | Chave privada VAPID |
+| `LAR_VAPID_CHAVE` | gerada e guardada no banco | Chave VAPID fixa, se preferir (`python -m app.push` gera uma) |
+| `LAR_DATA_DIR` | `data/` (`/tmp/gestao-lar` na Vercel) | Pasta de dados locais |
 
-> Para usar a câmera do celular direto no navegador em produção, sirva o app por HTTPS.
+## Publicar na Vercel com banco Neon
+
+O app já vem preparado para a Vercel (plano Hobby serve) com PostgreSQL do Neon:
+
+- **Funções Python:** a Vercel detecta `app/main.py` sozinha (FastAPI) e o pacote fica com cerca
+  de 300 MB, abaixo do limite de 500 MB para funções Python.
+- **Fotos:** ficam no banco, porque a Vercel não tem disco permanente.
+- **Resumo diário:** quem dispara é o Cron da Vercel (`vercel.json`), já que não há processo
+  rodando continuamente.
+- **Fuso horário:** como a Vercel roda em UTC e não deixa mudar a variável `TZ`, o app usa
+  `LAR_FUSO`.
+- **Tamanho das fotos:** o celular reduz a foto antes de enviar, porque a Vercel limita o tamanho
+  do upload. Uma foto de 8 MB vira cerca de 0,4 MB.
+
+### Passo a passo
+
+1. **Projeto na Vercel:** *Add New → Project*, importe o repositório e, em **Root Directory**,
+   escolha `gestao-lar`. O preset FastAPI é detectado automaticamente.
+2. **Banco Neon:** na aba *Storage* do projeto, conecte o Neon. A integração cria a variável
+   `DATABASE_URL`. Se preferir, copie a *connection string* do painel do Neon (de preferência a
+   do host com `-pooler`) e crie `DATABASE_URL` manualmente.
+3. **Variáveis de ambiente** (*Settings → Environment Variables*):
+   - `CRON_SECRET`: um texto aleatório e longo. A Vercel envia esse valor ao chamar o resumo diário.
+   - `LAR_VAPID_CONTATO`: `mailto:seu-email@exemplo.com`.
+   - `LAR_FUSO`: só se a casa não estiver no horário de Brasília.
+4. **Deploy.** As tabelas são criadas sozinhas na primeira visita.
+5. **Primeiro acesso:** abra o endereço do projeto **logo após o deploy** e crie o acesso do dono
+   na tela *Bem-vindo!*. Depois cadastre prestadores e acessos pela aba *Usuários*.
+
+Para popular o Neon com os dados de exemplo (opcional, só para testar), rode no seu computador:
+`DATABASE_URL="<url do Neon>" python -m app.seed`.
+
+### Bom saber
+
+- **O Cron só roda em deploys de produção.** O resumo diário só funciona depois que o código
+  estiver no branch de produção do projeto (normalmente `main`).
+- **Horário do cron:** `0 10 * * *` = 10:00 UTC (07:00 em Brasília). No plano Hobby, a Vercel
+  dispara em algum momento dentro dessa hora, ou seja, o resumo chega entre 07:00 e 07:59.
+  Para outro horário, ajuste `vercel.json`.
+- **Primeira requisição:** depois de um tempo parado, a primeira requisição pode levar alguns
+  segundos (carregamento do OpenCV). As seguintes são rápidas.
+- **Espaço no Neon:** no plano gratuito (0,5 GB) cabem alguns milhares de fotos. Notificações
+  lidas com mais de 60 dias são apagadas automaticamente.
 
 ## Testes
 
 ```bash
 pip install -r requirements-dev.txt
 pytest
+# contra PostgreSQL (como o Neon):
+LAR_TESTE_DATABASE_URL=postgresql://usuario@localhost/lar_teste pytest
 ```
 
 ## Estrutura
@@ -149,7 +198,9 @@ gestao-lar/
 ├── app/
 │   ├── main.py          # FastAPI, rotas, fotos protegidas e arquivos estáticos
 │   ├── auth.py          # Senhas, sessões e permissões (dono x prestador)
-│   ├── models.py        # Prestador, Recurso, Atividade, Tarefa, MovimentoEstoque, Usuario, Sessao
+│   ├── models.py        # Tabelas: tarefas, estoque, usuários, notificações, fotos (Arquivo)
+│   ├── relogio.py       # "Hoje" e "agora" no fuso da casa (LAR_FUSO)
+│   ├── fotos.py         # Fotos reduzidas e guardadas no banco
 │   ├── cronograma.py    # Regras de frequência e lançamento automático
 │   ├── estoque.py       # Movimentos e lista de compras
 │   ├── notificacoes.py  # Avisos, preferências e resumo diário programado
@@ -158,7 +209,8 @@ gestao-lar/
 │   ├── routers/         # Endpoints REST
 │   ├── static/          # Interface web (HTML/CSS/JS, mobile-first, PWA + service worker)
 │   └── seed.py          # Dados de exemplo
-└── tests/
+├── tests/
+└── vercel.json          # Cron do resumo diário na Vercel
 ```
 
 ## Próximos passos sugeridos

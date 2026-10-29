@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import Atividade, Tarefa
+from .relogio import hoje
 
 HORIZONTE_PADRAO_DIAS = 30
 
@@ -66,7 +67,7 @@ def gerar_tarefas(db: Session, inicio: date | None = None, fim: date | None = No
     O prestador de cada tarefa é escolhido em rodízio entre os prestadores ativos
     vinculados à atividade, contando as ocorrências desde a data de início.
     """
-    inicio = inicio or date.today()
+    inicio = inicio or hoje()
     fim = fim or inicio + timedelta(days=HORIZONTE_PADRAO_DIAS)
 
     if atividade is not None:
@@ -98,10 +99,10 @@ def gerar_tarefas(db: Session, inicio: date | None = None, fim: date | None = No
 
 def regenerar_futuras(db: Session, atividade: Atividade) -> int:
     """Após editar uma atividade, refaz as tarefas pendentes a partir de hoje."""
-    hoje = date.today()
+    dia = hoje()
     for t in db.scalars(select(Tarefa).where(
-        Tarefa.atividade_id == atividade.id, Tarefa.data >= hoje, Tarefa.status == "pendente"
+        Tarefa.atividade_id == atividade.id, Tarefa.data >= dia, Tarefa.status == "pendente"
     )):
         db.delete(t)
     db.flush()
-    return gerar_tarefas(db, hoje, atividade=atividade)
+    return gerar_tarefas(db, dia, atividade=atividade)

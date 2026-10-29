@@ -3,6 +3,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
+from .relogio import hoje
+
 TipoAtividade = Literal[
     "limpeza", "refeicao", "organizacao", "lavanderia", "manutencao",
     "jardinagem", "compras", "cuidados", "outro",
@@ -76,7 +78,7 @@ class AtividadeIn(BaseModel):
     frequencia: Frequencia = "semanal"
     dias_semana: list[int] = []
     dia_mes: int | None = Field(default=None, ge=1, le=31)
-    data_inicio: date = Field(default_factory=date.today)
+    data_inicio: date = Field(default_factory=hoje)
     data_fim: date | None = None
     ativa: bool = True
     prestador_ids: list[int] = []

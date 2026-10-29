@@ -1,7 +1,7 @@
 import base64
 import json
 import os
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 import pywebpush
@@ -11,10 +11,11 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from app import push
 from app.database import SessionLocal
 from app.notificacoes import enviar_resumos
+from app.relogio import hoje
 from conftest import bagunca, cena, jpg
 from test_auth import entrar
 
-HOJE = date.today()
+HOJE = hoje()
 
 
 def preparar(client, estoque=500, consumo=50):

@@ -7,6 +7,9 @@ from pathlib import Path
 os.environ["LAR_DATA_DIR"] = tempfile.mkdtemp(prefix="lar_teste_")
 os.environ["LAR_PBKDF2_ITERACOES"] = "1000"  # hash de senha rápido nos testes
 os.environ["LAR_AGENDADOR"] = "0"  # sem resumo diário automático durante os testes
+# Para testar contra PostgreSQL (como o Neon): LAR_TESTE_DATABASE_URL=postgresql://... pytest
+if os.environ.get("LAR_TESTE_DATABASE_URL"):
+    os.environ["LAR_DATABASE_URL"] = os.environ["LAR_TESTE_DATABASE_URL"]
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import cv2  # noqa: E402
@@ -36,6 +39,9 @@ def client(anonimo):
     r = anonimo.post("/api/auth/primeiro-acesso", json={"nome": "Dona", "login": "dona", "senha": SENHA_DONO})
     assert r.status_code == 201
     return anonimo
+
+
+AGENDAR_PUSH_ORIGINAL = push.agendar
 
 
 @pytest.fixture(autouse=True)

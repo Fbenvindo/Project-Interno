@@ -1,8 +1,7 @@
-from datetime import date
-
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.relogio import hoje
 from conftest import SENHA_DONO, cena, jpg
 
 
@@ -24,7 +23,7 @@ def preparar(client):
         assert r.status_code == 201, r.text
     client.post("/api/atividades", json={
         "nome": "Limpar cozinha", "tipo": "limpeza", "frequencia": "diaria",
-        "data_inicio": str(date.today()), "prestador_ids": [ana["id"], bia["id"]],
+        "data_inicio": str(hoje()), "prestador_ids": [ana["id"], bia["id"]],
     })
     tarefas = client.get("/api/cronograma").json()
     da_ana = next(t for t in tarefas if t["prestador"]["nome"] == "Ana")

@@ -1,7 +1,10 @@
 """Envio de Web Push (notificações no celular/navegador, mesmo com o app fechado).
 
-As chaves VAPID são geradas no primeiro uso e guardadas em DATA_DIR. Também podem
-ser fornecidas pela variável LAR_VAPID_PRIVADA (caminho de um arquivo PEM).
+Chave VAPID (identifica este servidor junto aos serviços de push), em ordem de prioridade:
+- LAR_VAPID_CHAVE: a chave em texto (gere com `python -m app.push`);
+- arquivo PEM em LAR_VAPID_PRIVADA ou data/vapid_privada.pem, se existir (versões anteriores);
+- senão, é gerada no primeiro uso e guardada no banco, o que também funciona em serverless,
+  onde não há disco persistente e todas as instâncias precisam usar a mesma chave.
 """
 
 import base64
@@ -15,12 +18,14 @@ from cryptography.hazmat.primitives import serialization
 from py_vapid import Vapid
 from pywebpush import WebPushException, webpush
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 
-from .database import DATA_DIR, SessionLocal
-from .models import InscricaoPush
+from .database import DATA_DIR, SERVERLESS, SessionLocal
+from .models import Configuracao, InscricaoPush
 
 log = logging.getLogger(__name__)
 
+CHAVE_TEXTO = os.environ.get("LAR_VAPID_CHAVE")
 ARQUIVO_CHAVE = os.environ.get("LAR_VAPID_PRIVADA", str(DATA_DIR / "vapid_privada.pem"))
 # Os serviços de push exigem um contato (mailto: ou https:) do responsável pelo app.
 CONTATO = os.environ.get("LAR_VAPID_CONTATO", "mailto:gestao-lar@example.com")
@@ -31,11 +36,25 @@ _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="push")
 
 @lru_cache
 def vapid() -> Vapid:
-    if not os.path.exists(ARQUIVO_CHAVE):
-        nova = Vapid()
-        nova.generate_keys()
-        nova.save_key(ARQUIVO_CHAVE)
-    return Vapid.from_file(ARQUIVO_CHAVE)
+    if CHAVE_TEXTO:
+        return Vapid.from_string(CHAVE_TEXTO)
+    if os.path.exists(ARQUIVO_CHAVE):
+        return Vapid.from_file(ARQUIVO_CHAVE)
+    return Vapid.from_string(_chave_do_banco())
+
+
+def _chave_do_banco() -> str:
+    with SessionLocal() as db:
+        existente = db.get(Configuracao, "vapid_chave")
+        if existente is not None:
+            return existente.valor
+        db.add(Configuracao(chave="vapid_chave", valor=gerar_chave()))
+        try:
+            db.commit()
+        except IntegrityError:
+            # Outra instância gerou ao mesmo tempo: vale a que foi gravada primeiro.
+            db.rollback()
+        return db.get(Configuracao, "vapid_chave").valor
 
 
 def chave_publica() -> str:
@@ -73,6 +92,28 @@ def enviar_agora(usuario_ids: list[int], conteudo: dict) -> int:
 
 
 def agendar(usuario_ids: list[int], conteudo: dict) -> None:
-    """Envia em segundo plano para não atrasar a resposta da API."""
-    if usuario_ids:
+    """Envia em segundo plano para não atrasar a resposta da API.
+
+    Em serverless a instância pode ser congelada assim que a resposta sai, então o envio
+    acontece antes de responder.
+    """
+    if not usuario_ids:
+        return
+    if SERVERLESS:
+        enviar_agora(usuario_ids, conteudo)
+    else:
         _executor.submit(enviar_agora, usuario_ids, conteudo)
+
+
+def gerar_chave() -> str:
+    """Nova chave VAPID no formato aceito por LAR_VAPID_CHAVE."""
+    nova = Vapid()
+    nova.generate_keys()
+    der = nova.private_key.private_bytes(
+        serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    )
+    return base64.urlsafe_b64encode(der).rstrip(b"=").decode()
+
+
+if __name__ == "__main__":
+    print(gerar_chave())

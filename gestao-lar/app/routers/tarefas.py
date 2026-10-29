@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
@@ -11,6 +11,7 @@ from ..database import get_db
 from ..estoque import movimentar
 from ..fotos import ler_foto, salvar_foto
 from ..models import Prestador, Recurso, Tarefa, Usuario
+from ..relogio import agora, hoje
 from ..schemas import ConcluirIn
 from ..serializacao import tarefa_out
 from ..visao import ImagemInvalida, analisar
@@ -41,14 +42,14 @@ def cronograma(inicio: date | None = None, fim: date | None = None, prestador_id
     """Lista as tarefas do período, lançando automaticamente as que faltarem."""
     if usuario.papel == "prestador":
         prestador_id = usuario.prestador_id
-    inicio = inicio or date.today()
+    inicio = inicio or hoje()
     fim = fim or inicio + timedelta(days=6)
     if fim < inicio or (fim - inicio).days > LIMITE_DIAS:
         raise HTTPException(422, f"Período inválido (máximo de {LIMITE_DIAS} dias)")
 
     # Tarefas de datas passadas não são lançadas retroativamente.
-    if fim >= date.today():
-        gerar_tarefas(db, max(inicio, date.today()), fim)
+    if fim >= hoje():
+        gerar_tarefas(db, max(inicio, hoje()), fim)
 
     q = select(Tarefa).where(Tarefa.data.between(inicio, fim))
     if prestador_id:
@@ -63,28 +64,28 @@ def cronograma(inicio: date | None = None, fim: date | None = None, prestador_id
 def gerar(dias: int = 30, db: Session = Depends(get_db)):
     if not 1 <= dias <= LIMITE_DIAS:
         raise HTTPException(422, f"dias deve estar entre 1 e {LIMITE_DIAS}")
-    hoje = date.today()
-    return {"criadas": gerar_tarefas(db, hoje, hoje + timedelta(days=dias))}
+    dia = hoje()
+    return {"criadas": gerar_tarefas(db, dia, dia + timedelta(days=dias))}
 
 
 @router.get("/painel")
 def painel(usuario: Usuario = Depends(usuario_atual), db: Session = Depends(get_db)):
-    hoje = date.today()
-    gerar_tarefas(db, hoje)
+    dia = hoje()
+    gerar_tarefas(db, dia)
     dono = usuario.papel == "dono"
     filtro = [] if dono else [Tarefa.prestador_id == usuario.prestador_id]
-    tarefas = db.scalars(select(Tarefa).where(Tarefa.data == hoje, *filtro)).unique().all()
+    tarefas = db.scalars(select(Tarefa).where(Tarefa.data == dia, *filtro)).unique().all()
     contagem = {s: 0 for s in ("pendente", "em_andamento", "concluida", "cancelada")}
     for t in tarefas:
         contagem[t.status] = contagem.get(t.status, 0) + 1
     atrasadas = db.scalars(select(Tarefa).where(
-        Tarefa.data < hoje, Tarefa.status.in_(("pendente", "em_andamento")), *filtro
+        Tarefa.data < dia, Tarefa.status.in_(("pendente", "em_andamento")), *filtro
     )).unique().all()
     alertas = db.scalars(select(Recurso).where(
         Recurso.ativo.is_(True), Recurso.estoque_atual <= Recurso.estoque_minimo
     )).all() if dono else []
     return {
-        "data": hoje,
+        "data": dia,
         "tarefas_hoje": contagem,
         "atrasadas": [tarefa_out(t) for t in sorted(atrasadas, key=lambda t: t.data)],
         "alertas_estoque": [
@@ -105,7 +106,7 @@ def iniciar(tarefa_id: int, usuario: Usuario = Depends(usuario_atual), db: Sessi
     t = obter(db, tarefa_id, usuario)
     _exigir_aberta(t)
     t.status = "em_andamento"
-    t.iniciada_em = t.iniciada_em or datetime.now()
+    t.iniciada_em = t.iniciada_em or agora()
     db.commit()
     return tarefa_out(t, detalhada=True)
 
@@ -135,17 +136,17 @@ async def enviar_foto(tarefa_id: int, foto: UploadFile = File(...),
     _exigir_aberta(t)
     dados = await foto.read()
     try:
-        resultado = analisar(dados, ler_foto(t.atividade.foto_referencia))
+        resultado = analisar(dados, ler_foto(db, t.atividade.foto_referencia))
     except ImagemInvalida as e:
         raise HTTPException(422, str(e))
 
-    t.foto = salvar_foto(dados, f"tarefa_{t.id}", foto.filename)
+    t.foto = salvar_foto(db, dados, f"tarefa_{t.id}")
     t.analise = resultado
     t.nota = resultado["nota"]
     t.avaliacao = resultado["avaliacao"]
     if t.status == "pendente":
         t.status = "em_andamento"
-        t.iniciada_em = datetime.now()
+        t.iniciada_em = agora()
     db.commit()
     return tarefa_out(t, detalhada=True)
 
@@ -175,10 +176,10 @@ def concluir(tarefa_id: int, dados: ConcluirIn | None = None,
         movimentar(db, recurso, "consumo", quantidade, tarefa_id=t.id,
                    observacao=f"Tarefa: {t.atividade.nome} ({t.data:%d/%m})")
 
-    agora = datetime.now()
+    momento = agora()
     t.status = "concluida"
-    t.iniciada_em = t.iniciada_em or agora
-    t.concluida_em = agora
+    t.iniciada_em = t.iniciada_em or momento
+    t.concluida_em = momento
     t.observacao = dados.observacao
     notificacoes.tarefa_concluida(db, t, usuario)
     db.commit()

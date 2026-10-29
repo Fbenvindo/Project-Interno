@@ -1,5 +1,6 @@
-from datetime import date, timedelta
+from datetime import timedelta
 
+from app.relogio import hoje
 from conftest import bagunca, cena, jpg
 
 
@@ -12,7 +13,7 @@ def criar_base(client):
     }).json()
     atividade = client.post("/api/atividades", json={
         "nome": "Limpar cozinha", "tipo": "limpeza", "periodo": "manha",
-        "frequencia": "diaria", "data_inicio": str(date.today()),
+        "frequencia": "diaria", "data_inicio": str(hoje()),
         "prestador_ids": [ana["id"], bia["id"]],
         "recursos": [{"recurso_id": detergente["id"], "quantidade": 50}],
     }).json()
@@ -21,22 +22,22 @@ def criar_base(client):
 
 def test_cronograma_gerado_com_rodizio(client):
     ana, bia, _, atividade = criar_base(client)
-    tarefas = client.get("/api/cronograma", params={"fim": str(date.today() + timedelta(days=3))}).json()
-    assert [t["data"] for t in tarefas] == [str(date.today() + timedelta(days=i)) for i in range(4)]
+    tarefas = client.get("/api/cronograma", params={"fim": str(hoje() + timedelta(days=3))}).json()
+    assert [t["data"] for t in tarefas] == [str(hoje() + timedelta(days=i)) for i in range(4)]
     assert [t["prestador"]["nome"] for t in tarefas] == ["Ana", "Bia", "Ana", "Bia"]
     assert atividade["recursos"][0]["nome"] == "Detergente"
 
     # Consultar de novo não duplica tarefas.
-    assert len(client.get("/api/cronograma", params={"fim": str(date.today() + timedelta(days=3))}).json()) == 4
+    assert len(client.get("/api/cronograma", params={"fim": str(hoje() + timedelta(days=3))}).json()) == 4
 
 
 def test_editar_atividade_refaz_tarefas_pendentes(client):
     _, _, _, atividade = criar_base(client)
-    dados = {**atividade, "frequencia": "semanal", "dias_semana": [date.today().weekday()],
+    dados = {**atividade, "frequencia": "semanal", "dias_semana": [hoje().weekday()],
              "prestador_ids": [], "recursos": []}
     dados.pop("id")
     assert client.put(f"/api/atividades/{atividade['id']}", json=dados).status_code == 200
-    tarefas = client.get("/api/cronograma", params={"fim": str(date.today() + timedelta(days=13))}).json()
+    tarefas = client.get("/api/cronograma", params={"fim": str(hoje() + timedelta(days=13))}).json()
     assert len(tarefas) == 2 and tarefas[0]["prestador"] is None
 
 

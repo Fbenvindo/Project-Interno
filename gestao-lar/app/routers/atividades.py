@@ -93,6 +93,6 @@ async def enviar_referencia(atividade_id: int, foto: UploadFile = File(...), db:
         carregar(dados)
     except ImagemInvalida as e:
         raise HTTPException(422, str(e))
-    a.foto_referencia = salvar_foto(dados, f"referencia_{a.id}", foto.filename)
+    a.foto_referencia = salvar_foto(db, dados, f"referencia_{a.id}")
     db.commit()
     return atividade_out(a)

@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+import hmac
+import os
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
@@ -10,6 +13,7 @@ from ..notificacoes import enviar_resumos, notificar, preferencias
 from ..schemas import CancelarPushIn, InscricaoPushIn, NotificacaoOut, PreferenciasNotificacao
 
 router = APIRouter(prefix="/api/notificacoes", tags=["notificações"])
+cron = APIRouter(prefix="/api/cron", tags=["agendamentos"])
 
 
 @router.get("", response_model=list[NotificacaoOut])
@@ -105,4 +109,15 @@ def teste(usuario: Usuario = Depends(usuario_atual), db: Session = Depends(get_d
 @router.post("/resumo", dependencies=[Depends(exigir_dono)])
 def enviar_resumo_agora(db: Session = Depends(get_db)):
     """Envia agora o resumo diário (quem já recebeu hoje não recebe de novo)."""
+    return {"enviadas": enviar_resumos(db)}
+
+
+@cron.get("/resumo")
+def cron_resumo(authorization: str = Header(default=""), db: Session = Depends(get_db)):
+    """Chamado uma vez por dia pelo Cron da Vercel, que envia "Authorization: Bearer <CRON_SECRET>"."""
+    segredo = os.environ.get("CRON_SECRET")
+    if not segredo:
+        raise HTTPException(503, "Defina a variável CRON_SECRET para habilitar o resumo agendado")
+    if not hmac.compare_digest(authorization.encode(), f"Bearer {segredo}".encode()):
+        raise HTTPException(401, "Não autorizado")
     return {"enviadas": enviar_resumos(db)}
