@@ -1,6 +1,6 @@
 // Faixa de ferramentas da aba superior ativa.
 import { Icon } from "./icons";
-import { disciplineOfTab, RIBBON, sameTool, type ActionId, type RibbonButton, type ToolSpec, type TopTab } from "./ribbon";
+import { disciplineOfTab, RIBBON, sameTool, type ActionId, type RibbonButton, type ToolSpec, type TopTab } from "./ribbonConfig";
 
 interface Props {
   tab: TopTab;
