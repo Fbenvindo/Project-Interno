@@ -90,6 +90,18 @@ O traçado proposto aparece em verde antes de gerar. Cada trecho sobe do ponto a
 
 Comprimentos vêm das quantidades IFC (`Qto_*`), depois das propriedades e, por último, da maior dimensão da geometria.
 
+## Instalador para Windows
+
+O GitHub Actions gera o instalador `MEP-BIM-Setup-<versão>.exe` a cada push que altere `apps/mep-bim/` (workflow [`mep-bim-desktop.yml`](../../.github/workflows/mep-bim-desktop.yml)). Antes de empacotar, ele roda a verificação de tipos e os testes.
+
+1. No GitHub, abra **Actions → MEP BIM - instalador Windows** e entre na execução mais recente (com ✅).
+2. Em **Artifacts**, baixe `MEP-BIM-Windows-<n>` (um `.zip` com o `.exe`). O artefato fica disponível por 30 dias.
+3. Execute o instalador: ele pergunta a pasta, cria atalhos na área de trabalho e no menu Iniciar e associa arquivos `.ifc` ao app (duplo clique num IFC abre o MEP BIM).
+
+O instalador ainda não é assinado digitalmente. Na primeira execução, o Windows pode mostrar "O Windows protegeu o computador": clique em **Mais informações → Executar assim mesmo**. Para eliminar esse aviso é preciso um certificado de assinatura de código (pode ser configurado depois como segredo do repositório).
+
+A execução também pode ser disparada manualmente pelo botão **Run workflow**, que só aparece depois que o workflow estiver no branch principal.
+
 ## Como executar
 
 Requisitos: Node.js 20+.

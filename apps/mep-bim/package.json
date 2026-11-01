@@ -20,15 +20,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "sample": "node scripts/generate-sample-ifc.mjs && node scripts/prepare-assets.mjs",
-    "dist:win": "npm run build && electron-builder --win",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:linux": "npm run build && electron-builder --linux"
-  },
-  "dependencies": {
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "three": "0.170.0",
-    "web-ifc": "0.0.72"
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:linux": "npm run build && electron-builder --linux --publish never"
   },
   "devDependencies": {
     "@types/node": "22.10.2",
@@ -39,27 +33,60 @@
     "electron": "33.2.1",
     "electron-builder": "25.1.8",
     "electron-vite": "2.3.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "three": "0.170.0",
     "typescript": "5.7.2",
     "vite": "5.4.11",
-    "vitest": "2.1.8"
+    "vitest": "2.1.8",
+    "web-ifc": "0.0.72"
   },
   "build": {
     "appId": "com.projetointerno.mepbim",
     "productName": "MEP BIM",
+    "copyright": "Project Interno",
     "directories": {
       "output": "release"
     },
     "files": [
       "out/**/*"
     ],
+    "fileAssociations": [
+      {
+        "ext": "ifc",
+        "name": "Modelo IFC",
+        "description": "Modelo BIM (IFC)",
+        "role": "Viewer"
+      }
+    ],
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "MEP-BIM-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MEP BIM"
     },
     "mac": {
       "target": "dmg"
     },
     "linux": {
-      "target": "AppImage"
+      "target": "AppImage",
+      "category": "Graphics"
     }
+  },
+  "author": {
+    "name": "Project Interno"
   }
 }

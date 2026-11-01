@@ -1,0 +1,58 @@
+# Gera o instalador Windows (.exe) do app desktop MEP BIM (apps/mep-bim).
+# Roda a cada push que altere o app e pode ser disparado manualmente na aba Actions.
+# O instalador fica disponível como artefato da execução por 30 dias.
+name: MEP BIM - instalador Windows
+
+on:
+  push:
+    paths:
+      - "apps/mep-bim/**"
+      - ".github/workflows/mep-bim-desktop.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mep-bim-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Testar e empacotar (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/mep-bim
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/mep-bim/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Verificar tipos
+        run: npm run typecheck
+
+      - name: Testes
+        run: npm test
+
+      - name: Gerar instalador
+        run: npm run dist:win
+        env:
+          # Sem certificado de assinatura de código: o Windows exibirá o aviso do SmartScreen.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Publicar instalador como artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: MEP-BIM-Windows-${{ github.run_number }}
+          path: apps/mep-bim/release/*.exe
+          if-no-files-found: error
+          retention-days: 30
