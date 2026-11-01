@@ -75,6 +75,7 @@ const P: Record<string, ReactNode> = {
       <path d="M8.5 8.5 L20 18 M8.5 15.5 L20 6" />
     </>
   ),
+  selecionar: <path d="M5 3 L19 12 L12.5 13.5 L16 20.5 L13.5 21.5 L10 14.5 L5 19 Z" />,
   propriedades: (
     <>
       <circle cx="12" cy="12" r="9" />

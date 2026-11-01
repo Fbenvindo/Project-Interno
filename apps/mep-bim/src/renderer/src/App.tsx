@@ -8,7 +8,6 @@ import type { Discipline, ElementInfo, Vec3 } from "../../core/types";
 import { loadIfc, type LoadedModel } from "../../ifc/loadIfc";
 import { desktop, getIfcApi, openIfc } from "./platform";
 import { Viewer, type ColorMode } from "./viewer/Viewer";
-import { PropertiesPanel } from "./components/PropertiesPanel";
 import { QuantitiesPanel } from "./components/QuantitiesPanel";
 import { ClashPanel } from "./components/ClashPanel";
 import { CalcPanel } from "./components/CalcPanel";
@@ -29,6 +28,8 @@ import { defaultTitleBlockId, titleBlockById, useTitleBlocks } from "./planta/ti
 import { useProjectFiles } from "./locacao/useProjectFiles";
 import { EMPTY_FILTERS, Navigator, NO_STOREY, type Filters } from "./shell/Navigator";
 import { Ribbon } from "./shell/Ribbon";
+import { ParamsPanel } from "./shell/ParamsPanel";
+import { makeCeilingResolver, makeSlabProbe } from "./locacao/ceiling";
 import { Icon, LogoMark } from "./shell/icons";
 import { DISCIPLINE_TABS, TOP_TABS, type ActionId, type DisciplineTab, type Tool, type ToolSpec, type TopTab } from "./shell/ribbonConfig";
 
@@ -90,6 +91,9 @@ export function App() {
   const [toolDisc, setToolDisc] = useState<DisciplineTab | null>(null);
   const [view, setView] = useState<View>("3d");
   const [leftOpen, setLeftOpen] = useState(true);
+  /** Coluna esquerda: Propriedades (em cima) e Navegador (embaixo), cada um recolhível. */
+  const [propsOpen, setPropsOpen] = useState(true);
+  const [navOpen, setNavOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [theme, setTheme] = useState<Theme>(readTheme);
   const [fitSignal, setFitSignal] = useState(0);
@@ -517,9 +521,16 @@ export function App() {
           setView("3d");
           setSectionOpen((o) => !(o && view === "3d"));
           return;
+        case "propriedades":
+          // Mostra/oculta a paleta de propriedades (abre a coluna esquerda se estiver fechada).
+          if (!leftOpen) {
+            setLeftOpen(true);
+            setPropsOpen(true);
+          } else setPropsOpen((o) => !o);
+          return;
       }
     },
-    [handleOpen, handleSample, files, view],
+    [handleOpen, handleSample, files, view, leftOpen],
   );
 
   const pressed: Partial<Record<ActionId, boolean>> = {
@@ -529,6 +540,7 @@ export function App() {
     vistaPlanta: view === "planta",
     vista3d: view === "3d",
     corte: view === "3d" && (sectionOpen || sectionActive),
+    propriedades: leftOpen && propsOpen,
   };
 
   // Mensagens dos arquivos de projeto somem sozinhas.
@@ -541,7 +553,10 @@ export function App() {
   const disc = toolDisc ? DISCIPLINE_TABS[toolDisc] : null;
   const selectedOne = selection.length === 1 ? (elementById.get(selection[0]) ?? null) : null;
   const viewer = viewerRef.current;
-  const rightWidth = tool.kind === "propriedades" ? 340 : tool.kind === "pranchas" ? 400 : 460;
+  // Sem ferramenta ativa (seleção), o painel da direita some: as propriedades ficam na coluna esquerda.
+  const rightWidth = tool.kind === "propriedades" ? 0 : tool.kind === "pranchas" ? 400 : 460;
+  const resolveCeiling = useMemo(() => (viewer && model ? makeCeilingResolver(viewer, elementById, model.storeyLevels) : null), [viewer, model, elementById]);
+  const slabAt = useMemo(() => (viewer && model ? makeSlabProbe(viewer, elementById, model.storeyLevels) : null), [viewer, model, elementById]);
   const projectName = (fileName ?? "").replace(/\.ifc$/i, "");
 
   const rightPanel = () => {
@@ -549,7 +564,7 @@ export function App() {
     if (!model || !viewer) return <div className="empty-side">Abra um modelo IFC em Arquivo › Abrir IFC.</div>;
     switch (tool.kind) {
       case "propriedades":
-        return <PropertiesPanel elements={selection.map((id) => elementById.get(id)).filter(Boolean) as ElementInfo[]} getProperties={getProperties} onFrame={selectAndFrame} />;
+        return null;
       case "locacao":
         return (
           <LocacaoPanel
@@ -658,9 +673,37 @@ export function App() {
 
       <Ribbon tab={top} tool={tool} hasModel={!!model} pressed={pressed} onTool={(t) => chooseTool(t, top in DISCIPLINE_TABS ? (top as DisciplineTab) : null)} onAction={onAction} />
 
-      <main className="workspace" style={{ gridTemplateColumns: `${leftOpen ? 260 : 0}px minmax(0, 1fr) ${rightOpen ? rightWidth : 0}px` }}>
-        <aside className={`sidebar ${leftOpen ? "" : "collapsed"}`} aria-hidden={!leftOpen}>
+      <main className="workspace" style={{ gridTemplateColumns: `${leftOpen ? 300 : 0}px minmax(0, 1fr) ${rightOpen ? rightWidth : 0}px` }}>
+        <aside className={`sidebar docks ${leftOpen ? "" : "collapsed"}`} aria-hidden={!leftOpen}>
+          {model && resolveCeiling && slabAt && (
+            <section className={`dock ${propsOpen ? "open" : ""}`}>
+              <button className="dock-head" onClick={() => setPropsOpen(!propsOpen)} aria-expanded={propsOpen}>
+                <span className={`caret ${propsOpen ? "open" : ""}`}>▸</span> Propriedades
+              </button>
+              {propsOpen && (
+                <div className="dock-body">
+                  <ParamsPanel
+                    selection={selection}
+                    elementById={elementById}
+                    store={store}
+                    model={model}
+                    getProperties={getProperties}
+                    resolveCeiling={resolveCeiling}
+                    slabAt={slabAt}
+                    systems={allSystems}
+                    onFrame={selectAndFrame}
+                  />
+                </div>
+              )}
+            </section>
+          )}
           {model ? (
+            <section className={`dock ${navOpen ? "open" : ""}`}>
+              <button className="dock-head" onClick={() => setNavOpen(!navOpen)} aria-expanded={navOpen}>
+                <span className={`caret ${navOpen ? "open" : ""}`}>▸</span> Navegador
+              </button>
+              {navOpen && (
+                <div className="dock-body">
             <Navigator
               elements={allElements}
               storeys={model.storeys}
@@ -676,6 +719,9 @@ export function App() {
               circuits={store.circuits}
               onCircuit={showCircuit}
             />
+                </div>
+              )}
+            </section>
           ) : (
             <div className="empty-side">Abra um modelo IFC para navegar por pavimentos, disciplinas, sistemas e circuitos.</div>
           )}

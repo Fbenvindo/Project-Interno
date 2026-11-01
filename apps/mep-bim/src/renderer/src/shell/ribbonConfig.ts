@@ -38,7 +38,8 @@ export type ActionId =
   | "vistaPlanta"
   | "vista3d"
   | "enquadrar"
-  | "corte";
+  | "corte"
+  | "propriedades";
 
 export interface RibbonButton {
   key: string;
@@ -139,7 +140,8 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
     {
       label: "Consulta",
       buttons: [
-        { key: "propriedades", label: "Propriedades", icon: "propriedades", tool: { kind: "propriedades" }, needsModel: true },
+        { key: "selecionar", label: "Selecionar", icon: "selecionar", tool: { kind: "propriedades" }, needsModel: true },
+        { key: "propriedades", label: "Propriedades", icon: "propriedades", action: "propriedades", needsModel: true },
         { key: "quantitativos", label: "Quantitativos", icon: "quantitativos", tool: { kind: "quantitativos" }, needsModel: true },
         { key: "interferencias", label: "Interferências", icon: "interferencias", tool: { kind: "interferencias" }, needsModel: true },
       ],

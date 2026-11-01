@@ -1261,3 +1261,170 @@ h3 {
 .matrix input {
   width: 42px;
 }
+
+/* ---- Coluna esquerda: Propriedades + Navegador (estilo Revit) -------------- */
+.sidebar.docks {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dock {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+}
+.dock.open {
+  flex: 1 1 0;
+}
+.dock.open:first-child {
+  flex-grow: 1.4;
+}
+.dock-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 12px;
+  border: none;
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: "Space Grotesk", Inter, sans-serif;
+  font-weight: 600;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.dock-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.dock-body .navigator {
+  padding-top: 8px;
+}
+
+.params {
+  font-size: 12px;
+}
+.ptype {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.ptype-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.ptype-body {
+  flex: 1;
+  min-width: 0;
+}
+.ptype-family {
+  color: var(--muted);
+  font-size: 11px;
+}
+.ptype-name {
+  font-weight: 600;
+}
+.ptype-select {
+  width: 100%;
+  margin-top: 2px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  font-weight: 600;
+}
+.pfilter {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.pfilter select {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+}
+.pfilter .small-btn {
+  margin: 0;
+}
+.ptable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.pgroup th {
+  text-align: left;
+  padding: 5px 8px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 11.5px;
+  cursor: pointer;
+  user-select: none;
+}
+.prow th {
+  width: 46%;
+  text-align: left;
+  font-weight: 400;
+  color: var(--muted);
+  padding: 2px 8px;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prow td {
+  padding: 1px 2px;
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+.pcell {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  font-size: 12px;
+}
+.pcell:hover {
+  border-color: var(--border);
+}
+.pcell:focus {
+  outline: none;
+  border-color: var(--cyan-text);
+  background: var(--input-bg);
+}
+.pcell.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pro {
+  display: block;
+  padding: 3px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pnote {
+  padding: 8px 12px;
+}
+.params.empty .ptype {
+  border: none;
+  flex-direction: column;
+  gap: 4px;
+}
