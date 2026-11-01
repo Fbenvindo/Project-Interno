@@ -13,8 +13,8 @@ interface Base {
 
 export type Prim = Base &
   (
-    | { t: "line"; a: P2; b: P2; weight: number; dashed?: boolean }
-    | { t: "poly"; pts: P2[]; closed: boolean; weight: number; fill?: string | null; dashed?: boolean }
+    | { t: "line"; a: P2; b: P2; weight: number; dashed?: boolean; dashdot?: boolean }
+    | { t: "poly"; pts: P2[]; closed: boolean; weight: number; fill?: string | null; dashed?: boolean; dashdot?: boolean }
     | { t: "circle"; c: P2; r: number; weight: number; fill?: string | null }
     | { t: "text"; p: P2; text: string; height: number; anchor: "start" | "middle" | "end"; angle?: number }
   );
@@ -33,6 +33,8 @@ export interface LegendItem {
   /** Desenho do item em mm de papel, centrado na origem (cabe em ~8 × 6 mm). */
   prims: SymbolPrim[];
   dashed?: boolean;
+  /** Traço-ponto (eletroduto aparente). */
+  dashdot?: boolean;
 }
 
 export interface PlanDrawing {

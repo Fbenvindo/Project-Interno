@@ -5,7 +5,8 @@ import { COMPONENT_BY_ID } from "./library";
 import type { CoordinateSystem } from "./math";
 import { newGuid, storeyAt, type PlacedPoint, type StoreyLevel } from "./points";
 import type { Circuit } from "./circuits";
-import { derivedGuid, runFittings, runSegments, RUN_TYPE_BY_ID, segmentBasis, type Run } from "./runs";
+import { derivedGuid, runFittings, runSegments, RUN_TYPE_BY_ID, segmentBasis, storeyProbeY, type Run } from "./runs";
+import { boxSizeLabel, INSTALL_LABEL, pullBoxes } from "./conduits";
 import type { Vec3 } from "./types";
 
 class StepWriter {
@@ -208,12 +209,13 @@ export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs,
       const q = w.add(`IFCQUANTITYLENGTH('Length',$,$,${num(seg.length * MM)},$)`);
       const qto = w.add(`IFCELEMENTQUANTITY('${newGuid()}',$,'${qtoName}',$,$,${list([q])})`);
       w.add(`IFCRELDEFINESBYPROPERTIES('${newGuid()}',$,$,$,${list([el])},${ref(qto)})`);
-      addToStoreyAndSystem(el, Math.min(seg.start[1], seg.end[1]), r.system, t.systemType);
+      addToStoreyAndSystem(el, storeyProbeY(r, Math.min(seg.start[1], seg.end[1])), r.system, t.systemType);
     }
   }
 
   for (const f of runFittings(runs)) {
     const t = RUN_TYPE_BY_ID[f.typeId];
+    if (f.kind === "te" && t.segmentPredefined === "CONDUITSEGMENT") continue; // derivação em caixa de passagem
     const r = runs.find((x) => x.id === f.runId)!;
     const d = Math.max(f.size.width, f.size.height) * 1.2;
     const center = toMm(f.position);
@@ -227,7 +229,32 @@ export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs,
     const el = w.add(
       `IFC${t.fittingType.replace(/^IFC/, "")}('${derivedGuid(r.guid, 500 + f.index)}',$,${str(`${r.tag} - ${f.label} ${f.size.label}`)},$,${str(f.label)},${ref(pl)},${ref(shape)},${str(r.tag)},.${f.kind === "curva" ? t.bendPredefined : t.teePredefined}.)`,
     );
-    addToStoreyAndSystem(el, f.position[1], f.system, t.systemType);
+    addToStoreyAndSystem(el, storeyProbeY(r, f.position[1]), f.system, t.systemType);
+  }
+
+  // ---- Caixas de passagem dos eletrodutos (IfcJunctionBox) ----------------------
+  for (const b of pullBoxes(runs, points)) {
+    const r = runs.find((x) => x.id === b.runIds[0])!;
+    const [bw, bh, bd] = b.spec.dims;
+    const center = toMm(b.position);
+    const xDir = cs.worldDirToIfc(Math.hypot(b.dir[0], b.dir[2]) > 0.3 ? [b.dir[0], 0, b.dir[2]] : [1, 0, 0]);
+    const xl = Math.hypot(xDir[0], xDir[1]) || 1;
+    const pl = placement([center[0], center[1], center[2] - bd / 2], dir([0, 0, 1]), dir([xDir[0] / xl, xDir[1] / xl, 0]));
+    const shape = body(`IFCRECTANGLEPROFILEDEF(.AREA.,$,${ref(origin2d)},${num(bw)},${num(bh)})`, bd);
+    const el = w.add(
+      `IFCJUNCTIONBOX('${derivedGuid(r.guid, 100_000 + b.index)}',$,${str(`${b.tag} - ${b.spec.label}`)},$,${str(b.spec.label)},${ref(pl)},${ref(shape)},${str(b.tag)},.PULL.)`,
+    );
+    const props = [
+      w.add(`IFCPROPERTYSINGLEVALUE('Etiqueta',$,IFCLABEL(${str(b.tag)}),$)`),
+      w.add(`IFCPROPERTYSINGLEVALUE('Tipo',$,IFCLABEL(${str(b.spec.label)}),$)`),
+      w.add(`IFCPROPERTYSINGLEVALUE('Dimensoes',$,IFCLABEL(${str(boxSizeLabel(b))}),$)`),
+      w.add(`IFCPROPERTYSINGLEVALUE('Quantidade',$,IFCINTEGER(${b.spec.count}),$)`),
+      w.add(`IFCPROPERTYSINGLEVALUE('Instalacao',$,IFCLABEL(${str(INSTALL_LABEL[b.install.mode])}),$)`),
+      w.add(`IFCPROPERTYSINGLEVALUE('Eletrodutos',$,IFCLABEL(${str(runs.filter((x) => b.runIds.includes(x.id)).map((x) => x.tag).join(", "))}),$)`),
+    ];
+    const pset = w.add(`IFCPROPERTYSET('${newGuid()}',$,'Pset_MEP_CaixaPassagem',$,${list(props)})`);
+    w.add(`IFCRELDEFINESBYPROPERTIES('${newGuid()}',$,$,$,${list([el])},${ref(pset)})`);
+    addToStoreyAndSystem(el, storeyProbeY(b, b.position[1]), r.system, "ELECTRICAL");
   }
 
   for (const s of storeyIds.values()) {

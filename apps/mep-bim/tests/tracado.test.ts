@@ -132,7 +132,10 @@ describe("elementos, etiquetas e ids", () => {
     expect(seg.size).toBe("Ø25");
     const curvas = rows.find((r) => r.description === "Curva 90°")!;
     expect(curvas.quantity).toBe(4);
-    expect(rows.find((r) => r.description === "Tê")!.quantity).toBe(1);
+    // Eletroduto não tem tê: a derivação vira caixa de passagem (ver eletrodutos.test.ts).
+    expect(rows.find((r) => r.description === "Tê")).toBeUndefined();
+    const agua = runElements([makeRun("agua-fria", [[0, 3, 0], [4, 3, 0]]), makeRun("agua-fria", [[2, 3, 2], [2, 3, 0]])], [{ name: "Térreo", level: 0 }]);
+    expect(agua.filter((e) => e.objectType === "Tê")).toHaveLength(1);
     expect(els.every((e) => e.discipline === "eletrica" && e.storey === "Térreo")).toBe(true);
   });
 

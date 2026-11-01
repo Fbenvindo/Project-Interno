@@ -143,6 +143,7 @@ const P: Record<string, ReactNode> = {
     </>
   ),
   eletroduto: <path d="M3 17 H10 Q13 17 13 14 V7 H21" />,
+  eletrodutoFlex: <path d="M3 17 C7 17 7 9 11 9 S15 15 19 13 L21 12" />,
   eletrocalha: (
     <>
       <path d="M3 8 V16 H21 V8" />

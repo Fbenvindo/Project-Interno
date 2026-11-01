@@ -54,3 +54,14 @@ export function reseatCeiling(
     storey: storeyForMounting("teto", refLevel, levels),
   };
 }
+
+/** Face inferior da laje acima de (x, z): do modelo (IfcSlab/IfcRoof) ou estimada pelo próximo pavimento. */
+export function makeSlabProbe(viewer: Viewer, elementById: Map<number, ElementInfo>, levels: StoreyLevel[]) {
+  return (x: number, z: number, floorY: number): number => {
+    const reach = reachAbove(floorY, levels);
+    const hit = viewer.castRay([x, floorY + 0.3, z], [0, 1, 0], reach, (n, id) => n[1] < -0.7 && SLAB_TYPES.has(elementById.get(id)?.ifcType ?? ""), true);
+    if (hit) return hit.point[1];
+    const next = levels.map((s) => s.level).filter((l) => l > floorY + 0.5).sort((a, b) => a - b)[0];
+    return next != null ? next - 0.15 : floorY + 2.85;
+  };
+}

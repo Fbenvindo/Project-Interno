@@ -183,7 +183,7 @@ function customTitleBlock(tbDef: TitleBlock, box: { x: number; y: number; w: num
 
 function primSvg(p: Prim, T: (q: P2) => P2, k: number, scale: number): string {
   const id = p.id != null ? ` data-id="${p.id}"` : "";
-  const dash = "dashed" in p && p.dashed ? ` stroke-dasharray="2 1"` : "";
+  const dash = "dashdot" in p && p.dashdot ? ` stroke-dasharray="3 0.8 0.6 0.8"` : "dashed" in p && p.dashed ? ` stroke-dasharray="2 1"` : "";
   if (p.t === "line") {
     const [a, b] = [T(p.a), T(p.b)];
     return `<line x1="${f2(a[0])}" y1="${f2(a[1])}" x2="${f2(b[0])}" y2="${f2(b[1])}" stroke="${p.color}" stroke-width="${p.weight}" stroke-linecap="round"${dash}${id}/>`;
@@ -205,9 +205,9 @@ function primSvg(p: Prim, T: (q: P2) => P2, k: number, scale: number): string {
 }
 
 /** Símbolo da legenda (mm, Y para cima) desenhado com centro em (cx, cy). */
-function legendSymbol(prims: SymbolPrim[], color: string, cx: number, cy: number, dashed = false): string {
+function legendSymbol(prims: SymbolPrim[], color: string, cx: number, cy: number, dashed = false, dashdot = false): string {
   const T = ([x, y]: P2): P2 => [cx + x, cy - y];
-  const dash = dashed ? ` stroke-dasharray="2 1"` : "";
+  const dash = dashdot ? ` stroke-dasharray="3 0.8 0.6 0.8"` : dashed ? ` stroke-dasharray="2 1"` : "";
   return prims
     .map((s) => {
       if (s.t === "line") {
@@ -229,5 +229,5 @@ function legendSymbol(prims: SymbolPrim[], color: string, cx: number, cy: number
 }
 
 function legendRow(item: LegendItem, symX: number, cy: number, textX: number): string {
-  return legendSymbol(item.prims, item.color, symX, cy, item.dashed) + `<text x="${textX}" y="${f2(cy)}" font-size="2.6" dominant-baseline="central" ${FONT}>${esc(item.label)}</text>`;
+  return legendSymbol(item.prims, item.color, symX, cy, item.dashed, item.dashdot) + `<text x="${textX}" y="${f2(cy)}" font-size="2.6" dominant-baseline="central" ${FONT}>${esc(item.label)}</text>`;
 }

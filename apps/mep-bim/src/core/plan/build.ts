@@ -5,12 +5,13 @@ import { COMPONENT_BY_ID } from "../library";
 import type { CoordinateSystem } from "../math";
 import type { TriangleMesh } from "../obb";
 import type { PlacedPoint, StoreyLevel } from "../points";
-import { runFittings, runSegments, RUN_TYPE_BY_ID, segmentElementId, type Run } from "../runs";
+import { runFittings, runSegments, RUN_TYPE_BY_ID, segmentElementId, storeyProbeY, type Run } from "../runs";
 import type { Discipline, ElementInfo, Vec3 } from "../types";
 import { LAYER_PREFIX, PEN, PRINT_COLOR, type LegendItem, type PlanDrawing, type Prim, type SymbolPrim } from "./drawing";
 import { chainSegments, cutMesh, type P2 } from "./section";
 import { centroid, pointInPolygon, type Space } from "../spaces";
 import { LEGEND_LINE, RISER_DOWN, RISER_UP, symbolFor, TEE_MARK } from "./symbols";
+import { BOX_LABEL, INSTALL_LABEL, type BoxKind, type PullBox } from "../conduits";
 
 export interface PlanLabels {
   tags: boolean;
@@ -36,7 +37,27 @@ export interface PlanInput {
   labels: PlanLabels;
   /** Ambientes (IfcSpace): nome e área no centro, quando a arquitetura está visível. */
   spaces?: Space[];
+  /** Caixas de passagem dos eletrodutos. */
+  boxes?: PullBox[];
 }
+
+/** Símbolos das caixas de passagem (mm de papel). */
+const sq = (h: number): SymbolPrim => ({ t: "poly", pts: [[-h, -h], [h, -h], [h, h], [-h, h]], closed: true });
+const oct = (r: number): SymbolPrim => ({
+  t: "poly",
+  pts: Array.from({ length: 8 }, (_, i): P2 => [r * Math.cos(((i + 0.5) * Math.PI) / 4), r * Math.sin(((i + 0.5) * Math.PI) / 4)]),
+  closed: true,
+});
+export const BOX_SYMBOL: Record<BoxKind, SymbolPrim[]> = {
+  "octogonal-pvc": [oct(1.8)],
+  "pvc-embutir": [sq(1.8), { t: "line", a: [-1.8, -1.8], b: [1.8, 1.8] }],
+  "ferro-fundido": [sq(1.8), sq(1.1)],
+  alvenaria: [sq(2.2), sq(1.6), { t: "text", p: [0, 0], text: "A", height: 1.6 }],
+  "pvc-sobrepor": [sq(1.8), { t: "text", p: [0, 0], text: "P", height: 1.6 }],
+  condulete: [{ t: "circle", c: [0, 0], r: 1.5 }, { t: "text", p: [0, 0], text: "C", height: 1.6 }],
+  metalica: [sq(1.8), { t: "line", a: [-1.8, -1.8], b: [1.8, 1.8] }, { t: "line", a: [-1.8, 1.8], b: [1.8, -1.8] }],
+  parede: [{ t: "poly", pts: [[-1.8, 0], [1.8, 0], [1.8, 1.4], [-1.8, 1.4]], closed: true, fill: true }],
+};
 
 /** Tipos cortados com hachura cheia (poché). */
 const POCHE_TYPES = new Set(["IFCWALL", "IFCWALLSTANDARDCASE", "IFCCOLUMN", "IFCCURTAINWALL", "IFCMEMBER", "IFCPILE"]);
@@ -189,7 +210,7 @@ export function buildPlan(input: PlanInput): PlanDrawing {
 
     segs.forEach((s, i) => {
       const lowY = Math.min(s.start[1], s.end[1]);
-      if (!inStorey(lowY)) return;
+      if (!inStorey(storeyProbeY(run, lowY))) return;
       const a = plan(s.start);
       const b = plan(s.end);
       const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -207,24 +228,27 @@ export function buildPlan(input: PlanInput): PlanDrawing {
         return;
       }
       const meanY = (s.start[1] + s.end[1]) / 2;
-      const onFloor = isConduit && meanY < level + 0.5;
-      const style = isConduit ? (onFloor ? "piso" : "teto") : "rede";
+      // Eletrodutos: estilo pela instalação (piso tracejado, laje contínuo, aparente traço-ponto).
+      const mode = isConduit ? (run.install?.mode ?? null) : null;
+      const onFloor = isConduit && (mode ? mode === "piso" : meanY < level + 0.5);
+      const dashdot = mode === "aparente";
+      const style = isConduit ? (mode ?? (onFloor ? "piso" : "teto")) : "rede";
       if (t.profile === "retangular") {
         const w = run.size.width / 1000;
         const n: P2 = [(-(b[1] - a[1]) / len) * (w / 2), ((b[0] - a[0]) / len) * (w / 2)];
-        prims.push({ t: "poly", pts: [[a[0] + n[0], a[1] + n[1]], [b[0] + n[0], b[1] + n[1]], [b[0] - n[0], b[1] - n[1]], [a[0] - n[0], a[1] - n[1]]], closed: true, weight: PEN.mep, dashed: onFloor, layer: `${prefix}-TRECHOS`, color, id });
+        prims.push({ t: "poly", pts: [[a[0] + n[0], a[1] + n[1]], [b[0] + n[0], b[1] + n[1]], [b[0] - n[0], b[1] - n[1]], [a[0] - n[0], a[1] - n[1]]], closed: true, weight: PEN.mep, dashed: onFloor, dashdot, layer: `${prefix}-TRECHOS`, color, id });
       } else {
-        prims.push({ t: "line", a, b, weight: PEN.mep, dashed: onFloor, layer: `${prefix}-TRECHOS`, color, id });
+        prims.push({ t: "line", a, b, weight: PEN.mep, dashed: onFloor, dashdot, layer: `${prefix}-TRECHOS`, color, id });
       }
       if (!labelSeg || len > labelSeg.len) labelSeg = { a, b, len };
       const key = `${t.id}-${style}`;
       if (!legend.has(key)) {
-        const where = style === "piso" ? " embutido no piso" : style === "teto" ? " no teto / parede" : "";
+        const where = mode ? ` — ${INSTALL_LABEL[mode]}` : style === "piso" ? " embutido no piso" : style === "teto" ? " no teto / parede" : "";
         const lp: SymbolPrim[] =
           t.profile === "retangular"
             ? [{ t: "poly", pts: [[-4, -0.8], [4, -0.8], [4, 0.8], [-4, 0.8]], closed: true }]
             : LEGEND_LINE;
-        legend.set(key, { key, label: `${t.label}${where}`, color, prims: lp, dashed: onFloor });
+        legend.set(key, { key, label: `${t.label}${where}`, color, prims: lp, dashed: onFloor, dashdot });
       }
     });
 
@@ -247,8 +271,28 @@ export function buildPlan(input: PlanInput): PlanDrawing {
     if (fit.kind !== "te" || !inStorey(fit.position[1])) continue;
     const t = RUN_TYPE_BY_ID[fit.typeId];
     if (!input.disciplines.has(t.discipline)) continue;
+    if (t.segmentPredefined === "CONDUITSEGMENT") continue; // eletrodutos: a derivação é uma caixa
     pushSymbol(TEE_MARK, plan(fit.position), [1, 0], [0, 1], `${LAYER_PREFIX[t.discipline]}-TRECHOS`, PRINT_COLOR[t.discipline]);
     if (!legend.has("te")) legend.set("te", { key: "te", label: "Derivação (tê)", color: "#333333", prims: TEE_MARK });
+  }
+
+  // ---- Caixas de passagem -------------------------------------------------------------------
+  if (input.disciplines.has("eletrica")) {
+    for (const b of input.boxes ?? []) {
+      if (!inStorey(storeyProbeY(b, b.position[1]))) continue;
+      const color = PRINT_COLOR.eletrica;
+      const horiz = Math.hypot(b.dir[0], b.dir[2]) > 0.3;
+      const r = horiz ? planDir([b.dir[0], 0, b.dir[2]]) : ([1, 0] as P2);
+      const f: P2 = [-r[1], r[0]];
+      const at = plan(b.position);
+      const id = -(900_000 + b.index);
+      pushSymbol(BOX_SYMBOL[b.spec.kind], at, r, f, "ELE-CAIXAS", color, id);
+      if (labels.tags) {
+        prims.push({ t: "text", p: [at[0] + f[0] * 3.6 * m, at[1] + f[1] * 3.6 * m], text: b.tag, height: 1.5 * m, anchor: "middle", layer: "ELE-TEXTOS", color, id });
+      }
+      const key = `caixa-${b.spec.kind}`;
+      if (!legend.has(key)) legend.set(key, { key, label: BOX_LABEL[b.spec.kind], color, prims: BOX_SYMBOL[b.spec.kind] });
+    }
   }
 
   // ---- Ambientes: número/nome e área (posição livre de instalações, se possível) -------------
@@ -278,7 +322,7 @@ export function buildPlan(input: PlanInput): PlanDrawing {
   }
 
   // Ordem de desenho: modelo, trechos, símbolos e, por cima, os textos.
-  const rank = (layer: string) => (layer.endsWith("-TEXTOS") ? 3 : layer.endsWith("-PONTOS") ? 2 : layer.endsWith("-TRECHOS") ? 1 : 0);
+  const rank = (layer: string) => (layer.endsWith("-TEXTOS") ? 3 : layer.endsWith("-PONTOS") || layer.endsWith("-CAIXAS") ? 2 : layer.endsWith("-TRECHOS") ? 1 : 0);
   prims.sort((a, b) => rank(a.layer) - rank(b.layer));
 
   return { prims, bounds: boundsOf(prims), legend: sortLegend([...legend.values()]), scale, storey, cutHeight: input.cutHeight };

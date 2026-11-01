@@ -24,6 +24,7 @@ import { buildPlan } from "../../core/plan/build";
 import { renderSheet } from "../../core/plan/sheet";
 import { connectedPairs, runElements, runFittings, runIdOfElement, runProperties, runSegments, RUN_TYPE_BY_ID, segmentElementId, fittingElementId } from "../../core/runs";
 import { usePointsStore } from "./locacao/usePointsStore";
+import { boxElements, boxIndexOf, boxProperties, pullBoxes } from "../../core/conduits";
 import { defaultTitleBlockId, titleBlockById, useTitleBlocks } from "./planta/titleBlocks";
 import { useProjectFiles } from "./locacao/useProjectFiles";
 import { EMPTY_FILTERS, Navigator, NO_STOREY, type Filters } from "./shell/Navigator";
@@ -104,7 +105,12 @@ export function App() {
   const files = useProjectFiles(store, model, fileName, () => setSelection([]));
   const pointElements = useMemo(() => store.points.map(pointToElement), [store.points]);
   const runElementList = useMemo(() => (model ? runElements(store.runs, model.storeyLevels) : []), [store.runs, model]);
-  const allElements = useMemo(() => (model ? [...model.elements, ...pointElements, ...runElementList] : []), [model, pointElements, runElementList]);
+  const boxes = useMemo(() => pullBoxes(store.runs, store.points), [store.runs, store.points]);
+  const boxElementList = useMemo(() => (model ? boxElements(boxes, store.runs, model.storeyLevels) : []), [boxes, store.runs, model]);
+  const allElements = useMemo(
+    () => (model ? [...model.elements, ...pointElements, ...runElementList, ...boxElementList] : []),
+    [model, pointElements, runElementList, boxElementList],
+  );
   const elementById = useMemo(() => new Map(allElements.map((e) => [e.expressID, e])), [allElements]);
   const connected = useMemo(() => connectedPairs(store.runs, store.points), [store.runs, store.points]);
   const meshById = useMemo(() => new Map(model?.meshes.map((m) => [m.expressID, m]) ?? []), [model]);
@@ -187,8 +193,9 @@ export function App() {
       disciplines: new Set(sheetSettings.disciplines),
       labels: sheetSettings.labels,
       spaces: model.spaces,
+      boxes,
     });
-  }, [view, model, meshById, sheetSettings, store.points, store.runs]);
+  }, [view, model, meshById, sheetSettings, store.points, store.runs, boxes]);
 
   const planSheet = useMemo(() => {
     if (!planDrawing || !sheetSettings) return null;
@@ -210,13 +217,18 @@ export function App() {
         const r = store.runs.find((x) => x.id === runId);
         return r ? runProperties(r) : [];
       }
+      const boxIndex = boxIndexOf(id);
+      if (boxIndex != null) {
+        const b = boxes.find((x) => x.index === boxIndex);
+        return b ? boxProperties(b, store.runs) : [];
+      }
       if (id < 0) {
         const p = store.points.find((x) => x.id === id);
         return p ? pointProperties(p) : [];
       }
       return model?.getProperties(id) ?? [];
     },
-    [model, store.points, store.runs],
+    [model, store.points, store.runs, boxes],
   );
 
   // ---- Visualizador --------------------------------------------------------
@@ -290,8 +302,17 @@ export function App() {
         color: DISCIPLINE_BY_ID[t.discipline].color,
       };
     });
-    viewerRef.current?.setExtras("runs", [...visuals, ...fittings]);
-  }, [store.runs, model]);
+    // Caixas de passagem dos eletrodutos, alinhadas ao eletroduto principal.
+    const boxVisuals = boxes.map((b) => ({
+      id: -(900_000 + b.index),
+      shape: "caixa" as const,
+      size: [b.spec.dims[0] / 1000, b.spec.dims[1] / 1000, b.spec.dims[2] / 1000] as Vec3,
+      position: b.position,
+      rotation: Math.atan2(-b.dir[2], b.dir[0]),
+      color: "#B45309",
+    }));
+    viewerRef.current?.setExtras("runs", [...visuals, ...fittings, ...boxVisuals]);
+  }, [store.runs, model, boxes]);
 
   // Ganchos para testes automatizados da interface (somente em desenvolvimento).
   useEffect(() => {
@@ -555,6 +576,7 @@ export function App() {
             onSelect={selectPoints}
             systems={allSystems}
             typeIds={disc?.runs}
+            elementById={elementById}
             preset={{ typeId: tool.typeId, n: tool.n }}
           />
         );

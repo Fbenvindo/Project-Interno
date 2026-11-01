@@ -72,7 +72,7 @@ export const DISCIPLINE_TABS: Record<DisciplineTab, DisciplineCfg> = {
     color: "#F59E0B",
     text: "#B45309",
     groups: ["Iluminação", "Tomadas e comandos", "Telecom e segurança"],
-    runs: ["eletroduto-pvc", "eletroduto-flexivel", "eletroduto-aco", "eletrocalha", "eletroduto-dados"],
+    runs: ["eletroduto-pvc", "eletroduto-aco", "eletroduto-flexivel", "eletroduto-pead", "eletrocalha", "eletroduto-dados"],
   },
   hidraulica: {
     label: "Hidráulica",
@@ -165,7 +165,11 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
     },
     {
       label: "Infraestrutura",
-      buttons: [run("eletroduto", "Eletroduto", "eletroduto", "eletroduto-pvc"), run("eletrocalha", "Eletrocalha", "eletrocalha", "eletrocalha")],
+      buttons: [
+        run("eletroduto", "Eletroduto rígido", "eletroduto", "eletroduto-pvc"),
+        run("eletroduto-flex", "Eletroduto flexível", "eletrodutoFlex", "eletroduto-flexivel"),
+        run("eletrocalha", "Eletrocalha", "eletrocalha", "eletrocalha"),
+      ],
     },
     {
       label: "Circuitos",

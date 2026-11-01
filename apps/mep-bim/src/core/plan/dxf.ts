@@ -46,7 +46,7 @@ export function exportDxf(drawing: PlanDrawing): string {
   g(2, "TABLES");
   g(0, "TABLE");
   g(2, "LTYPE");
-  g(70, 2);
+  g(70, 3);
   g(0, "LTYPE");
   g(2, "CONTINUOUS");
   g(70, 0);
@@ -54,6 +54,17 @@ export function exportDxf(drawing: PlanDrawing): string {
   g(72, 65);
   g(73, 0);
   g(40, 0);
+  g(0, "LTYPE");
+  g(2, "DASHDOT");
+  g(70, 0);
+  g(3, "__ . __ . __");
+  g(72, 65);
+  g(73, 4);
+  g(40, 3 * drawing.scale + 0.6 * drawing.scale + 1.6 * drawing.scale);
+  g(49, 3 * drawing.scale);
+  g(49, -0.8 * drawing.scale);
+  g(49, 0);
+  g(49, -0.8 * drawing.scale);
   g(0, "LTYPE");
   g(2, "DASHED");
   g(70, 0);
@@ -88,7 +99,8 @@ export function exportDxf(drawing: PlanDrawing): string {
   function head(type: string, p: Prim) {
     g(0, type);
     g(8, p.layer);
-    if ("dashed" in p && p.dashed) g(6, "DASHED");
+    if ("dashdot" in p && p.dashdot) g(6, "DASHDOT");
+    else if ("dashed" in p && p.dashed) g(6, "DASHED");
   }
 
   function entity(p: Prim) {

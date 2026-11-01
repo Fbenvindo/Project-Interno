@@ -2,6 +2,7 @@
 // alimenta o mesmo modo de edição usado na vista 3D (locação e traçado), com
 // encaixe em faces de parede e cota real de teto/piso obtida por raio no modelo.
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
+import { pullBoxes } from "../../../core/conduits";
 import { DISCIPLINES } from "../../../core/disciplines";
 import type { SurfaceHit } from "../../../core/placement";
 import { buildPlan, boundsOf } from "../../../core/plan/build";
@@ -47,7 +48,7 @@ function primsToSvg(prims: Prim[]): string {
   return prims
     .map((p) => {
       const id = p.id != null ? ` data-id="${p.id}"` : "";
-      const dash = "dashed" in p && p.dashed ? ` stroke-dasharray="6 4"` : "";
+      const dash = "dashdot" in p && p.dashdot ? ` stroke-dasharray="9 3 2 3"` : "dashed" in p && p.dashed ? ` stroke-dasharray="6 4"` : "";
       const stroke = `stroke="${p.color}" vector-effect="non-scaling-stroke"`;
       if (p.t === "line") return `<line x1="${f3(p.a[0])}" y1="${f3(-p.a[1])}" x2="${f3(p.b[0])}" y2="${f3(-p.b[1])}" ${stroke} stroke-width="${px(p.weight)}"${dash}${id}/>`;
       if (p.t === "poly")
@@ -87,6 +88,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
         disciplines: ALL,
         labels: LABELS,
         spaces: model.spaces,
+        boxes: pullBoxes(store.runs, store.points),
       }),
     [cs, model, storey, cutHeight, store.points, store.runs],
   );

@@ -6,6 +6,7 @@ import type { OBB } from "./obb";
 import { COMPONENT_BY_ID } from "./library";
 import { pointOBB, storeyAt, type PlacedPoint, type StoreyLevel } from "./points";
 import type { BBox, Discipline, ElementInfo, PropertyGroup, Vec3 } from "./types";
+import type { ConduitInstall } from "./conduits";
 
 export type Profile = "circular" | "retangular";
 
@@ -37,6 +38,10 @@ export interface RunType {
   slopeFor?: (size: RunSize) => number;
   /** Tem parâmetro de circuito (elétrica). */
   circuit?: boolean;
+  /** Eletroduto flexível (corrugado): curvatura livre, só embutido no piso ou na laje. */
+  flexible?: boolean;
+  /** Material do eletroduto, para o tipo de caixa de passagem. */
+  conduitMaterial?: "pvc" | "pead" | "aco";
 }
 
 const circ = (labels: [string, number][]): RunSize[] => labels.map(([label, d]) => ({ label, width: d, height: d }));
@@ -59,9 +64,10 @@ const STEEL_INCH: [string, number][] = [
 
 export const RUN_TYPES: RunType[] = [
   // Elétrica
-  { id: "eletroduto-pvc", group: "Elétrica", label: "Eletroduto PVC rígido", discipline: "eletrica", profile: "circular", sizes: mm([20, 25, 32, 40, 50, 60, 75, 85, 110]), defaultSize: "Ø25", system: "Tomadas", systemType: "ELECTRICAL", material: "PVC rígido", tagPrefix: "ELD", circuit: true, ...CONDUIT },
-  { id: "eletroduto-flexivel", group: "Elétrica", label: "Eletroduto flexível corrugado", discipline: "eletrica", profile: "circular", sizes: mm([20, 25, 32]), defaultSize: "Ø25", system: "Tomadas", systemType: "ELECTRICAL", material: "PVC corrugado", tagPrefix: "ELD", circuit: true, ...CONDUIT },
-  { id: "eletroduto-aco", group: "Elétrica", label: "Eletroduto de aço galvanizado", discipline: "eletrica", profile: "circular", sizes: circ(STEEL_INCH), defaultSize: '1"', system: "Distribuição", systemType: "ELECTRICAL", material: "Aço galvanizado", tagPrefix: "ELD", circuit: true, ...CONDUIT },
+  { id: "eletroduto-pvc", group: "Elétrica", label: "Eletroduto rígido de PVC", discipline: "eletrica", profile: "circular", sizes: mm([20, 25, 32, 40, 50, 60, 75, 85, 110]), defaultSize: "Ø25", system: "Tomadas", systemType: "ELECTRICAL", material: "PVC rígido", tagPrefix: "ELD", circuit: true, conduitMaterial: "pvc", ...CONDUIT },
+  { id: "eletroduto-flexivel", group: "Elétrica", label: "Eletroduto flexível corrugado PVC", discipline: "eletrica", profile: "circular", sizes: mm([20, 25, 32]), defaultSize: "Ø25", system: "Tomadas", systemType: "ELECTRICAL", material: "PVC corrugado", tagPrefix: "ELD", circuit: true, flexible: true, conduitMaterial: "pvc", ...CONDUIT },
+  { id: "eletroduto-pead", group: "Elétrica", label: "Eletroduto flexível corrugado PEAD", discipline: "eletrica", profile: "circular", sizes: mm([32, 40, 50, 63, 75, 90, 110]), defaultSize: "Ø40", system: "Distribuição", systemType: "ELECTRICAL", material: "PEAD corrugado", tagPrefix: "ELD", circuit: true, flexible: true, conduitMaterial: "pead", ...CONDUIT },
+  { id: "eletroduto-aco", group: "Elétrica", label: "Eletroduto rígido de aço carbono", discipline: "eletrica", profile: "circular", sizes: circ(STEEL_INCH), defaultSize: '1"', system: "Distribuição", systemType: "ELECTRICAL", material: "Aço carbono galvanizado", tagPrefix: "ELD", circuit: true, conduitMaterial: "aco", ...CONDUIT },
   { id: "eletrocalha", group: "Elétrica", label: "Eletrocalha perfurada", discipline: "eletrica", profile: "retangular", sizes: rect([[50, 50], [100, 50], [100, 100], [150, 50], [150, 100], [200, 50], [200, 100], [300, 100], [400, 100], [500, 100]]), defaultSize: "200x100", system: "Distribuição", systemType: "ELECTRICAL", material: "Aço galvanizado", tagPrefix: "ELC", ...TRAY },
   { id: "eletroduto-dados", group: "Telecom", label: "Eletroduto de dados (PVC)", discipline: "telecom", profile: "circular", sizes: mm([20, 25, 32, 40, 50]), defaultSize: "Ø25", system: "Telecom - Dados", systemType: "COMMUNICATION", material: "PVC rígido", tagPrefix: "ELT", ...CONDUIT },
   // Hidráulica
@@ -94,6 +100,19 @@ export interface Run {
   params: Record<string, string | number>;
   /** Circuito (uid) cujos condutores passam por este trecho. */
   circuit?: string | null;
+  /** Eletrodutos: embutido no piso, na laje ou aparente no teto, e arranjo das caixas. */
+  install?: ConduitInstall;
+}
+
+/**
+ * Cota usada para achar o pavimento de um ponto do trecho: eletrodutos na laje ou
+ * aparentes no teto pertencem ao pavimento de baixo; embutidos no piso, ao próprio piso.
+ */
+export function storeyProbeY(run: Pick<Run, "install">, y: number): number {
+  const mode = run.install?.mode;
+  if (mode === "laje" || mode === "aparente") return y - 0.4;
+  if (mode === "piso") return y + 0.1;
+  return y;
 }
 
 let runSerial = 1;
@@ -164,6 +183,20 @@ export function orthoSnap(prev: Vec3, candidate: Vec3): Vec3 {
   const dx = candidate[0] - prev[0];
   const dz = candidate[2] - prev[2];
   return Math.abs(dx) >= Math.abs(dz) ? [candidate[0], prev[1], prev[2]] : [prev[0], prev[1], candidate[2]];
+}
+
+/** Restringe a direção em planta a múltiplos de `stepDeg` (ex.: 45° para eletrodutos rígidos), mantendo a cota. */
+export function angleSnap(prev: Vec3, candidate: Vec3, stepDeg = 45): Vec3 {
+  const dx = candidate[0] - prev[0];
+  const dz = candidate[2] - prev[2];
+  const l = Math.hypot(dx, dz);
+  if (l < 1e-9) return [prev[0], prev[1], prev[2]];
+  const step = (stepDeg * Math.PI) / 180;
+  const a = Math.round(Math.atan2(dz, dx) / step) * step;
+  const ux = Math.cos(a);
+  const uz = Math.sin(a);
+  const along = dx * ux + dz * uz;
+  return [prev[0] + ux * along, prev[1], prev[2] + uz * along];
 }
 
 /**
@@ -302,6 +335,8 @@ export function runFittings(runs: Run[]): Fitting[] {
       const d2 = norm(sub(r.vertices[i + 1], r.vertices[i]));
       const angle = (Math.acos(Math.min(1, Math.max(-1, dot(d1, d2)))) * 180) / Math.PI;
       if (angle < 1) continue;
+      // Eletroduto flexível: curvatura livre; só leva curva na passagem vertical ↔ horizontal.
+      if (RUN_TYPE_BY_ID[r.typeId].flexible && Math.abs(d1[1]) < 0.7 && Math.abs(d2[1]) < 0.7) continue;
       const rounded = Math.round(angle);
       out.push({
         runId: r.id,
@@ -367,7 +402,7 @@ export function runElements(runs: Run[], levels: StoreyLevel[]): ElementInfo[] {
         name: `${r.tag} - ${t.label} ${r.size.label}`,
         objectType: t.label,
         predefinedType: t.segmentPredefined,
-        storey: storeyAt(Math.min(s.start[1], s.end[1]), levels),
+        storey: storeyAt(storeyProbeY(r, Math.min(s.start[1], s.end[1])), levels),
         systems: r.system ? [r.system] : [],
         discipline: t.discipline,
         category: "segmento",
@@ -381,6 +416,8 @@ export function runElements(runs: Run[], levels: StoreyLevel[]): ElementInfo[] {
   }
   for (const f of runFittings(runs)) {
     const t = RUN_TYPE_BY_ID[f.typeId];
+    // Eletrodutos não têm tê: a derivação é feita numa caixa de passagem (ver conduits.ts).
+    if (f.kind === "te" && t.segmentPredefined === "CONDUITSEGMENT") continue;
     const r = runs.find((x) => x.id === f.runId)!;
     const half = (Math.max(f.size.width, f.size.height) * 0.6) / 1000;
     out.push({
@@ -390,7 +427,7 @@ export function runElements(runs: Run[], levels: StoreyLevel[]): ElementInfo[] {
       name: `${r.tag} - ${f.label} ${f.size.label}`,
       objectType: f.label,
       predefinedType: f.kind === "curva" ? t.bendPredefined : t.teePredefined,
-      storey: storeyAt(f.position[1], levels),
+      storey: storeyAt(storeyProbeY(r, f.position[1]), levels),
       systems: f.system ? [f.system] : [],
       discipline: t.discipline,
       category: getCategory(t.fittingType),
@@ -403,6 +440,8 @@ export function runElements(runs: Run[], levels: StoreyLevel[]): ElementInfo[] {
   }
   return out;
 }
+
+const INSTALL_TEXT = { piso: "Embutido no piso", laje: "Embutido na laje", aparente: "Aparente no teto" } as const;
 
 export function runProperties(r: Run): PropertyGroup[] {
   const t = RUN_TYPE_BY_ID[r.typeId];
@@ -417,6 +456,8 @@ export function runProperties(r: Run): PropertyGroup[] {
         { name: "Bitola", value: r.size.label },
         { name: "Material", value: t.material },
         { name: "Sistema", value: r.system },
+        ...(r.install ? [{ name: "Instalação", value: INSTALL_TEXT[r.install.mode] + (r.install.mode === "aparente" ? (r.install.apparentRef === "entreforro" ? " (entreforro)" : " (sob a laje)") : r.install.mode === "piso" && r.install.external ? " (área externa)" : "") }] : []),
+        ...(t.flexible ? [{ name: "Eletroduto", value: "flexível (curvatura livre)" }] : t.conduitMaterial ? [{ name: "Eletroduto", value: "rígido (curvas de 45° e 90°)" }] : []),
         { name: "Comprimento total (m)", value: Math.round(runLength(r) * 100) / 100 },
         { name: "Segmentos", value: runSegments(r).length },
         { name: "Curvas", value: fittings.filter((f) => f.kind === "curva").length },

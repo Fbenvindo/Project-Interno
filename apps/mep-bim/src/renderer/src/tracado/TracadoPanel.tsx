@@ -5,6 +5,7 @@ import { intersectRayPlane } from "../../../core/math";
 import type { SurfaceHit } from "../../../core/placement";
 import { newGuid, storeyAt } from "../../../core/points";
 import {
+  angleSnap,
   applySlope,
   autoRoute,
   closestOnSegment,
@@ -25,7 +26,24 @@ import {
   type Run,
   type RunType,
 } from "../../../core/runs";
-import type { Vec3 } from "../../../core/types";
+import type { ElementInfo, Vec3 } from "../../../core/types";
+import {
+  BOX_REASON_LABEL,
+  boxElementId,
+  boxSizeLabel,
+  conduitElevation,
+  DEFAULT_INSTALL,
+  INSTALL_LABEL,
+  isConduitRun,
+  isConduitType,
+  applyInstall,
+  pullBoxes,
+  runFloorProbeY,
+  typeAllowed,
+  type ConduitInstall,
+  type InstallMode,
+} from "../../../core/conduits";
+import { makeSlabProbe } from "../locacao/ceiling";
 import type { LoadedModel } from "../../../ifc/loadIfc";
 import { useProjectFiles } from "../locacao/useProjectFiles";
 import type { PointsStore } from "../locacao/usePointsStore";
@@ -43,6 +61,7 @@ interface Props {
   typeIds?: string[];
   /** Tipo escolhido na faixa de ferramentas (n muda a cada clique): já inicia o desenho. */
   preset?: { typeId: string; n: number } | null;
+  elementById: Map<number, ElementInfo>;
 }
 
 type Mode = "desenhar" | "ligar";
@@ -59,7 +78,7 @@ const STEP = 0.01; // arredondamento dos comprimentos: 10 mm
 const isTyping = (t: EventTarget | null) => t instanceof HTMLElement && /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName);
 const roundStep = (v: number) => Math.round(v / STEP) * STEP;
 
-export function TracadoPanel({ model, fileName, store, viewer, selection, onSelect, systems, typeIds, preset }: Props) {
+export function TracadoPanel({ model, fileName, store, viewer, selection, onSelect, systems, typeIds, preset, elementById }: Props) {
   const [typeId, setTypeId] = useState(preset?.typeId ?? typeIds?.[0] ?? "eletroduto-pvc");
   const type = RUN_TYPE_BY_ID[typeId];
   const [sizeLabel, setSizeLabel] = useState(type.defaultSize);
@@ -69,6 +88,9 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
   const [slope, setSlope] = useState(type.slopeFor?.(size) ?? 0);
   const [workElevation, setWorkElevation] = useState(2.8);
   const [ortho, setOrtho] = useState(true);
+  const [install, setInstall] = useState<ConduitInstall>(DEFAULT_INSTALL);
+  const conduit = isConduitType(type);
+  const slabAt = useMemo(() => makeSlabProbe(viewer, elementById, model.storeyLevels), [viewer, elementById, model.storeyLevels]);
   const [mode, setMode] = useState<Mode>("desenhar");
   const [drawing, setDrawing] = useState(false);
   const [draft, setDraft] = useState<Vec3[]>([]);
@@ -84,6 +106,11 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
     setSizeLabel(t.defaultSize);
     setSystem(t.system);
     setSlope(t.slopeFor?.(s) ?? 0);
+  };
+  const chooseInstall = (next: ConduitInstall) => {
+    setInstall(next);
+    // Aparente exige eletroduto rígido.
+    if (isConduitType(type) && !typeAllowed(type, next.mode)) chooseType(RUN_TYPES.find((t) => isConduitType(t) && typeAllowed(t, next.mode) && (!typeIds || typeIds.includes(t.id)))?.id ?? "eletroduto-pvc");
   };
   const chooseSize = (label: string) => {
     setSizeLabel(label);
@@ -136,9 +163,19 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
     [pointById, runById],
   );
 
+  /** Cota (Y) do eletroduto horizontal em (x, z) para a instalação escolhida; null para outras redes. */
+  const conduitY = useCallback(
+    (x: number, z: number, floorY: number): number | null => {
+      const L = live.current;
+      if (!isConduitType(L.type)) return null;
+      return conduitElevation(L.install, floorY, slabAt(x, z, floorY), L.size.width, L.workElevation);
+    },
+    [slabAt],
+  );
+
   // Estado mais recente para os callbacks do visualizador.
-  const live = useRef({ type, size, system, circuit, slope, workElevation, ortho, draft, mode, destination, pickingDestination });
-  live.current = { type, size, system, circuit, slope, workElevation, ortho, draft, mode, destination, pickingDestination };
+  const live = useRef({ type, size, system, circuit, slope, workElevation, ortho, draft, mode, destination, pickingDestination, install });
+  live.current = { type, size, system, circuit, slope, workElevation, ortho, draft, mode, destination, pickingDestination, install };
 
   /** Próximo vértice a partir do cursor, com as restrições de desenho. */
   const nextCandidate = useCallback(
@@ -150,7 +187,11 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
       if (!last) {
         if (!hit) return null;
         const off = Math.max(L.size.width, L.size.height) / 2000;
-        return { point: hit.point.map((v, i) => v + hit.normal[i] * off) as Vec3, snap: "superficie", label: "superfície" };
+        const p = hit.point.map((v, i) => v + hit.normal[i] * off) as Vec3;
+        // Eletroduto: começa já na cota da instalação (piso, laje ou aparente).
+        const y = conduitY(p[0], p[2], floorAt(hit.point[1] - 0.1));
+        if (y != null) return { point: [p[0], y, p[2]], snap: "superficie", label: INSTALL_LABEL[L.install.mode] };
+        return { point: p, snap: "superficie", label: "superfície" };
       }
       if (ctx.shift) {
         // Vertical: plano vertical pelo último vértice, voltado para a câmera.
@@ -162,15 +203,39 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
       let p = intersectRayPlane(ctx.ray.origin, ctx.ray.direction, last, [0, 1, 0]);
       if (!p && hit) p = [hit.point[0], last[1], hit.point[2]];
       if (!p) return null;
-      if (L.ortho) p = orthoSnap(last, p);
+      if (isConduitType(L.type)) {
+        // Rígido: curvas de 45° e 90°; flexível: curvatura livre.
+        if (!L.type.flexible) p = angleSnap(last, p, L.ortho ? 90 : 45);
+      } else if (L.ortho) p = orthoSnap(last, p);
       return {
         point: [last[0] + roundStep(p[0] - last[0]), last[1], last[2] + roundStep(p[2] - last[2])],
         snap: "plano",
         label: "plano de trabalho",
       };
     },
-    [objectCandidate],
+    [objectCandidate, conduitY, floorAt],
   );
+
+  /**
+   * Primeiro vértice num ponto locado: o eletroduto sai do ponto e sobe (ou desce)
+   * pela parede até a cota da instalação, e daí segue no plano horizontal.
+   */
+  const startAt = useCallback(
+    (c: Candidate): Vec3[] => {
+      if (c.snap !== "ponto") return [c.point];
+      const y = conduitY(c.point[0], c.point[2], floorAt(c.point[1]));
+      if (y == null || Math.abs(y - c.point[1]) < 0.01) return [c.point];
+      return [c.point, [c.point[0], y, c.point[2]]];
+    },
+    [conduitY, floorAt],
+  );
+
+  /** Chegada a um ponto ou trecho: horizontal até a vertical do destino e desce/sobe até ele. */
+  const arriveAt = useCallback((last: Vec3, target: Vec3): Vec3[] => {
+    const L = live.current;
+    if (isConduitType(L.type) && L.type.flexible) return simplify([last, [target[0], last[1], target[2]], target]);
+    return manhattanPath(last, target, last[1]);
+  }, []);
 
   const finishRun = useCallback(
     (vertices: Vec3[]) => {
@@ -187,6 +252,7 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
         slope: L.slope,
         vertices: L.slope ? applySlope(v, L.slope) : v,
         params: L.type.circuit && L.circuit.trim() ? { Circuito: L.circuit.trim() } : {},
+        ...(isConduitType(L.type) ? { install: { ...L.install } } : {}),
       };
       store.addRuns([run]);
       setDraft([]);
@@ -198,14 +264,15 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
   const autoPaths = useCallback((): Vec3[][] => {
     const L = live.current;
     if (!L.destination || !selectedPoints.length) return [];
-    const elevation = floorAt(L.destination.point[1]) + L.workElevation;
+    const floorY = floorAt(L.destination.point[1]);
+    const elevation = conduitY(L.destination.point[0], L.destination.point[2], floorY) ?? floorY + L.workElevation;
     return autoRoute(
       selectedPoints.map((p) => p.position),
       L.destination.point,
       elevation,
       routeMode,
     );
-  }, [selectedPoints, floorAt, routeMode]);
+  }, [selectedPoints, floorAt, routeMode, conduitY]);
 
   const generateAuto = () => {
     const L = live.current;
@@ -224,6 +291,7 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
         slope: L.slope,
         vertices: L.slope ? applySlope(path, L.slope) : path,
         params: L.type.circuit && L.circuit.trim() ? { Circuito: L.circuit.trim() } : {},
+        ...(isConduitType(L.type) ? { install: { ...L.install } } : {}),
       };
       all = [...all, run];
       created.push(run);
@@ -271,10 +339,11 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
           return segPreview(L.draft);
         }
         if (!last) {
-          setStatus(`Início em ${c.label} · clique para começar`);
-          return segPreview([c.point]);
+          const start = startAt(c);
+          setStatus(`Início em ${c.label}${start.length > 1 ? ` · ${start[1][1] > c.point[1] ? "sobe" : "desce"} até a cota ${INSTALL_LABEL[L.install.mode]}` : ""} · clique para começar`);
+          return segPreview(start);
         }
-        const tail = c.snap === "ponto" || c.snap === "trecho" ? manhattanPath(last, c.point, last[1]) : [last, c.point];
+        const tail = c.snap === "ponto" || c.snap === "trecho" ? arriveAt(last, c.point) : [last, c.point];
         const legLength = runLength({ vertices: tail } as Run);
         const totalLength = runLength({ vertices: [...L.draft, ...tail.slice(1)] } as Run);
         setStatus(
@@ -297,11 +366,11 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
         if (!c) return;
         const last = L.draft[L.draft.length - 1];
         if (!last) {
-          setDraft([c.point]);
+          setDraft(startAt(c));
           return;
         }
         if (c.snap === "ponto" || c.snap === "trecho") {
-          finishRun([...L.draft, ...manhattanPath(last, c.point, last[1]).slice(1)]);
+          finishRun([...L.draft, ...arriveAt(last, c.point).slice(1)]);
           return;
         }
         if (distance(last, c.point) > 0.001) setDraft([...L.draft, c.point]);
@@ -312,7 +381,7 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
       },
     });
     return () => viewer.setPlacementHandler(null);
-  }, [armed, viewer, nextCandidate, objectCandidate, finishRun, autoPaths]);
+  }, [armed, viewer, nextCandidate, objectCandidate, finishRun, autoPaths, startAt, arriveAt]);
 
   // Qualquer mudança de configuração atualiza a pré-visualização.
   useEffect(() => viewer.refreshPlacement());
@@ -337,9 +406,9 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
   const goToWorkElevation = useCallback(() => {
     const last = live.current.draft[live.current.draft.length - 1];
     if (!last) return;
-    const y = floorAt(last[1]) + live.current.workElevation;
+    const y = conduitY(last[0], last[2], floorAt(last[1] - 0.1)) ?? floorAt(last[1]) + live.current.workElevation;
     setDraft([...live.current.draft, [last[0], y, last[2]]]);
-  }, [floorAt]);
+  }, [floorAt, conduitY]);
 
   const files = useProjectFiles(store, model, fileName, () => onSelect([]));
 
@@ -396,6 +465,23 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
     return [...groups.values()];
   }, [store.runs]);
 
+  const boxes = useMemo(() => pullBoxes(store.runs, store.points), [store.runs, store.points]);
+  /** Muda a instalação dos eletrodutos selecionados e os leva para a nova cota. */
+  const reinstall = (runs: Run[], patch: Partial<ConduitInstall>) => {
+    const changes = new Map(
+      runs.filter(isConduitRun).map((r) => {
+        const inst = { ...(r.install ?? DEFAULT_INSTALL), ...patch };
+        const floorY = floorAt(runFloorProbeY(r));
+        const mid = r.vertices[Math.floor(r.vertices.length / 2)];
+        return [r.id, applyInstall(r, inst, { floorY, slabUnderside: slabAt(mid[0], mid[2], floorY), entreforroHeight: workElevation, points: store.points })];
+      }),
+    );
+    store.updateRuns([...changes.keys()], (r) => changes.get(r.id)!);
+  };
+  /** Ajuste do arranjo de uma caixa: grava em todos os eletrodutos que passam por ela. */
+  const setBoxInstall = (runIds: number[], patch: Partial<ConduitInstall>) =>
+    store.updateRuns(runIds, (r) => ({ install: { ...(r.install ?? DEFAULT_INSTALL), ...patch } }), `box:${Object.keys(patch).join(",")}`);
+
   const runElementIds = (runs: Run[]) => runs.flatMap((r) => runSegments(r).map((s) => segmentElementId(r.id, s.index)));
 
   return (
@@ -412,7 +498,9 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
         </div>
       </div>
 
-      {selectedRuns.length > 0 && <RunEditor runs={selectedRuns} store={store} systems={systems} onDelete={() => (store.removeRuns(selectedRunIds), onSelect([]))} />}
+      {selectedRuns.length > 0 && (
+        <RunEditor runs={selectedRuns} store={store} systems={systems} onDelete={() => (store.removeRuns(selectedRunIds), onSelect([]))} onReinstall={reinstall} />
+      )}
 
       <section className="card">
         <div className="form-grid">
@@ -422,8 +510,9 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
               {GROUPS.filter((g) => RUN_TYPES.some((t) => t.group === g && (!typeIds || typeIds.includes(t.id)))).map((g) => (
                 <optgroup key={g} label={g}>
                   {RUN_TYPES.filter((t) => t.group === g && (!typeIds || typeIds.includes(t.id))).map((t) => (
-                    <option key={t.id} value={t.id}>
+                    <option key={t.id} value={t.id} disabled={!typeAllowed(t, install.mode)}>
                       {t.label}
+                      {!typeAllowed(t, install.mode) ? " (só embutido)" : ""}
                     </option>
                   ))}
                 </optgroup>
@@ -451,22 +540,28 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
               <input value={circuit} onChange={(e) => setCircuit(e.target.value)} placeholder="ex.: C3" />
             </label>
           )}
-          <label>
-            Elevação de trabalho (m, acima do piso)
-            <input type="number" step={0.05} value={workElevation} onChange={(e) => setWorkElevation(Number(e.target.value))} />
-          </label>
-          <label>
-            Declividade (%)
-            <input type="number" step={0.5} min={0} value={slope} onChange={(e) => setSlope(Math.max(0, Number(e.target.value)))} />
-          </label>
+          {(!conduit || (install.mode === "aparente" && install.apparentRef === "entreforro")) && (
+            <label>
+              {conduit ? "Altura no entreforro (m, acima do piso)" : "Elevação de trabalho (m, acima do piso)"}
+              <input type="number" step={0.05} value={workElevation} onChange={(e) => setWorkElevation(Number(e.target.value))} />
+            </label>
+          )}
+          {!conduit && (
+            <label>
+              Declividade (%)
+              <input type="number" step={0.5} min={0} value={slope} onChange={(e) => setSlope(Math.max(0, Number(e.target.value)))} />
+            </label>
+          )}
         </div>
         <datalist id="systems-list-run">
           {systems.map((s) => (
             <option key={s} value={s} />
           ))}
         </datalist>
+        {conduit && <InstallChooser install={install} onChange={chooseInstall} />}
         <div className="muted small">
           <span className="swatch" style={{ background: DISCIPLINE_BY_ID[type.discipline].color }} /> {type.material}
+          {conduit && (type.flexible ? " · flexível: curvatura livre, curva de 90° só na subida/descida" : " · rígido: curvas de 45° e 90°")}
           {type.slopeFor && ` · declividade padrão ${formatNumber(type.slopeFor(size), 1)}% (no sentido do desenho)`}
         </div>
 
@@ -481,9 +576,12 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
 
         {mode === "desenhar" ? (
           <div className="mode-body">
-            <label className="check-row">
-              <input type="checkbox" checked={ortho} onChange={(e) => setOrtho(e.target.checked)} /> Ortogonal (trechos em X, Y ou vertical)
-            </label>
+            {!(conduit && type.flexible) && (
+              <label className="check-row">
+                <input type="checkbox" checked={ortho} onChange={(e) => setOrtho(e.target.checked)} />{" "}
+                {conduit ? "Só 90° (desmarque para permitir curvas de 45°)" : "Ortogonal (trechos em X, Y ou vertical)"}
+              </label>
+            )}
             <div className="btn-row wrap">
               <button className={`btn ${drawing ? "" : "primary"}`} onClick={() => (setDrawing(!drawing), setDraft([]))}>
                 {drawing ? "Parar de desenhar (Esc)" : "Desenhar trecho"}
@@ -502,6 +600,12 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
                 </>
               )}
             </div>
+            {conduit && (
+              <p className="muted small">
+                Saindo de um ponto locado (ex.: tomada a 30 cm), o eletroduto sobe ou desce pela parede até a cota {INSTALL_LABEL[install.mode]} e
+                segue por ela; ao chegar em outro ponto, desce ou sobe até ele.
+              </p>
+            )}
             <p className="muted small">
               Comece num ponto locado, num trecho (gera tê) ou numa superfície. Os próximos cliques seguem no plano do último vértice; segure Shift
               para subir ou descer. Clicar num ponto ou trecho liga até ele e finaliza.
@@ -566,6 +670,74 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
         )}
       </section>
 
+      {boxes.length > 0 && (
+        <section>
+          <div className="section-title">Caixas de passagem ({boxes.length})</div>
+          <p className="muted small">
+            Calculadas pelas regras: até 15 m sem curva, 12 m com 1 curva, 9 m com 2 curvas e no máximo 2 curvas entre caixas; derivações e pontas livres
+            também levam caixa.
+          </p>
+          <table className="grid-table boxes">
+            <thead>
+              <tr>
+                <th>Caixa</th>
+                <th>Tipo e medidas</th>
+                <th>Arranjo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {boxes.map((b) => {
+                const tubes = store.runs.filter((r) => b.runIds.includes(r.id));
+                return (
+                  <tr key={b.tag} className="clickable" onClick={() => onSelect([boxElementId(b.index)], true)} title={b.reasons.map((r) => BOX_REASON_LABEL[r]).join(", ")}>
+                    <td>
+                      <b>{b.tag}</b>
+                      <div className="muted small">{tubes.map((r) => `${r.tag} ${r.size.label}`).join(", ")}</div>
+                    </td>
+                    <td>
+                      {b.spec.count > 1 ? `${b.spec.count}× ` : ""}
+                      {b.spec.label}
+                      <div className="muted small">
+                        {boxSizeLabel(b)} · mín. {Math.round(b.spec.required[0])}×{Math.round(b.spec.required[1])} mm
+                      </div>
+                      {b.spec.warning && <div className="warn-text small">{b.spec.warning}</div>}
+                    </td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      {b.spec.kind === "alvenaria" ? (
+                        <span className="matrix">
+                          <input
+                            type="number"
+                            min={1}
+                            title="Tubos na horizontal"
+                            value={b.install.matrix?.cols ?? b.runIds.length}
+                            onChange={(e) => setBoxInstall(b.runIds, { matrix: { cols: Math.max(1, Number(e.target.value)), rows: b.install.matrix?.rows ?? 1 } })}
+                          />
+                          ×
+                          <input
+                            type="number"
+                            min={1}
+                            title="Tubos na vertical"
+                            value={b.install.matrix?.rows ?? 1}
+                            onChange={(e) => setBoxInstall(b.runIds, { matrix: { cols: b.install.matrix?.cols ?? b.runIds.length, rows: Math.max(1, Number(e.target.value)) } })}
+                          />
+                        </span>
+                      ) : b.runIds.length > 1 && b.spec.kind !== "condulete" ? (
+                        <select value={b.install.layout ?? "horizontal"} onChange={(e) => setBoxInstall(b.runIds, { layout: e.target.value as "horizontal" | "vertical" })}>
+                          <option value="horizontal">horizontal</option>
+                          <option value="vertical">vertical</option>
+                        </select>
+                      ) : (
+                        <span className="muted small">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
+      )}
+
       <div className="btn-row wrap">
         <button className="btn primary" onClick={files.save} disabled={store.isEmpty} title="Ctrl+S">
           Salvar projeto{store.dirty && !store.isEmpty ? " •" : ""}
@@ -586,7 +758,22 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
   );
 }
 
-function RunEditor({ runs, store, systems, onDelete }: { runs: Run[]; store: PointsStore; systems: string[]; onDelete: () => void }) {
+function RunEditor({
+  runs,
+  store,
+  systems,
+  onDelete,
+  onReinstall,
+}: {
+  runs: Run[];
+  store: PointsStore;
+  systems: string[];
+  onDelete: () => void;
+  onReinstall: (runs: Run[], patch: Partial<ConduitInstall>) => void;
+}) {
+  const conduits = runs.every(isConduitRun);
+  const modeOf = (r: Run) => r.install?.mode ?? "laje";
+  const commonMode = runs.every((r) => modeOf(r) === modeOf(runs[0])) ? modeOf(runs[0]) : "";
   const ids = runs.map((r) => r.id);
   const single = runs.length === 1 ? runs[0] : null;
   const sameType = runs.every((r) => r.typeId === runs[0].typeId);
@@ -604,6 +791,17 @@ function RunEditor({ runs, store, systems, onDelete }: { runs: Run[]; store: Poi
         Comprimento: {formatNumber(total, 2)} m{single?.slope ? ` · declividade ${formatNumber(single.slope, 1)}%` : ""}
       </div>
       <div className="form-grid">
+        {conduits && (
+          <label>
+            Instalação
+            <select value={commonMode} onChange={(e) => e.target.value && onReinstall(runs, { mode: e.target.value as InstallMode })}>
+              {!commonMode && <option value="">(várias)</option>}
+              <option value="piso">Embutido no piso</option>
+              <option value="laje">Embutido na laje</option>
+              <option value="aparente">Aparente no teto</option>
+            </select>
+          </label>
+        )}
         {single && (
           <label>
             Etiqueta
@@ -655,5 +853,55 @@ function RunEditor({ runs, store, systems, onDelete }: { runs: Run[]; store: Poi
         </button>
       </div>
     </section>
+  );
+}
+
+/** Forma de instalação do eletroduto: piso, laje ou aparente no teto. */
+function InstallChooser({ install, onChange }: { install: ConduitInstall; onChange: (i: ConduitInstall) => void }) {
+  const modes: InstallMode[] = ["piso", "laje", "aparente"];
+  return (
+    <div className="install-chooser">
+      <div className="field-label">Instalação</div>
+      <div className="segmented">
+        {modes.map((m) => (
+          <button key={m} className={install.mode === m ? "on" : ""} onClick={() => onChange({ ...install, mode: m })}>
+            {m === "piso" ? "Piso" : m === "laje" ? "Laje" : "Aparente no teto"}
+          </button>
+        ))}
+      </div>
+      {install.mode === "aparente" && (
+        <div className="options">
+          <label>
+            <input type="radio" checked={install.apparentRef !== "entreforro"} onChange={() => onChange({ ...install, apparentRef: "laje" })} /> Sob a laje
+          </label>
+          <label>
+            <input type="radio" checked={install.apparentRef === "entreforro"} onChange={() => onChange({ ...install, apparentRef: "entreforro" })} /> No entreforro
+          </label>
+        </div>
+      )}
+      {install.mode === "piso" && (
+        <div className="options">
+          <label>
+            <input type="checkbox" checked={!!install.external} onChange={(e) => onChange({ ...install, external: e.target.checked })} /> Rede externa (caixas em
+            alvenaria)
+          </label>
+          {!install.external && (
+            <label title='Caixa de piso interno: só 4×4" com eletroduto até 1"'>
+              Acima de 1":
+              <select value={install.floorLarge ?? "alvenaria"} onChange={(e) => onChange({ ...install, floorLarge: e.target.value as "alvenaria" | "parede" })}>
+                <option value="alvenaria">caixa em alvenaria</option>
+                <option value="parede">caixa na parede (camada única)</option>
+              </select>
+            </label>
+          )}
+        </div>
+      )}
+      <div className="muted small">
+        {install.mode === "piso" && "Embutido no contrapiso (eixo 5 cm abaixo do piso). PVC/PEAD flexível permitido."}
+        {install.mode === "laje" && "Embutido na laje de teto (eixo 5 cm acima da face inferior). PVC/PEAD flexível permitido; caixas octogonais."}
+        {install.mode === "aparente" &&
+          (install.apparentRef === "entreforro" ? "Aparente no entreforro, na altura informada." : "Aparente, fixado sob a laje.") + " Só eletroduto rígido (PVC ou aço)."}
+      </div>
+    </div>
   );
 }
