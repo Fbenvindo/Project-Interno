@@ -15,6 +15,8 @@ import {
   type IfcAPI,
 } from "web-ifc";
 import { classifyDiscipline, getCategory, isGenericMepType, isKnownIfcType } from "../core/disciplines";
+import { CoordinateSystem } from "../core/math";
+import type { StoreyLevel } from "../core/points";
 import { deriveLength, deriveSize, systemsFromProps } from "../core/quantities";
 import type { BBox, ElementInfo, PropertyGroup, PropertyValue } from "../core/types";
 
@@ -37,6 +39,10 @@ export interface LoadedModel {
   meshes: ElementMesh[];
   /** Pavimentos ordenados por elevação. */
   storeys: string[];
+  /** Cota de cada pavimento na cena (Y, metros). */
+  storeyLevels: StoreyLevel[];
+  /** Conversão entre coordenadas da cena e do IFC. */
+  coordinates: CoordinateSystem;
   systems: string[];
   getProperties(expressID: number): PropertyGroup[];
   close(): void;
@@ -77,8 +83,10 @@ export function loadIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn =
     meshes.push({ expressID: flat.expressID, ...merge(parts), color });
   });
 
-  // ---- Unidades ------------------------------------------------------------
+  // ---- Unidades e coordenadas ------------------------------------------------
   const unitToMeters = readLengthUnit();
+  // Calculada pelo web-ifc durante a geração da geometria (COORDINATE_TO_ORIGIN).
+  const coordinates = new CoordinateSystem(Array.from(api.GetCoordinationMatrix(modelID)));
 
   // ---- Estrutura espacial --------------------------------------------------
   onProgress("Lendo pavimentos e sistemas", 0.6);
@@ -231,7 +239,12 @@ export function loadIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn =
     });
   }
 
-  const storeys = [...storeyInfo.values()].sort((a, b) => a.elevation - b.elevation).map((s) => s.name);
+  const sortedStoreys = [...storeyInfo.values()].sort((a, b) => a.elevation - b.elevation);
+  const storeys = sortedStoreys.map((s) => s.name);
+  const storeyLevels = sortedStoreys.map((s) => ({
+    name: s.name,
+    level: coordinates.ifcToWorld([0, 0, s.elevation * unitToMeters])[1],
+  }));
   onProgress("Concluído", 1);
 
   return {
@@ -241,6 +254,8 @@ export function loadIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn =
     elements,
     meshes,
     storeys,
+    storeyLevels,
+    coordinates,
     systems: [...systemNames].sort((a, b) => a.localeCompare(b, "pt-BR")),
     getProperties,
     close: () => api.CloseModel(modelID),

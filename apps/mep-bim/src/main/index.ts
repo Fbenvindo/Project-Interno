@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from 
 import { readFile, writeFile } from "node:fs/promises";
 import { basename, join, normalize, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { OpenedFile, SaveRequest } from "../shared/ipc";
+import type { FileFilter, OpenedFile, OpenedTextFile, SaveRequest } from "../shared/ipc";
 
 // Em produção o renderer é servido por um protocolo próprio (app://), com
 // origem estável e cabeçalho CSP, em vez de file://.
@@ -96,6 +96,13 @@ ipcMain.handle("ifc:pending", async (): Promise<OpenedFile | null> => {
   const file = pendingFile;
   pendingFile = null;
   return readIfc(file);
+});
+
+ipcMain.handle("file:openText", async (_e, filters: FileFilter[]): Promise<OpenedTextFile | null> => {
+  const res = await dialog.showOpenDialog(mainWindow!, { title: "Abrir arquivo", filters, properties: ["openFile"] });
+  if (res.canceled || !res.filePaths[0]) return null;
+  const path = res.filePaths[0];
+  return { name: basename(path), path, content: await readFile(path, "utf8") };
 });
 
 ipcMain.handle("file:save", async (_e, req: SaveRequest): Promise<string | null> => {

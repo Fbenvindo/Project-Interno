@@ -40,6 +40,7 @@ export function PropertiesPanel({ elements, getProperties, onFrame }: Props) {
   const el = elements[0];
   const d = DISCIPLINE_BY_ID[el.discipline];
   const summary: [string, string][] = [
+    ["Origem", el.origin === "locacao" ? "Locação (criado no app)" : "Modelo IFC"],
     ["Disciplina", d.label],
     ["Tipo", `${getTypeLabel(el.ifcType)} (${el.ifcType})`],
     ["Tipo pré-definido", el.predefinedType ?? "—"],

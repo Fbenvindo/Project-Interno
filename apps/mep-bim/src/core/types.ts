@@ -55,4 +55,6 @@ export interface ElementInfo {
   length: number | null;
   /** Dimensão nominal legível, ex.: "Ø50" ou "400x300" (mm). */
   size: string | null;
+  /** "locacao" para pontos criados no app; ausente para elementos do IFC. */
+  origin?: "ifc" | "locacao";
 }

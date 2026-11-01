@@ -550,3 +550,94 @@ summary {
 .result.fail {
   border-left-color: var(--fail);
 }
+
+/* ---- Locação ------------------------------------------------------------ */
+.btn-row {
+  display: flex;
+  gap: 6px;
+}
+.btn-row.wrap {
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.btn.danger {
+  border-color: #6b2b2e;
+  color: #ff8a80;
+}
+.btn.danger:hover:not(:disabled) {
+  background: #4a1f22;
+}
+.locacao section {
+  margin-top: 14px;
+}
+.lib .search {
+  margin-bottom: 8px;
+}
+.lib-group {
+  margin-top: 8px;
+}
+.lib-group-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.lib-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+.lib-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  text-align: left;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  cursor: pointer;
+  min-width: 0;
+}
+.lib-item .grow {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lib-item:hover {
+  border-color: #46505f;
+}
+.lib-item.on {
+  border-color: var(--accent);
+  background: #1f2a3a;
+}
+.card h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.segmented button {
+  background: none;
+  border: none;
+  padding: 6px 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.segmented button.on {
+  background: var(--accent);
+  color: #fff;
+}
+.place-status {
+  position: sticky;
+  bottom: 0;
+  border: 1px solid var(--accent);
+  background: #1a2433;
+}
+.editor {
+  border-color: #00a5b8;
+}

@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { DISCIPLINES } from "../../../core/disciplines";
-import type { Discipline } from "../../../core/types";
-import type { LoadedModel } from "../../../ifc/loadIfc";
+import type { Discipline, ElementInfo } from "../../../core/types";
 
 export const NO_STOREY = "(sem pavimento)";
 
@@ -14,7 +13,9 @@ export interface Filters {
 }
 
 interface Props {
-  model: LoadedModel;
+  elements: ElementInfo[];
+  storeys: string[];
+  systems: string[];
   filters: Filters;
   onChange: (f: Filters) => void;
   visibleCount: number;
@@ -28,21 +29,21 @@ function toggle<T>(set: Set<T>, value: T): Set<T> {
   return next;
 }
 
-export function FilterPanel({ model, filters, onChange, visibleCount, onIsolate }: Props) {
+export function FilterPanel({ elements, storeys, systems, filters, onChange, visibleCount, onIsolate }: Props) {
   const counts = useMemo(() => {
     const disciplines = new Map<Discipline, number>();
     const storeys = new Map<string, number>();
     const systems = new Map<string, number>();
-    for (const e of model.elements) {
+    for (const e of elements) {
       disciplines.set(e.discipline, (disciplines.get(e.discipline) ?? 0) + 1);
       const s = e.storey ?? NO_STOREY;
       storeys.set(s, (storeys.get(s) ?? 0) + 1);
       for (const sys of e.systems) systems.set(sys, (systems.get(sys) ?? 0) + 1);
     }
     return { disciplines, storeys, systems };
-  }, [model]);
+  }, [elements]);
 
-  const storeyList = [...model.storeys.filter((s) => counts.storeys.has(s)), ...(counts.storeys.has(NO_STOREY) ? [NO_STOREY] : [])];
+  const storeyList = [...storeys.filter((s) => counts.storeys.has(s)), ...(counts.storeys.has(NO_STOREY) ? [NO_STOREY] : [])];
 
   return (
     <div className="filters">
@@ -54,7 +55,7 @@ export function FilterPanel({ model, filters, onChange, visibleCount, onIsolate 
         onChange={(e) => onChange({ ...filters, search: e.target.value })}
       />
       <div className="muted small">
-        {visibleCount} de {model.elements.length} elementos visíveis
+        {visibleCount} de {elements.length} elementos visíveis
       </div>
 
       <section>
@@ -111,7 +112,7 @@ export function FilterPanel({ model, filters, onChange, visibleCount, onIsolate 
               </button>
             )}
           </div>
-          {model.systems.map((s) => (
+          {systems.map((s) => (
             <label key={s} className="check-row">
               <input type="checkbox" checked={filters.systems.has(s)} onChange={() => onChange({ ...filters, systems: toggle(filters.systems, s) })} />
               <span className="grow">{s}</span>

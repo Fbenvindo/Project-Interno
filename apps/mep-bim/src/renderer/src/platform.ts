@@ -1,7 +1,7 @@
 // Acesso à plataforma: usa a API do Electron quando disponível e, no navegador
 // (modo de desenvolvimento "dev:web"), recorre a <input type=file> e download.
 import { IfcAPI } from "web-ifc";
-import type { DesktopApi, OpenedFile, SaveRequest } from "../../shared/ipc";
+import type { DesktopApi, FileFilter, OpenedFile, OpenedTextFile, SaveRequest } from "../../shared/ipc";
 
 declare global {
   interface Window {
@@ -27,13 +27,27 @@ export async function openIfc(): Promise<OpenedFile | null> {
 
 export async function saveFile(req: SaveRequest): Promise<string | null> {
   if (desktop) return desktop.saveFile(req);
-  const blob = new Blob([req.content], { type: "text/csv;charset=utf-8" });
+  const blob = new Blob([req.content], { type: "text/plain;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = req.defaultName;
   a.click();
   URL.revokeObjectURL(a.href);
   return req.defaultName;
+}
+
+export async function openTextFile(filters: FileFilter[]): Promise<OpenedTextFile | null> {
+  if (desktop) return desktop.openTextFile(filters);
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = filters.flatMap((f) => f.extensions.map((e) => `.${e}`)).join(",");
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      resolve(file ? { name: file.name, path: null, content: await file.text() } : null);
+    };
+    input.click();
+  });
 }
 
 let ifcApi: Promise<IfcAPI> | null = null;

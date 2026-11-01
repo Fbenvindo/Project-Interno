@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DISCIPLINE_BY_ID, getTypeLabel } from "../../core/disciplines";
-import type { Discipline, ElementInfo } from "../../core/types";
+import { COMPONENT_BY_ID } from "../../core/library";
+import { sizeMeters } from "../../core/placement";
+import { pointProperties, pointToElement, type PlacedPoint } from "../../core/points";
+import type { Discipline, ElementInfo, Vec3 } from "../../core/types";
 import { loadIfc, type LoadedModel } from "../../ifc/loadIfc";
 import { desktop, getIfcApi, openIfc } from "./platform";
 import { Viewer, type ColorMode } from "./viewer/Viewer";
@@ -10,17 +13,34 @@ import { QuantitiesPanel } from "./components/QuantitiesPanel";
 import { ClashPanel } from "./components/ClashPanel";
 import { CalcPanel } from "./components/CalcPanel";
 import type { OpenedFile } from "../../shared/ipc";
+import { LocacaoPanel } from "./locacao/LocacaoPanel";
+import { usePointsStore } from "./locacao/usePointsStore";
 
-type Tab = "modelo" | "quantitativos" | "interferencias" | "dimensionamento";
+type Tab = "modelo" | "locacao" | "quantitativos" | "interferencias" | "dimensionamento";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "modelo", label: "Modelo" },
+  { id: "locacao", label: "Locação" },
   { id: "quantitativos", label: "Quantitativos" },
   { id: "interferencias", label: "Interferências" },
   { id: "dimensionamento", label: "Dimensionamento" },
 ];
 
 const EMPTY_FILTERS: Filters = { hiddenDisciplines: new Set(), hiddenStoreys: new Set(), systems: new Set(), search: "" };
+
+/** Direção de enquadramento para pontos: de frente para a parede ou por baixo do teto. */
+function viewDirectionFor(points: PlacedPoint[]): Vec3 | undefined {
+  if (!points.length) return undefined;
+  const mountings = new Set(points.map((p) => COMPONENT_BY_ID[p.componentId].mounting));
+  if (mountings.size !== 1) return undefined;
+  const [m] = mountings;
+  if (m === "teto") return [0.5, -1, 0.7];
+  if (m === "piso") return [0.5, 1.2, 0.7];
+  const x = points.reduce((s, p) => s + Math.sin(p.rotation), 0);
+  const z = points.reduce((s, p) => s + Math.cos(p.rotation), 0);
+  const len = Math.hypot(x, z);
+  return len < 1e-6 ? undefined : [x / len, 0.35, z / len];
+}
 
 export function App() {
   const viewerHost = useRef<HTMLDivElement>(null);
@@ -35,7 +55,24 @@ export function App() {
   const [selection, setSelection] = useState<number[]>([]);
   const [colorMode, setColorMode] = useState<ColorMode>("disciplina");
 
-  const elementById = useMemo(() => new Map(model?.elements.map((e) => [e.expressID, e]) ?? []), [model]);
+  const store = usePointsStore();
+  const pointElements = useMemo(() => store.points.map(pointToElement), [store.points]);
+  const allElements = useMemo(() => (model ? [...model.elements, ...pointElements] : []), [model, pointElements]);
+  const elementById = useMemo(() => new Map(allElements.map((e) => [e.expressID, e])), [allElements]);
+  const allSystems = useMemo(
+    () => [...new Set([...(model?.systems ?? []), ...store.points.map((p) => p.system).filter(Boolean)])].sort((a, b) => a.localeCompare(b, "pt-BR")),
+    [model, store.points],
+  );
+  const getProperties = useCallback(
+    (id: number) => {
+      if (id < 0) {
+        const p = store.points.find((x) => x.id === id);
+        return p ? pointProperties(p) : [];
+      }
+      return model?.getProperties(id) ?? [];
+    },
+    [model, store.points],
+  );
 
   // ---- Visualizador --------------------------------------------------------
   useEffect(() => {
@@ -58,8 +95,27 @@ export function App() {
   useEffect(() => viewerRef.current?.setSelection(selection), [selection]);
   useEffect(() => viewerRef.current?.setColorMode(colorMode), [colorMode]);
 
+  // Pontos locados na cena (recriados também após abrir outro modelo).
+  useEffect(() => {
+    viewerRef.current?.setPoints(
+      store.points.map((p) => {
+        const def = COMPONENT_BY_ID[p.componentId];
+        return { id: p.id, shape: def.shape, size: sizeMeters(def), position: p.position, rotation: p.rotation, color: DISCIPLINE_BY_ID[def.discipline].color };
+      }),
+    );
+  }, [store.points, model]);
+
+  // Ganchos para testes automatizados da interface (somente em desenvolvimento).
+  useEffect(() => {
+    if (import.meta.env.DEV) Object.assign(window, { __mep: { viewer: viewerRef.current, model, store } });
+  }, [model, store]);
+
+  const dirtyRef = useRef(false);
+  dirtyRef.current = store.dirty && store.points.length > 0;
+
   // ---- Abertura de arquivos ------------------------------------------------
   const openFile = useCallback(async (file: OpenedFile) => {
+    if (dirtyRef.current && !window.confirm("Há pontos locados não salvos neste modelo. Abrir outro modelo e descartá-los?")) return;
     setError(null);
     setProgress("Inicializando leitor IFC…");
     // Deixa a interface pintar a mensagem antes do processamento pesado.
@@ -71,6 +127,7 @@ export function App() {
       modelRef.current = loaded;
       const disciplineOf = new Map(loaded.elements.map((e) => [e.expressID, e.discipline]));
       viewerRef.current!.load(loaded.meshes, (id) => DISCIPLINE_BY_ID[disciplineOf.get(id) ?? "outros"].color);
+      store.reset([]);
       setModel(loaded);
       setFileName(file.name);
       setFilters(EMPTY_FILTERS);
@@ -129,7 +186,7 @@ export function App() {
   const visibleElements = useMemo<ElementInfo[]>(() => {
     if (!model) return [];
     const q = filters.search.trim().toLowerCase();
-    return model.elements.filter((e) => {
+    return allElements.filter((e) => {
       if (filters.hiddenDisciplines.has(e.discipline)) return false;
       if (filters.hiddenStoreys.has(e.storey ?? NO_STOREY)) return false;
       if (filters.systems.size && !e.systems.some((s) => filters.systems.has(s))) return false;
@@ -139,17 +196,24 @@ export function App() {
       }
       return true;
     });
-  }, [model, filters]);
+  }, [model, allElements, filters]);
 
   useEffect(() => {
     if (!model) return;
-    const all = visibleElements.length === model.elements.length;
+    const all = visibleElements.length === allElements.length;
     viewerRef.current?.setVisible(all ? null : new Set(visibleElements.map((e) => e.expressID)));
-  }, [model, visibleElements]);
+  }, [model, allElements, visibleElements]);
 
   const selectAndFrame = useCallback((ids: number[]) => {
     setSelection(ids);
     viewerRef.current?.fitTo(ids);
+  }, []);
+
+  const pointsRef = useRef(store.points);
+  pointsRef.current = store.points;
+  const selectPoints = useCallback((ids: number[], frame = false) => {
+    setSelection(ids);
+    if (frame) viewerRef.current?.fitTo(ids, viewDirectionFor(pointsRef.current.filter((p) => ids.includes(p.id))));
   }, []);
 
   const focusClash = useCallback((ids: number[]) => {
@@ -206,7 +270,15 @@ export function App() {
       <main className={`workspace ${wide ? "wide" : ""}`}>
         <aside className="sidebar">
           {model ? (
-            <FilterPanel model={model} filters={filters} onChange={setFilters} visibleCount={visibleElements.length} onIsolate={isolateDiscipline} />
+            <FilterPanel
+              elements={allElements}
+              storeys={model.storeys}
+              systems={allSystems}
+              filters={filters}
+              onChange={setFilters}
+              visibleCount={visibleElements.length}
+              onIsolate={isolateDiscipline}
+            />
           ) : (
             <div className="empty-side">Abra um modelo IFC para ver disciplinas, pavimentos e sistemas.</div>
           )}
@@ -239,12 +311,24 @@ export function App() {
               Erro ao abrir o modelo: {error}
             </div>
           )}
-          {model && <div className="hint">Clique para selecionar · Ctrl+clique para somar · duplo clique para enquadrar</div>}
+          {model && tab !== "locacao" && <div className="hint">Clique para selecionar · Ctrl+clique para somar · duplo clique para enquadrar</div>}
         </section>
 
         <aside className="panel">
           {tab === "modelo" && model && (
-            <PropertiesPanel elements={selection.map((id) => elementById.get(id)).filter(Boolean) as ElementInfo[]} getProperties={model.getProperties} onFrame={selectAndFrame} />
+            <PropertiesPanel elements={selection.map((id) => elementById.get(id)).filter(Boolean) as ElementInfo[]} getProperties={getProperties} onFrame={selectAndFrame} />
+          )}
+          {tab === "locacao" && model && viewerRef.current && (
+            <LocacaoPanel
+              model={model}
+              fileName={fileName}
+              store={store}
+              viewer={viewerRef.current}
+              elementById={elementById}
+              selection={selection}
+              onSelect={selectPoints}
+              systems={allSystems}
+            />
           )}
           {tab === "quantitativos" && model && <QuantitiesPanel elements={visibleElements} fileName={fileName} onSelect={selectAndFrame} />}
           {tab === "interferencias" && model && (
