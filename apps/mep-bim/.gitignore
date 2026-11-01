@@ -1,0 +1,6 @@
+node_modules
+out
+release
+# Copiados por scripts/prepare-assets.mjs
+src/renderer/public/wasm/
+src/renderer/public/samples/

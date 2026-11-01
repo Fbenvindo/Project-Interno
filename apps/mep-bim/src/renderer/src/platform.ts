@@ -1,0 +1,52 @@
+// Acesso à plataforma: usa a API do Electron quando disponível e, no navegador
+// (modo de desenvolvimento "dev:web"), recorre a <input type=file> e download.
+import { IfcAPI } from "web-ifc";
+import type { DesktopApi, OpenedFile, SaveRequest } from "../../shared/ipc";
+
+declare global {
+  interface Window {
+    desktop?: DesktopApi;
+  }
+}
+
+export const desktop = window.desktop ?? null;
+
+export async function openIfc(): Promise<OpenedFile | null> {
+  if (desktop) return desktop.openIfc();
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".ifc";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      resolve(file ? { name: file.name, path: null, data: new Uint8Array(await file.arrayBuffer()) } : null);
+    };
+    input.click();
+  });
+}
+
+export async function saveFile(req: SaveRequest): Promise<string | null> {
+  if (desktop) return desktop.saveFile(req);
+  const blob = new Blob([req.content], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = req.defaultName;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  return req.defaultName;
+}
+
+let ifcApi: Promise<IfcAPI> | null = null;
+
+/** Instância única do web-ifc (WebAssembly em thread única, sem exigir COOP/COEP). */
+export function getIfcApi(): Promise<IfcAPI> {
+  if (!ifcApi) {
+    ifcApi = (async () => {
+      const api = new IfcAPI();
+      api.SetWasmPath(new URL("wasm/", document.baseURI).href, true);
+      await api.Init(undefined, true);
+      return api;
+    })();
+  }
+  return ifcApi;
+}
