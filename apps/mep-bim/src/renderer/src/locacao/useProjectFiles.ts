@@ -8,10 +8,11 @@ import type { PointsStore } from "./usePointsStore";
 const base = (name: string | null) => (name ?? "modelo").replace(/\.ifc$/i, "");
 
 /** Salvar, abrir e exportar o projeto do app (pontos locados e trechos). */
-export function useProjectFiles(store: PointsStore, model: LoadedModel, fileName: string | null, onOpened?: () => void) {
+export function useProjectFiles(store: PointsStore, model: LoadedModel | null, fileName: string | null, onOpened?: () => void) {
   const [message, setMessage] = useState<string | null>(null);
 
   const save = useCallback(async () => {
+    if (!model) return;
     const json = JSON.stringify(serializeProject({ points: store.points, runs: store.runs, circuits: store.circuits }, model.coordinates, fileName), null, 2);
     const saved = await saveFile({
       defaultName: `${base(fileName)}.locacao.json`,
@@ -22,9 +23,10 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel, fileName
       store.markSaved();
       setMessage(`Projeto salvo: ${saved}`);
     }
-  }, [store, model.coordinates, fileName]);
+  }, [store, model, fileName]);
 
   const open = useCallback(async () => {
+    if (!model) return;
     if (store.dirty && !store.isEmpty && !window.confirm("Há alterações não salvas. Substituir pelo projeto do arquivo?")) return;
     const file = await openTextFile([{ name: "Projeto MEP (locação e traçado)", extensions: ["json"] }]);
     if (!file) return;
@@ -40,9 +42,10 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel, fileName
     } catch (e) {
       setMessage(`Não foi possível abrir: ${e instanceof Error ? e.message : e}`);
     }
-  }, [store, model.coordinates, fileName, onOpened]);
+  }, [store, model, fileName, onOpened]);
 
   const exportIfc = useCallback(async () => {
+    if (!model) return;
     const text = exportPointsIfc(store.points, { modelName: fileName, storeys: model.storeyLevels, cs: model.coordinates, runs: store.runs, circuits: store.circuits });
     const saved = await saveFile({
       defaultName: `${base(fileName)}-mep.ifc`,

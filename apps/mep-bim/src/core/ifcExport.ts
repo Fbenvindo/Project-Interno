@@ -23,7 +23,7 @@ class StepWriter {
       "ISO-10303-21;",
       "HEADER;",
       `FILE_DESCRIPTION((${str(description)}),'2;1');`,
-      `FILE_NAME(${str(fileName)},'${new Date().toISOString().slice(0, 19)}',(''),(''),'MEP BIM','MEP BIM','');`,
+      `FILE_NAME(${str(fileName)},'${new Date().toISOString().slice(0, 19)}',(''),(''),'SmartEasyBIM','SmartEasyBIM','');`,
       "FILE_SCHEMA(('IFC4'));",
       "ENDSEC;",
       "DATA;",

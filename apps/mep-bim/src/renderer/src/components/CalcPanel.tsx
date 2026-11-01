@@ -15,6 +15,8 @@ import type { ElementInfo } from "../../../core/types";
 
 interface Props {
   selected: ElementInfo | null;
+  /** Mostra só as calculadoras de uma disciplina. */
+  which?: "eletrica" | "hidraulica" | "hvac";
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -273,16 +275,16 @@ function DutoCard({ selected }: Props) {
   );
 }
 
-export function CalcPanel({ selected }: Props) {
+export function CalcPanel({ selected, which }: Props) {
   return (
     <div className="panel-body">
       <h2>Dimensionamento</h2>
       <p className="muted small">
         Calculadoras de verificação rápida. Selecione um segmento no modelo para aproveitar comprimento e dimensão.
       </p>
-      <QuedaTensaoCard selected={selected} />
-      <AguaFriaCard selected={selected} />
-      <DutoCard selected={selected} />
+      {(!which || which === "eletrica") && <QuedaTensaoCard selected={selected} />}
+      {(!which || which === "hidraulica") && <AguaFriaCard selected={selected} />}
+      {(!which || which === "hvac") && <DutoCard selected={selected} />}
     </div>
   );
 }

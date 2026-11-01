@@ -604,6 +604,24 @@ export class Viewer {
     return hit ? (hit.object.userData.expressID as number) : null;
   }
 
+  /** Fundo da vista: claro (branco) ou escuro (preto). */
+  setTheme(dark: boolean) {
+    this.renderer.setClearColor(dark ? 0x0b0d10 : 0xffffff);
+    const old = this.scene.getObjectByName("grid") as THREE.GridHelper | undefined;
+    const grid = dark ? new THREE.GridHelper(100, 100, 0x3a4250, 0x22272f) : new THREE.GridHelper(100, 100, 0xb6c2d1, 0xe2e8f0);
+    grid.name = "grid";
+    if (old) {
+      grid.position.copy(old.position);
+      this.scene.remove(old);
+      old.geometry.dispose();
+      (old.material as THREE.Material).dispose();
+    }
+    this.scene.add(grid);
+    this.ghostMaterial.color.set(dark ? 0x9aa4b2 : 0x64748b);
+    this.ghostMaterial.opacity = dark ? 0.08 : 0.1;
+    this.requestRender();
+  }
+
   private placeGrid() {
     const box = new THREE.Box3().setFromObject(this.modelGroup);
     const grid = this.scene.getObjectByName("grid");

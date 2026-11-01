@@ -24,6 +24,10 @@ interface Props {
   selection: number[];
   elementById: Map<number, ElementInfo>;
   onPick: (id: number | null, additive: boolean) => void;
+  /** Fundo preto: a planta é desenhada invertida (traço claro). */
+  dark?: boolean;
+  /** Muda a cada pedido de enquadramento vindo de fora (faixa de ferramentas). */
+  fitSignal?: number;
 }
 
 type ViewBox = { x: number; y: number; w: number; h: number };
@@ -56,7 +60,7 @@ function primsToSvg(prims: Prim[]): string {
     .join("");
 }
 
-export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick }: Props) {
+export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick, dark, fitSignal }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const cs = model.coordinates;
   const level = model.storeyLevels.find((s) => s.name === storey)?.level ?? 0;
@@ -107,6 +111,10 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base]);
   useEffect(fit, [fit]);
+  useEffect(() => {
+    if (fitSignal) fit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitSignal]);
 
   const toModel = (clientX: number, clientY: number): P2 => {
     const r = host.current!.getBoundingClientRect();
@@ -318,7 +326,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   return (
     <div
       ref={host}
-      className={`plan-editor ${handler ? "editing" : ""}`}
+      className={`plan-editor ${handler ? "editing" : ""} ${dark ? "dark" : ""}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

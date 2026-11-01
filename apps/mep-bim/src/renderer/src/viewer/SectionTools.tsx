@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { formatNumber } from "../../../core/format";
 import type { CoordinateSystem } from "../../../core/math";
 import type { Vec3 } from "../../../core/types";
@@ -38,10 +38,12 @@ interface Props {
   cs: CoordinateSystem;
   /** Cota do pavimento ativo (Z do projeto), para atalhos de corte. */
   storeyZ: number | null;
+  /** Painel aberto (controlado pela janela, para o botão Corte da faixa). */
+  open: boolean;
+  onOpen: (open: boolean) => void;
 }
 
-export function SectionTools({ section, onChange, bounds, cs, storeyZ }: Props) {
-  const [open, setOpen] = useState(false);
+export function SectionTools({ section, onChange, bounds, cs, storeyZ, open, onOpen: setOpen }: Props) {
   const active = section.horizontal.on || section.x.on || section.y.on;
   const range = useMemo(() => {
     if (!bounds) return null;

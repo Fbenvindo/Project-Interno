@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { DISCIPLINE_BY_ID, getTypeLabel } from "../../core/disciplines";
+import { DISCIPLINE_BY_ID, DISCIPLINES, getTypeLabel } from "../../core/disciplines";
 import { COMPONENT_BY_ID } from "../../core/library";
 import { sizeMeters } from "../../core/placement";
 import { pointProperties, pointToElement, type PlacedPoint } from "../../core/points";
+import type { Circuit } from "../../core/circuits";
 import type { Discipline, ElementInfo, Vec3 } from "../../core/types";
 import { loadIfc, type LoadedModel } from "../../ifc/loadIfc";
 import { desktop, getIfcApi, openIfc } from "./platform";
 import { Viewer, type ColorMode } from "./viewer/Viewer";
-import { FilterPanel, NO_STOREY, type Filters } from "./components/FilterPanel";
 import { PropertiesPanel } from "./components/PropertiesPanel";
 import { QuantitiesPanel } from "./components/QuantitiesPanel";
 import { ClashPanel } from "./components/ClashPanel";
@@ -22,24 +22,25 @@ import { NO_SECTION, SectionTools, sectionToPlanes, type SectionState } from "./
 import { PlantaPanel, type PlanSettings } from "./planta/PlantaPanel";
 import { buildPlan } from "../../core/plan/build";
 import { renderSheet } from "../../core/plan/sheet";
-import { DISCIPLINES } from "../../core/disciplines";
 import { connectedPairs, runElements, runFittings, runIdOfElement, runProperties, runSegments, RUN_TYPE_BY_ID, segmentElementId, fittingElementId } from "../../core/runs";
 import { usePointsStore } from "./locacao/usePointsStore";
+import { useProjectFiles } from "./locacao/useProjectFiles";
+import { EMPTY_FILTERS, Navigator, NO_STOREY, type Filters } from "./shell/Navigator";
+import { Ribbon } from "./shell/Ribbon";
+import { Icon, LogoMark } from "./shell/icons";
+import { DISCIPLINE_TABS, TOP_TABS, type ActionId, type DisciplineTab, type Tool, type ToolSpec, type TopTab } from "./shell/ribbon";
 
-type Tab = "modelo" | "locacao" | "tracado" | "circuitos" | "planta" | "quantitativos" | "interferencias" | "dimensionamento";
+type View = "planta" | "3d" | "prancha";
+type Theme = "claro" | "escuro";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "modelo", label: "Modelo" },
-  { id: "locacao", label: "Locação" },
-  { id: "tracado", label: "Traçado" },
-  { id: "circuitos", label: "Circuitos" },
-  { id: "planta", label: "Planta 2D" },
-  { id: "quantitativos", label: "Quantitativos" },
-  { id: "interferencias", label: "Interferências" },
-  { id: "dimensionamento", label: "Dimensionamento" },
-];
-
-const EMPTY_FILTERS: Filters = { hiddenDisciplines: new Set(), hiddenStoreys: new Set(), systems: new Set(), search: "" };
+const THEME_KEY = "smarteasybim.tema";
+function readTheme(): Theme {
+  try {
+    return localStorage.getItem(THEME_KEY) === "escuro" ? "escuro" : "claro";
+  } catch {
+    return "claro";
+  }
+}
 
 /** Direção de enquadramento para pontos: de frente para a parede ou por baixo do teto. */
 function viewDirectionFor(points: PlacedPoint[]): Vec3 | undefined {
@@ -55,6 +56,17 @@ function viewDirectionFor(points: PlacedPoint[]): Vec3 | undefined {
   return len < 1e-6 ? undefined : [x / len, 0.35, z / len];
 }
 
+const TOOL_HINT: Record<ToolSpec["kind"], string> = {
+  propriedades: "Clique para selecionar · Ctrl+clique para somar · duplo clique para enquadrar",
+  locacao: "Clique na planta para locar · Esc cancela",
+  tracado: "Clique para inserir vértices · duplo clique ou Enter termina · Esc cancela",
+  circuitos: "Selecione pontos na vista e atribua ao circuito",
+  calc: "Selecione um segmento para aproveitar comprimento e dimensão",
+  quantitativos: "Clique em uma linha para localizar os elementos",
+  interferencias: "Clique em uma interferência para enquadrá-la",
+  pranchas: "Roda do mouse: zoom · arrastar: mover · duplo clique: enquadrar a folha",
+};
+
 export function App() {
   const viewerHost = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
@@ -63,19 +75,32 @@ export function App() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("modelo");
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [selection, setSelection] = useState<number[]>([]);
   const [colorMode, setColorMode] = useState<ColorMode>("disciplina");
   const [planSettings, setPlanSettings] = useState<PlanSettings | null>(null);
-  // Editor em planta (Locação e Traçado), vistas por pavimento e cortes.
-  const [editorView, setEditorView] = useState<"2d" | "3d">("2d");
-  const [editorStorey, setEditorStorey] = useState<string>("");
-  const [editorCut, setEditorCut] = useState(1.2);
+
+  // Casca: aba superior, ferramenta ativa, vista central, painéis e tema.
+  const [top, setTop] = useState<TopTab>("arquivo");
+  const toolCounter = useRef(0);
+  const [tool, setToolState] = useState<Tool>({ kind: "propriedades", n: 0 });
+  /** Disciplina em que a ferramenta foi escolhida (filtra biblioteca e tipos de trecho). */
+  const [toolDisc, setToolDisc] = useState<DisciplineTab | null>(null);
+  const [view, setView] = useState<View>("3d");
+  const [leftOpen, setLeftOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(true);
+  const [theme, setTheme] = useState<Theme>(readTheme);
+  const [fitSignal, setFitSignal] = useState(0);
+
+  // Pavimento ativo (planta e prancha), vista 3D isolada e cortes.
+  const [storey, setStorey] = useState<string>("");
   const [storeyView, setStoreyView] = useState<string | null>(null);
+  const [editorCut, setEditorCut] = useState(1.2);
   const [section, setSection] = useState<SectionState>(NO_SECTION);
+  const [sectionOpen, setSectionOpen] = useState(false);
 
   const store = usePointsStore();
+  const files = useProjectFiles(store, model, fileName, () => setSelection([]));
   const pointElements = useMemo(() => store.points.map(pointToElement), [store.points]);
   const runElementList = useMemo(() => (model ? runElements(store.runs, model.storeyLevels) : []), [store.runs, model]);
   const allElements = useMemo(() => (model ? [...model.elements, ...pointElements, ...runElementList] : []), [model, pointElements, runElementList]);
@@ -83,7 +108,39 @@ export function App() {
   const connected = useMemo(() => connectedPairs(store.runs, store.points), [store.runs, store.points]);
   const meshById = useMemo(() => new Map(model?.meshes.map((m) => [m.expressID, m]) ?? []), [model]);
 
-  // ---- Planta 2D ---------------------------------------------------------------
+  const chooseTool = useCallback(
+    (spec: ToolSpec, disc: DisciplineTab | null = null) => {
+      setToolState({ ...spec, n: ++toolCounter.current } as Tool);
+      setToolDisc(disc);
+      if (spec.kind === "pranchas") setView("prancha");
+      else if (spec.kind === "locacao" || spec.kind === "tracado") setView("planta");
+      setRightOpen(true);
+    },
+    [],
+  );
+
+  const chooseTop = useCallback(
+    (t: TopTab) => {
+      setTop(t);
+      // Arquivo mantém a ferramenta (salvar no meio da edição); as demais abas começam pela consulta.
+      if (t === "pranchas") chooseTool({ kind: "pranchas" });
+      else if (t !== "arquivo" && t !== top) chooseTool({ kind: "propriedades" });
+    },
+    [chooseTool, top],
+  );
+
+  // ---- Tema ------------------------------------------------------------------
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme === "escuro" ? "dark" : "light";
+    viewerRef.current?.setTheme(theme === "escuro");
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      /* armazenamento indisponível */
+    }
+  }, [theme]);
+
+  // ---- Planta 2D e prancha ---------------------------------------------------
   const planAvailable = useMemo(() => DISCIPLINES.map((d) => d.id).filter((d) => allElements.some((e) => e.discipline === d)), [allElements]);
   useEffect(() => {
     if (!model || planSettings) return;
@@ -91,10 +148,10 @@ export function App() {
     const score = new Map<string, number>();
     for (const p of store.points) if (p.storey) score.set(p.storey, (score.get(p.storey) ?? 0) + 10);
     for (const e of model.elements) if (e.storey && e.ifcType.startsWith("IFCWALL")) score.set(e.storey, (score.get(e.storey) ?? 0) + 1);
-    const storey = [...score.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? model.storeys[0] ?? "";
-    setEditorStorey(storey);
+    const best = [...score.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? model.storeys[0] ?? "";
+    setStorey(best);
     setPlanSettings({
-      storey,
+      storey: best,
       cutHeight: 1.2,
       scale: 50,
       format: "A1",
@@ -111,29 +168,31 @@ export function App() {
     });
   }, [model, planSettings, store.points, fileName]);
 
+  const sheetSettings = useMemo(() => (planSettings ? { ...planSettings, storey } : null), [planSettings, storey]);
   const planDrawing = useMemo(() => {
-    if (tab !== "planta" || !model || !planSettings) return null;
+    if (view !== "prancha" || !model || !sheetSettings) return null;
     return buildPlan({
       elements: model.elements,
       meshes: meshById,
       cs: model.coordinates,
       storeyLevels: model.storeyLevels,
-      storey: planSettings.storey,
-      cutHeight: planSettings.cutHeight,
+      storey: sheetSettings.storey,
+      cutHeight: sheetSettings.cutHeight,
       points: store.points,
       runs: store.runs,
-      scale: planSettings.scale,
-      disciplines: new Set(planSettings.disciplines),
-      labels: planSettings.labels,
+      scale: sheetSettings.scale,
+      disciplines: new Set(sheetSettings.disciplines),
+      labels: sheetSettings.labels,
       spaces: model.spaces,
     });
-  }, [tab, model, meshById, planSettings, store.points, store.runs]);
+  }, [view, model, meshById, sheetSettings, store.points, store.runs]);
 
   const planSheet = useMemo(() => {
-    if (!planDrawing || !planSettings) return null;
-    const info = { ...planSettings.info, conteudo: planSettings.info.conteudo || `Instalações MEP — Planta ${planSettings.storey}` };
-    return renderSheet(planDrawing, planSettings.format, info);
-  }, [planDrawing, planSettings]);
+    if (!planDrawing || !sheetSettings) return null;
+    const info = { ...sheetSettings.info, conteudo: sheetSettings.info.conteudo || `Instalações MEP — Planta ${sheetSettings.storey}` };
+    return renderSheet(planDrawing, sheetSettings.format, info);
+  }, [planDrawing, sheetSettings]);
+
   const allSystems = useMemo(
     () =>
       [...new Set([...(model?.systems ?? []), ...store.points.map((p) => p.system), ...store.runs.map((r) => r.system)].filter(Boolean))].sort((a, b) =>
@@ -161,19 +220,20 @@ export function App() {
   useEffect(() => {
     const viewer = new Viewer(viewerHost.current!);
     viewerRef.current = viewer;
+    viewer.setTheme(readTheme() === "escuro");
     return () => viewer.dispose();
   }, []);
 
-  useEffect(() => {
-    const viewer = viewerRef.current!;
-    viewer.onPick = (id, additive) => {
-      setSelection((cur) => {
-        if (id == null) return additive ? cur : [];
-        if (!additive) return [id];
-        return cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
-      });
-    };
+  const pick = useCallback((id: number | null, additive: boolean) => {
+    setSelection((cur) => {
+      if (id == null) return additive ? cur : [];
+      if (!additive) return [id];
+      return cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    });
   }, []);
+  useEffect(() => {
+    viewerRef.current!.onPick = pick;
+  }, [pick]);
 
   // Selecionar um segmento destaca o trecho inteiro.
   useEffect(() => {
@@ -258,7 +318,11 @@ export function App() {
       setFileName(file.name);
       setFilters(EMPTY_FILTERS);
       setSelection([]);
-      document.title = `${file.name} — MEP BIM`;
+      setStoreyView(null);
+      setSection(NO_SECTION);
+      setView("3d");
+      setTop((t) => (t === "arquivo" ? "modelo" : t));
+      document.title = `${file.name} — SmartEasyBIM`;
     } catch (e) {
       console.error(e);
       setError(e instanceof Error ? e.message : String(e));
@@ -350,24 +414,20 @@ export function App() {
 
   const isolateDiscipline = useCallback(
     (d: Discipline) => {
-      const all = new Set(model?.elements.map((e) => e.discipline));
+      const all = new Set(allElements.map((e) => e.discipline));
       all.delete(d);
       setFilters((f) => ({ ...f, hiddenDisciplines: all }));
     },
-    [model],
+    [allElements],
   );
-
-  const wide = tab !== "modelo";
-  const editing2d = (tab === "locacao" || tab === "tracado") && editorView === "2d";
-  const show3d = !!model && tab !== "planta" && !editing2d;
 
   // Cortes aplicados à vista 3D.
   useEffect(() => {
     if (model) viewerRef.current?.setSection(sectionToPlanes(section, model.coordinates));
   }, [section, model]);
 
-  /** Vista 3D de um pavimento: oculta os demais e enquadra. */
-  const showStorey = useCallback(
+  /** Pavimento escolhido no navegador: planta e prancha passam a ele e o 3D o isola (null = modelo completo em 3D). */
+  const chooseStorey = useCallback(
     (name: string | null) => {
       if (!model) return;
       setStoreyView(name);
@@ -375,56 +435,208 @@ export function App() {
         ...f,
         hiddenStoreys: name ? new Set([...model.storeys, NO_STOREY].filter((s) => s !== name)) : new Set(),
       }));
-      if (name) setEditorStorey(name);
+      if (name) setStorey(name);
+      else setView("3d");
       setTimeout(() => viewerRef.current?.fitTo(), 60);
     },
     [model],
   );
+
   const storeyZ = useMemo(() => {
     if (!model) return null;
-    const name = storeyView ?? (editing2d ? editorStorey : null) ?? null;
-    const lvl = model.storeyLevels.find((s) => s.name === (name ?? editorStorey));
+    const lvl = model.storeyLevels.find((s) => s.name === (storeyView ?? storey));
     return lvl ? model.coordinates.worldToIfc([0, lvl.level, 0])[2] : null;
-  }, [model, storeyView, editorStorey, editing2d]);
+  }, [model, storeyView, storey]);
+
+  const showCircuit = useCallback(
+    (c: Circuit) => {
+      chooseTool({ kind: "circuitos" }, "eletrica");
+      setTop("eletrica");
+      selectPoints(
+        pointsRef.current.filter((p) => p.circuit === c.uid).map((p) => p.id),
+        view === "3d",
+      );
+    },
+    [chooseTool, selectPoints, view],
+  );
+
+  // ---- Ações da faixa de ferramentas ------------------------------------------
+  const sectionActive = section.horizontal.on || section.x.on || section.y.on;
+  const onAction = useCallback(
+    (a: ActionId) => {
+      switch (a) {
+        case "abrirIfc":
+          return void handleOpen();
+        case "exemplo":
+          return void handleSample();
+        case "abrirProjeto":
+          return void files.open();
+        case "salvarProjeto":
+          return void files.save();
+        case "exportarIfc":
+          return void files.exportIfc();
+        case "temaClaro":
+          return setTheme("claro");
+        case "temaEscuro":
+          return setTheme("escuro");
+        case "cores":
+          return setColorMode((m) => (m === "disciplina" ? "ifc" : "disciplina"));
+        case "vistaPlanta":
+          return setView("planta");
+        case "vista3d":
+          return setView("3d");
+        case "enquadrar":
+          if (view === "3d") viewerRef.current?.fitTo();
+          else setFitSignal((n) => n + 1);
+          return;
+        case "corte":
+          setView("3d");
+          setSectionOpen((o) => !(o && view === "3d"));
+          return;
+      }
+    },
+    [handleOpen, handleSample, files, view],
+  );
+
+  const pressed: Partial<Record<ActionId, boolean>> = {
+    temaClaro: theme === "claro",
+    temaEscuro: theme === "escuro",
+    cores: colorMode === "disciplina",
+    vistaPlanta: view === "planta",
+    vista3d: view === "3d",
+    corte: view === "3d" && (sectionOpen || sectionActive),
+  };
+
+  // Mensagens dos arquivos de projeto somem sozinhas.
+  useEffect(() => {
+    if (!files.message) return;
+    const t = setTimeout(() => files.setMessage(null), 6000);
+    return () => clearTimeout(t);
+  }, [files.message, files.setMessage]);
+
+  const disc = toolDisc ? DISCIPLINE_TABS[toolDisc] : null;
+  const selectedOne = selection.length === 1 ? (elementById.get(selection[0]) ?? null) : null;
+  const viewer = viewerRef.current;
+  const rightWidth = tool.kind === "propriedades" ? 340 : tool.kind === "pranchas" ? 400 : 460;
+  const projectName = (fileName ?? "").replace(/\.ifc$/i, "");
+
+  const rightPanel = () => {
+    if (tool.kind === "calc") return <CalcPanel selected={selectedOne} which={tool.which} />;
+    if (!model || !viewer) return <div className="empty-side">Abra um modelo IFC em Arquivo › Abrir IFC.</div>;
+    switch (tool.kind) {
+      case "propriedades":
+        return <PropertiesPanel elements={selection.map((id) => elementById.get(id)).filter(Boolean) as ElementInfo[]} getProperties={getProperties} onFrame={selectAndFrame} />;
+      case "locacao":
+        return (
+          <LocacaoPanel
+            model={model}
+            fileName={fileName}
+            store={store}
+            viewer={viewer}
+            elementById={elementById}
+            selection={selection}
+            onSelect={selectPoints}
+            systems={allSystems}
+            groups={disc?.groups}
+            preset={{ componentId: tool.componentId, n: tool.n }}
+          />
+        );
+      case "tracado":
+        return (
+          <TracadoPanel
+            model={model}
+            fileName={fileName}
+            store={store}
+            viewer={viewer}
+            selection={selection}
+            onSelect={selectPoints}
+            systems={allSystems}
+            typeIds={disc?.runs}
+            preset={{ typeId: tool.typeId, n: tool.n }}
+          />
+        );
+      case "circuitos":
+        return <CircuitosPanel model={model} fileName={fileName} store={store} selection={selection} onSelect={selectPoints} />;
+      case "quantitativos":
+        return <QuantitiesPanel elements={visibleElements} fileName={fileName} onSelect={selectAndFrame} />;
+      case "interferencias":
+        return (
+          <ClashPanel
+            elements={visibleElements}
+            elementById={elementById}
+            fileName={fileName}
+            meshes={meshById}
+            ignorePair={connected}
+            onFocus={focusClash}
+            onClear={clearHighlight}
+          />
+        );
+      case "pranchas":
+        if (!sheetSettings || !planDrawing || !planSheet)
+          return <div className="empty-side">Abra a vista Prancha para configurar a folha.</div>;
+        return (
+          <PlantaPanel
+            settings={sheetSettings}
+            onChange={(s) => {
+              setPlanSettings(s);
+              if (s.storey !== storey) setStorey(s.storey);
+            }}
+            storeys={model.storeys}
+            drawing={planDrawing}
+            sheet={planSheet}
+            fileName={fileName}
+            available={planAvailable}
+          />
+        );
+    }
+  };
 
   return (
     <div className="app">
-      <header className="toolbar">
+      <header className="app-header">
         <div className="brand">
-          <span className="logo">MEP</span>
-          <span className="brand-name">BIM</span>
+          <LogoMark size={28} />
+          <span className="wordmark">
+            Smart<span>Easy</span>BIM
+          </span>
         </div>
-        <button className="btn primary" onClick={handleOpen}>
-          Abrir IFC
-        </button>
-        <nav className="tabs">
-          {TABS.map((t) => (
-            <button key={t.id} className={`tab ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)} disabled={!model && t.id !== "dimensionamento"}>
+        <nav className="top-nav" aria-label="Disciplinas">
+          {TOP_TABS.map((t) => (
+            <button key={t.id} className={`top-tab ${top === t.id ? "active" : ""}`} onClick={() => chooseTop(t.id)}>
               {t.label}
             </button>
           ))}
         </nav>
         <div className="spacer" />
-        {model && (
-          <>
-            <label className="toggle">
-              <input type="checkbox" checked={colorMode === "disciplina"} onChange={(e) => setColorMode(e.target.checked ? "disciplina" : "ifc")} />
-              Cores por disciplina
-            </label>
-            <button className="btn" onClick={() => viewerRef.current?.fitTo()} title="Enquadrar (F)">
-              Enquadrar
-            </button>
-          </>
-        )}
-        <span className="file-name" title={fileName ?? ""}>
-          {fileName ? `${fileName} · ${model?.schema} · ${model?.elements.length} elementos` : "Nenhum modelo aberto"}
-        </span>
+        <div className="project-title" title={fileName ?? ""}>
+          {model ? (
+            <>
+              {projectName}
+              {storey && <span className="muted-on-dark"> · {storeyView ?? storey}</span>}
+            </>
+          ) : (
+            <span className="muted-on-dark">Nenhum modelo aberto</span>
+          )}
+        </div>
+        <button
+          className="icon-btn on-dark"
+          onClick={() => setTheme(theme === "claro" ? "escuro" : "claro")}
+          title={theme === "claro" ? "Fundo preto" : "Fundo branco"}
+          aria-label="Alternar cor de fundo"
+        >
+          <Icon name={theme === "claro" ? "lua" : "sol"} size={18} />
+        </button>
+        <button className="btn save" onClick={files.save} disabled={!model}>
+          Salvar{store.dirty && !store.isEmpty ? " •" : ""}
+        </button>
       </header>
 
-      <main className={`workspace ${wide ? "wide" : ""}`}>
-        <aside className="sidebar">
+      <Ribbon tab={top} tool={tool} hasModel={!!model} pressed={pressed} onTool={(t) => chooseTool(t, top in DISCIPLINE_TABS ? (top as DisciplineTab) : null)} onAction={onAction} />
+
+      <main className="workspace" style={{ gridTemplateColumns: `${leftOpen ? 260 : 0}px minmax(0, 1fr) ${rightOpen ? rightWidth : 0}px` }}>
+        <aside className={`sidebar ${leftOpen ? "" : "collapsed"}`} aria-hidden={!leftOpen}>
           {model ? (
-            <FilterPanel
+            <Navigator
               elements={allElements}
               storeys={model.storeys}
               systems={allSystems}
@@ -432,157 +644,142 @@ export function App() {
               onChange={setFilters}
               visibleCount={visibleElements.length}
               onIsolate={isolateDiscipline}
+              storey={storey}
               storeyView={storeyView}
-              onStoreyView={showStorey}
+              onStorey={chooseStorey}
+              points={store.points}
+              circuits={store.circuits}
+              onCircuit={showCircuit}
             />
           ) : (
-            <div className="empty-side">Abra um modelo IFC para ver disciplinas, pavimentos e sistemas.</div>
+            <div className="empty-side">Abra um modelo IFC para navegar por pavimentos, disciplinas, sistemas e circuitos.</div>
           )}
         </aside>
 
-        <section className="viewport">
-          <div ref={viewerHost} className="viewer-host" />
-          {editing2d && model && viewerRef.current && editorStorey && (
-            <PlanEditor
-              viewer={viewerRef.current}
-              model={model}
-              store={store}
-              storey={editorStorey}
-              cutHeight={editorCut}
-              selection={selection}
-              elementById={elementById}
-              onPick={(id, additive) =>
-                setSelection((cur) => {
-                  if (id == null) return additive ? cur : [];
-                  if (!additive) return [id];
-                  return cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
-                })
-              }
-            />
-          )}
-          {model && (tab === "locacao" || tab === "tracado") && (
-            <div className="editor-toolbar">
-              <div className="segmented">
-                <button className={editorView === "2d" ? "on" : ""} onClick={() => setEditorView("2d")}>
-                  Planta 2D
+        <section className="center">
+          <div className="view-tabs">
+            <button className="icon-btn" onClick={() => setLeftOpen(!leftOpen)} title={leftOpen ? "Ocultar painel esquerdo" : "Mostrar painel esquerdo"} aria-pressed={leftOpen}>
+              <Icon name="painelEsq" size={18} />
+            </button>
+            {model && (
+              <>
+                <button className={`view-tab ${view === "planta" ? "active" : ""}`} onClick={() => setView("planta")}>
+                  Planta · {storey}
                 </button>
-                <button className={editorView === "3d" ? "on" : ""} onClick={() => setEditorView("3d")}>
-                  3D
+                <button className={`view-tab ${view === "3d" ? "active" : ""}`} onClick={() => setView("3d")}>
+                  3D · {storeyView ?? "Modelo completo"}
                 </button>
+                <button className={`view-tab ${view === "prancha" ? "active" : ""}`} onClick={() => chooseTool({ kind: "pranchas" })}>
+                  Prancha
+                </button>
+              </>
+            )}
+            <div className="spacer" />
+            {model && view === "planta" && (
+              <label className="cut-input" title="Altura do plano de corte acima do piso">
+                corte
+                <input type="number" step={0.1} min={0.2} value={editorCut} onChange={(e) => setEditorCut(Math.max(0.2, Number(e.target.value)))} />m
+              </label>
+            )}
+            <button className="icon-btn" onClick={() => setRightOpen(!rightOpen)} title={rightOpen ? "Ocultar painel direito" : "Mostrar painel direito"} aria-pressed={rightOpen}>
+              <Icon name="painelDir" size={18} />
+            </button>
+          </div>
+
+          <div className="viewport">
+            <div ref={viewerHost} className="viewer-host" />
+            {view === "planta" && model && viewer && storey && (
+              <PlanEditor
+                viewer={viewer}
+                model={model}
+                store={store}
+                storey={storey}
+                cutHeight={editorCut}
+                selection={selection}
+                elementById={elementById}
+                onPick={pick}
+                dark={theme === "escuro"}
+                fitSignal={fitSignal}
+              />
+            )}
+            {view === "3d" && model && (
+              <SectionTools
+                section={section}
+                onChange={setSection}
+                bounds={viewer?.getModelBounds() ?? null}
+                cs={model.coordinates}
+                storeyZ={storeyZ}
+                open={sectionOpen}
+                onOpen={setSectionOpen}
+              />
+            )}
+            {view === "prancha" && planSheet && (
+              <PlanView sheet={planSheet} selection={selection} onSelect={(ids, additive) => setSelection((cur) => (additive ? [...new Set([...cur, ...ids])] : ids))} fitSignal={fitSignal} />
+            )}
+            {!model && !progress && (
+              <div className="welcome">
+                <LogoMark size={72} light={theme === "escuro"} />
+                <h1>
+                  Smart<span>Easy</span>BIM
+                </h1>
+                <p>Projetos de instalações MEP sobre modelos IFC. Abra um modelo (Revit, Archicad etc.) ou arraste o arquivo para esta janela.</p>
+                <div className="welcome-actions">
+                  <button className="btn primary" onClick={handleOpen}>
+                    Abrir IFC…
+                  </button>
+                  <button className="btn" onClick={handleSample}>
+                    Abrir modelo de exemplo
+                  </button>
+                </div>
               </div>
-              {editorView === "2d" && (
-                <>
-                  <select value={editorStorey} onChange={(e) => setEditorStorey(e.target.value)} title="Pavimento">
-                    {model.storeys.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                  <label className="cut-input" title="Altura do plano de corte acima do piso">
-                    corte
-                    <input type="number" step={0.1} min={0.2} value={editorCut} onChange={(e) => setEditorCut(Math.max(0.2, Number(e.target.value)))} />m
-                  </label>
-                </>
-              )}
-            </div>
-          )}
-          {show3d && (
-            <SectionTools section={section} onChange={setSection} bounds={viewerRef.current?.getModelBounds() ?? null} cs={model!.coordinates} storeyZ={storeyZ} />
-          )}
-          {tab === "planta" && planSheet && (
-            <PlanView
-              sheet={planSheet}
-              selection={selection}
-              onSelect={(ids, additive) =>
-                setSelection((cur) => (additive ? [...new Set([...cur, ...ids])] : ids))
-              }
-            />
-          )}
-          {!model && !progress && (
-            <div className="welcome">
-              <h1>Projetos MEP em BIM</h1>
-              <p>Abra um modelo IFC (Revit, Archicad, etc.) ou arraste o arquivo para esta janela.</p>
-              <div className="welcome-actions">
-                <button className="btn primary" onClick={handleOpen}>
-                  Abrir IFC…
-                </button>
-                <button className="btn" onClick={handleSample}>
-                  Abrir modelo de exemplo
-                </button>
+            )}
+            {progress && (
+              <div className="overlay">
+                <div className="spinner" />
+                {progress}
               </div>
-            </div>
-          )}
-          {progress && (
-            <div className="overlay">
-              <div className="spinner" />
-              {progress}
-            </div>
-          )}
-          {error && (
-            <div className="error" onClick={() => setError(null)}>
-              Erro ao abrir o modelo: {error}
-            </div>
-          )}
-          {model && tab !== "locacao" && tab !== "tracado" && tab !== "planta" && <div className="hint">Clique para selecionar · Ctrl+clique para somar · duplo clique para enquadrar</div>}
+            )}
+            {error && (
+              <div className="error" onClick={() => setError(null)}>
+                Erro ao abrir o modelo: {error}
+              </div>
+            )}
+            {files.message && (
+              <div className="toast" onClick={() => files.setMessage(null)}>
+                {files.message}
+              </div>
+            )}
+          </div>
         </section>
 
-        <aside className="panel">
-          {tab === "modelo" && model && (
-            <PropertiesPanel elements={selection.map((id) => elementById.get(id)).filter(Boolean) as ElementInfo[]} getProperties={getProperties} onFrame={selectAndFrame} />
-          )}
-          {tab === "locacao" && model && viewerRef.current && (
-            <LocacaoPanel
-              model={model}
-              fileName={fileName}
-              store={store}
-              viewer={viewerRef.current}
-              elementById={elementById}
-              selection={selection}
-              onSelect={selectPoints}
-              systems={allSystems}
-            />
-          )}
-          {tab === "tracado" && model && viewerRef.current && (
-            <TracadoPanel
-              model={model}
-              fileName={fileName}
-              store={store}
-              viewer={viewerRef.current}
-              selection={selection}
-              onSelect={selectPoints}
-              systems={allSystems}
-            />
-          )}
-          {tab === "circuitos" && model && (
-            <CircuitosPanel model={model} fileName={fileName} store={store} selection={selection} onSelect={selectPoints} />
-          )}
-          {tab === "planta" && model && planSettings && planDrawing && planSheet && (
-            <PlantaPanel
-              settings={planSettings}
-              onChange={setPlanSettings}
-              storeys={model.storeys}
-              drawing={planDrawing}
-              sheet={planSheet}
-              fileName={fileName}
-              available={planAvailable}
-            />
-          )}
-          {tab === "quantitativos" && model && <QuantitiesPanel elements={visibleElements} fileName={fileName} onSelect={selectAndFrame} />}
-          {tab === "interferencias" && model && (
-            <ClashPanel
-              elements={visibleElements}
-              elementById={elementById}
-              fileName={fileName}
-              meshes={meshById}
-              ignorePair={connected}
-              onFocus={focusClash}
-              onClear={clearHighlight}
-            />
-          )}
-          {tab === "dimensionamento" && <CalcPanel selected={selection.length === 1 ? (elementById.get(selection[0]) ?? null) : null} />}
+        <aside className={`panel ${rightOpen ? "" : "collapsed"}`} aria-hidden={!rightOpen}>
+          {rightPanel()}
         </aside>
       </main>
+
+      <footer className="status-bar">
+        <span className={`dot ${progress ? "busy" : model ? "ok" : ""}`} />
+        <span>{progress ?? (model ? "Pronto" : "Sem modelo")}</span>
+        {model && (
+          <>
+            <span className="sep" />
+            <span>
+              {fileName} · {model.schema} · {model.elements.length} elementos
+            </span>
+            <span className="sep" />
+            <span>{TOOL_HINT[tool.kind]}</span>
+          </>
+        )}
+        <div className="spacer" />
+        {model && (
+          <span className="num">
+            {store.points.length} pontos · {store.runs.length} trechos · {store.circuits.length} circuitos
+            {selection.length > 0 && ` · ${selection.length} selecionado${selection.length > 1 ? "s" : ""}`}
+          </span>
+        )}
+        <span className="sep" />
+        <span>Fundo {theme === "claro" ? "branco" : "preto"}</span>
+      </footer>
     </div>
   );
 }

@@ -39,6 +39,10 @@ interface Props {
   selection: number[];
   onSelect: (ids: number[], frame?: boolean) => void;
   systems: string[];
+  /** Tipos de trecho da disciplina ativa; todos se omitido. */
+  typeIds?: string[];
+  /** Tipo escolhido na faixa de ferramentas (n muda a cada clique): já inicia o desenho. */
+  preset?: { typeId: string; n: number } | null;
 }
 
 type Mode = "desenhar" | "ligar";
@@ -55,8 +59,8 @@ const STEP = 0.01; // arredondamento dos comprimentos: 10 mm
 const isTyping = (t: EventTarget | null) => t instanceof HTMLElement && /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName);
 const roundStep = (v: number) => Math.round(v / STEP) * STEP;
 
-export function TracadoPanel({ model, fileName, store, viewer, selection, onSelect, systems }: Props) {
-  const [typeId, setTypeId] = useState("eletroduto-pvc");
+export function TracadoPanel({ model, fileName, store, viewer, selection, onSelect, systems, typeIds, preset }: Props) {
+  const [typeId, setTypeId] = useState(preset?.typeId ?? typeIds?.[0] ?? "eletroduto-pvc");
   const type = RUN_TYPE_BY_ID[typeId];
   const [sizeLabel, setSizeLabel] = useState(type.defaultSize);
   const size = type.sizes.find((s) => s.label === sizeLabel) ?? type.sizes[0];
@@ -86,6 +90,15 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
     const s = type.sizes.find((x) => x.label === label);
     if (s && type.slopeFor) setSlope(type.slopeFor(s));
   };
+
+  useEffect(() => {
+    if (!preset) return;
+    chooseType(preset.typeId);
+    setMode("desenhar");
+    setDraft([]);
+    setDrawing(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset?.n]);
 
   const pointById = useMemo(() => new Map(store.points.map((p) => [p.id, p])), [store.points]);
   const runById = useMemo(() => new Map(store.runs.map((r) => [r.id, r])), [store.runs]);
@@ -406,9 +419,9 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
           <label>
             Tipo
             <select value={typeId} onChange={(e) => chooseType(e.target.value)}>
-              {GROUPS.map((g) => (
+              {GROUPS.filter((g) => RUN_TYPES.some((t) => t.group === g && (!typeIds || typeIds.includes(t.id)))).map((g) => (
                 <optgroup key={g} label={g}>
-                  {RUN_TYPES.filter((t) => t.group === g).map((t) => (
+                  {RUN_TYPES.filter((t) => t.group === g && (!typeIds || typeIds.includes(t.id))).map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.label}
                     </option>

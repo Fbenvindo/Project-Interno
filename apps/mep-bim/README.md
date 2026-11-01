@@ -1,15 +1,25 @@
-# MEP BIM — aplicativo desktop
+# SmartEasyBIM — aplicativo desktop
 
 Aplicativo **local (desktop)** para projetos de instalações MEP em BIM: hidráulica, incêndio, gás, climatização (HVAC), elétrica e telecom.
 Trabalha sobre modelos **IFC** de qualquer software (Revit, Archicad, Tekla, etc.) e **não depende** do app de gestão técnica de projetos que está na raiz deste repositório: são dependências, build e execução separados.
 
-![Modelo de exemplo aberto no app](docs/tela-modelo.png)
+![Elétrica › Tomada no editor em planta, fundo branco](docs/tela-modelo.png)
+
+## Interface
+
+- **Menu superior por disciplina**: Arquivo, Modelo, Elétrica, Hidráulica, Incêndio, Climatização e Pranchas.
+- **Faixa de ferramentas** logo abaixo, com as funções da disciplina escolhida, em grupos (ex.: Elétrica → Pontos: Tomada, Interruptor, Luminária, Quadro · Telecom · Infraestrutura: Eletroduto, Eletrocalha · Circuitos). Escolher um ponto ou um trecho já abre o editor em planta com o componente pronto para locar.
+- **Navegador** à esquerda (pavimentos, disciplinas, sistemas, quadros e circuitos) e **painel da ferramenta** à direita; os dois se ocultam e reaparecem pelos botões nas pontas da barra de vistas.
+- **Vistas** no centro: *Planta · pavimento* (edição 2D), *3D* (modelo completo ou pavimento isolado, com cortes) e *Prancha*.
+- **Cor de fundo** branco ou preto: botão de sol/lua no cabeçalho ou Arquivo › Fundo. A escolha fica salva.
+
+![Climatização › Duto com fundo preto](docs/tela-escuro.png)
 
 ## O que já faz
 
 | Módulo | Recursos |
 | --- | --- |
-| **Vistas 3D e cortes** | Na barra lateral, **Modelo completo** ou **3D por pavimento** (isola o pavimento e enquadra). Em toda vista 3D, a ferramenta **✂ Corte** tem corte horizontal (mostra o que está abaixo da altura escolhida, com atalhos piso + 0,5/1,2/2,5 m) e cortes verticais em X e em Y do projeto, com controle deslizante e inversão de lado. Seleção e locação respeitam o corte. |
+| **Vistas 3D e cortes** | No navegador (Pavimentos), **Modelo completo** ou um pavimento (isola o pavimento no 3D e enquadra). Em toda vista 3D, a ferramenta **✂ Corte** tem corte horizontal (mostra o que está abaixo da altura escolhida, com atalhos piso + 0,5/1,2/2,5 m) e cortes verticais em X e em Y do projeto, com controle deslizante e inversão de lado. Seleção e locação respeitam o corte. |
 | **Visualizador IFC** | Abre IFC2x3 / IFC4 (botão, menu `Ctrl+O`, arrastar e soltar ou duplo clique no arquivo), navegação 3D, seleção (Ctrl+clique soma), duplo clique enquadra, cores por disciplina ou cores originais do IFC. |
 | **Locação de pontos** | Biblioteca com 35 componentes (iluminação, tomadas e comandos, quadros, telecom e CFTV, incêndio, louças e ralos, climatização). Clique para locar com encaixe automático na **parede**, no **teto/forro** ou no **piso**, distribuição em **área** (linhas × colunas ou espaçamento máximo), etiquetas automáticas (L1, T1, SPK1…), sistema, circuito e parâmetros. Mover, girar, editar em lote, desfazer/refazer. Salva a locação (`.locacao.json`) e **exporta IFC4** para federar com o modelo. |
 | **Filtros** | Por disciplina (com "só" para isolar), pavimento, sistema e busca por nome, tipo ou dimensão. |
@@ -26,7 +36,7 @@ Trabalha sobre modelos **IFC** de qualquer software (Revit, Archicad, Tekla, etc
 
 ### Locação de pontos
 
-As abas **Locação** e **Traçado** abrem num **editor em planta 2D** do pavimento: o corte real do IFC na altura escolhida (padrão 1,20 m), com os pontos, trechos e ambientes desenhados por cima. No canto superior direito ficam o pavimento, a altura do corte e o seletor **Planta 2D | 3D**, para quem preferir editar no modelo (combinado com a ferramenta de corte).
+As ferramentas de locação e traçado abrem a vista **Planta** do pavimento ativo (escolhido no navegador): o corte real do IFC na altura indicada na barra de vistas (padrão 1,20 m), com os pontos, trechos e ambientes desenhados por cima. A aba **3D** continua disponível para quem preferir editar no modelo (combinado com a ferramenta de corte).
 
 1. Escolha um componente da biblioteca e ajuste altura, sistema, circuito e parâmetros.
 2. Passe o mouse na planta:
@@ -133,11 +143,11 @@ Comprimentos vêm das quantidades IFC (`Qto_*`), depois das propriedades e, por 
 
 ## Instalador para Windows
 
-O GitHub Actions gera o instalador `MEP-BIM-Setup-<versão>.exe` a cada push que altere `apps/mep-bim/` (workflow [`mep-bim-desktop.yml`](../../.github/workflows/mep-bim-desktop.yml)). Antes de empacotar, ele roda a verificação de tipos e os testes.
+O GitHub Actions gera o instalador `SmartEasyBIM-Setup-<versão>.exe` a cada push que altere `apps/mep-bim/` (workflow [`mep-bim-desktop.yml`](../../.github/workflows/mep-bim-desktop.yml)). Antes de empacotar, ele roda a verificação de tipos e os testes.
 
-1. No GitHub, abra **Actions → MEP BIM - instalador Windows** e entre na execução mais recente (com ✅).
-2. Em **Artifacts**, baixe `MEP-BIM-Windows-<n>` (um `.zip` com o `.exe`). O artefato fica disponível por 30 dias.
-3. Execute o instalador: ele pergunta a pasta, cria atalhos na área de trabalho e no menu Iniciar e associa arquivos `.ifc` ao app (duplo clique num IFC abre o MEP BIM).
+1. No GitHub, abra **Actions → SmartEasyBIM - instalador Windows** e entre na execução mais recente (com ✅).
+2. Em **Artifacts**, baixe `SmartEasyBIM-Windows-<n>` (um `.zip` com o `.exe`). O artefato fica disponível por 30 dias.
+3. Execute o instalador: ele pergunta a pasta, cria atalhos na área de trabalho e no menu Iniciar e associa arquivos `.ifc` ao app (duplo clique num IFC abre o SmartEasyBIM).
 
 O instalador ainda não é assinado digitalmente. Na primeira execução, o Windows pode mostrar "O Windows protegeu o computador": clique em **Mais informações → Executar assim mesmo**. Para eliminar esse aviso é preciso um certificado de assinatura de código (pode ser configurado depois como segredo do repositório).
 

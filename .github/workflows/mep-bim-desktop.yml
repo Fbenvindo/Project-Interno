@@ -1,7 +1,7 @@
-# Gera o instalador Windows (.exe) do app desktop MEP BIM (apps/mep-bim).
+# Gera o instalador Windows (.exe) do app desktop SmartEasyBIM (apps/mep-bim).
 # Roda a cada push que altere o app e pode ser disparado manualmente na aba Actions.
 # O instalador fica disponível como artefato da execução por 30 dias.
-name: MEP BIM - instalador Windows
+name: SmartEasyBIM - instalador Windows
 
 on:
   push:
@@ -52,7 +52,7 @@ jobs:
       - name: Publicar instalador como artefato
         uses: actions/upload-artifact@v4
         with:
-          name: MEP-BIM-Windows-${{ github.run_number }}
+          name: SmartEasyBIM-Windows-${{ github.run_number }}
           path: apps/mep-bim/release/*.exe
           if-no-files-found: error
           retention-days: 30

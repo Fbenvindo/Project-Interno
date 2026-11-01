@@ -137,7 +137,7 @@ export function renderSheet(drawing: PlanDrawing, format: SheetFormat, info: She
       `<text x="${cx + 2}" y="${cy0 + 11}" font-size="3.6" ${FONT}>${esc(value || "—")}</text>`,
     );
   });
-  out.push(`<text x="${tb.x + tb.w - 2}" y="${tb.y + tb.h + 4.5}" font-size="2" text-anchor="end" fill="#666" ${FONT}>Gerado pelo MEP BIM · formato ${format}</text>`);
+  out.push(`<text x="${tb.x + tb.w - 2}" y="${tb.y + tb.h + 4.5}" font-size="2" text-anchor="end" fill="#666" ${FONT}>Gerado pelo SmartEasyBIM · formato ${format}</text>`);
 
   const inner = out.join("");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}mm" height="${h}mm" viewBox="0 0 ${w} ${h}">${inner}</svg>`;

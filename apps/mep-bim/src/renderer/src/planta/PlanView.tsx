@@ -5,12 +5,14 @@ interface Props {
   sheet: SheetResult;
   selection: number[];
   onSelect: (ids: number[], additive: boolean) => void;
+  /** Muda a cada pedido de enquadramento vindo da faixa de ferramentas. */
+  fitSignal?: number;
 }
 
 type ViewBox = { x: number; y: number; w: number; h: number };
 
 /** Prancha interativa: roda do mouse = zoom, arrastar = deslocar, clique = selecionar. */
-export function PlanView({ sheet, selection, onSelect }: Props) {
+export function PlanView({ sheet, selection, onSelect, fitSignal }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const [vb, setVb] = useState<ViewBox>({ x: 0, y: 0, w: sheet.width, h: sheet.height });
   const drag = useRef<{ x: number; y: number; vb: ViewBox; moved: boolean } | null>(null);
@@ -29,6 +31,10 @@ export function PlanView({ sheet, selection, onSelect }: Props) {
 
   // Reenquadra ao trocar o formato da folha.
   useEffect(fit, [fit]);
+  useEffect(() => {
+    if (fitSignal) fit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitSignal]);
 
   const toSheet = (clientX: number, clientY: number) => {
     const r = host.current!.getBoundingClientRect();

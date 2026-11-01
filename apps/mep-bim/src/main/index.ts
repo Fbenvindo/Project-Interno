@@ -32,7 +32,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 640,
-    title: "MEP BIM",
+    title: "SmartEasyBIM",
     backgroundColor: "#14171c",
     show: false,
     webPreferences: {

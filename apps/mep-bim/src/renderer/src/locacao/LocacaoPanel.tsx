@@ -31,6 +31,10 @@ interface Props {
   selection: number[];
   onSelect: (ids: number[], frame?: boolean) => void;
   systems: string[];
+  /** Grupos da biblioteca exibidos (disciplina ativa); todos se omitido. */
+  groups?: string[];
+  /** Componente escolhido na faixa de ferramentas (n muda a cada clique). */
+  preset?: { componentId: string; n: number } | null;
 }
 
 type Mode = "ponto" | "area" | "ambiente";
@@ -42,7 +46,7 @@ const FLOOR_TYPES = new Set(["IFCSLAB", "IFCCOVERING", "IFCROOF", "IFCRAMP", "IF
 
 const isTyping = (t: EventTarget | null) => t instanceof HTMLElement && /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName);
 
-export function LocacaoPanel({ model, fileName, store, viewer, elementById, selection, onSelect, systems }: Props) {
+export function LocacaoPanel({ model, fileName, store, viewer, elementById, selection, onSelect, systems, groups, preset }: Props) {
   const [componentId, setComponentId] = useState<string | null>(null);
   const [height, setHeight] = useState(0);
   const [rotationDeg, setRotationDeg] = useState(0);
@@ -76,6 +80,12 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
     setParams(defaultParams(d));
     setMode("ponto");
   };
+
+  // Ferramenta escolhida na faixa superior: seleciona o componente e já ativa a locação.
+  useEffect(() => {
+    if (preset) selectComponent(preset.componentId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset?.n]);
 
   // ---- Cálculo da posição ----------------------------------------------------
   const acceptFloor = useCallback((id: number) => FLOOR_TYPES.has(elementById.get(id)?.ifcType ?? ""), [elementById]);
@@ -287,7 +297,7 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
   }, [points]);
 
   const q = search.trim().toLowerCase();
-  const filteredComponents = COMPONENTS.filter((c) => !q || `${c.label} ${c.group}`.toLowerCase().includes(q));
+  const filteredComponents = COMPONENTS.filter((c) => (!groups || groups.includes(c.group)) && (!q || `${c.label} ${c.group}`.toLowerCase().includes(q)));
 
   return (
     <div className="panel-body locacao">
