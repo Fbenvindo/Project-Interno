@@ -91,6 +91,26 @@ ipcMain.handle("ifc:open", async (): Promise<OpenedFile | null> => {
   return readIfc(res.filePaths[0]);
 });
 
+ipcMain.handle("ifc:openMany", async (): Promise<OpenedFile[]> => {
+  const res = await dialog.showOpenDialog(mainWindow!, {
+    title: "Vincular modelos IFC",
+    filters: [{ name: "Modelos IFC", extensions: ["ifc"] }],
+    properties: ["openFile", "multiSelections"],
+  });
+  if (res.canceled) return [];
+  return Promise.all(res.filePaths.map(readIfc));
+});
+
+// Só arquivos .ifc: o caminho vem do arquivo de projeto salvo pelo próprio usuário.
+ipcMain.handle("ifc:readPath", async (_e, filePath: string): Promise<OpenedFile | null> => {
+  if (typeof filePath !== "string" || !/\.ifc$/i.test(filePath)) return null;
+  try {
+    return await readIfc(filePath);
+  } catch {
+    return null;
+  }
+});
+
 ipcMain.handle("ifc:pending", async (): Promise<OpenedFile | null> => {
   if (!pendingFile) return null;
   const file = pendingFile;

@@ -7,6 +7,7 @@ import { newRunId, RUN_TYPE_BY_ID, type Run } from "./runs";
 import { newCircuitId, type Circuit, type CircuitType } from "./circuits";
 import type { Vec3 } from "./types";
 import { EMPTY_PROGRAM, type ProgramState } from "./program";
+import type { LinkMeta } from "../ifc/federate";
 
 export interface ProjectData {
   points: PlacedPoint[];
@@ -14,6 +15,8 @@ export interface ProjectData {
   circuits: Circuit[];
   /** Programa de necessidades por ambiente (versão 4). */
   program?: ProgramState;
+  /** Vínculos IFC (referências externas). */
+  links?: LinkMeta[];
 }
 
 interface StoredCircuit {
@@ -48,6 +51,7 @@ export interface ProjectFile extends LocacaoFile {
   trechos?: StoredRun[];
   circuitos?: StoredCircuit[];
   programa?: ProgramState;
+  vinculos?: { id: string; nome: string; caminho: string | null; disciplina: LinkMeta["discipline"]; visivel: boolean; transparente: boolean }[];
 }
 
 const round6 = (v: number) => Math.round(v * 1e6) / 1e6;
@@ -82,6 +86,9 @@ export function serializeProject(data: ProjectData, cs: CoordinateSystem, modelN
       quedaMaxima: c.dropLimit,
     })),
     ...(data.program && Object.keys(data.program.rooms).length ? { programa: data.program } : {}),
+    ...(data.links?.length
+      ? { vinculos: data.links.map((l) => ({ id: l.id, nome: l.name, caminho: l.path, disciplina: l.discipline, visivel: l.visible, transparente: l.translucent })) }
+      : {}),
   };
 }
 
@@ -117,5 +124,13 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
     dropLimit: c.quedaMaxima ?? 4,
   }));
   const program: ProgramState = file.programa && typeof file.programa === "object" && file.programa.rooms ? file.programa : EMPTY_PROGRAM;
-  return { points, runs, circuits, program };
+  const links: LinkMeta[] = (file.vinculos ?? []).map((v) => ({
+    id: v.id,
+    name: v.nome,
+    path: v.caminho ?? null,
+    discipline: v.disciplina ?? "auto",
+    visible: v.visivel !== false,
+    translucent: !!v.transparente,
+  }));
+  return { points, runs, circuits, program, links };
 }

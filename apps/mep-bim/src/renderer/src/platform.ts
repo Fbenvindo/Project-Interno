@@ -25,6 +25,28 @@ export async function openIfc(): Promise<OpenedFile | null> {
   });
 }
 
+/** Vários IFC (vínculos). */
+export async function openIfcMany(): Promise<OpenedFile[]> {
+  if (desktop) return desktop.openIfcMany();
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".ifc";
+    input.multiple = true;
+    input.onchange = async () => {
+      const files = [...(input.files ?? [])];
+      resolve(await Promise.all(files.map(async (f) => ({ name: f.name, path: null, data: new Uint8Array(await f.arrayBuffer()) }))));
+    };
+    input.click();
+  });
+}
+
+/** Relê um IFC pelo caminho salvo (só no app desktop). */
+export async function readIfcPath(path: string | null): Promise<OpenedFile | null> {
+  if (!desktop || !path) return null;
+  return desktop.readIfcPath(path);
+}
+
 export async function saveFile(req: SaveRequest): Promise<string | null> {
   if (desktop) return desktop.saveFile(req);
   const blob = new Blob([req.content], { type: "text/plain;charset=utf-8" });

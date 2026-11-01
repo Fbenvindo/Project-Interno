@@ -2,10 +2,7 @@
 name: SmartEasyBIM - plugin Revit
 
 on:
-  push:
-    paths:
-      - "apps/mep-bim/revit-addin/**"
-      - ".github/workflows/smarteasybim-revit.yml"
+  # Só quando disparado manualmente (aba Actions › Run workflow), a pedido.
   workflow_dispatch:
 
 jobs:

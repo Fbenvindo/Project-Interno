@@ -30,6 +30,10 @@ export interface PdfRequest {
 
 export interface DesktopApi {
   openIfc(): Promise<OpenedFile | null>;
+  /** Vários IFC de uma vez (vínculos). */
+  openIfcMany(): Promise<OpenedFile[]>;
+  /** Relê um IFC pelo caminho (vínculos salvos no projeto); null se não existir mais. */
+  readIfcPath(path: string): Promise<OpenedFile | null>;
   /** Arquivo recebido pela linha de comando / sistema operacional, se houver. */
   takePendingIfc(): Promise<OpenedFile | null>;
   saveFile(req: SaveRequest): Promise<string | null>;

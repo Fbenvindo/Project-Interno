@@ -1,13 +1,10 @@
 # Gera o instalador Windows (.exe) do app desktop SmartEasyBIM (apps/mep-bim).
-# Roda a cada push que altere o app e pode ser disparado manualmente na aba Actions.
+# Disparado manualmente na aba Actions (Run workflow) quando um novo instalador for pedido.
 # O instalador fica disponível como artefato da execução por 30 dias.
 name: SmartEasyBIM - instalador Windows
 
 on:
-  push:
-    paths:
-      - "apps/mep-bim/**"
-      - ".github/workflows/mep-bim-desktop.yml"
+  # Só quando disparado manualmente (aba Actions › Run workflow), a pedido.
   workflow_dispatch:
 
 permissions:

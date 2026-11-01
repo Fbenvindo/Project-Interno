@@ -25,6 +25,7 @@ export type ToolSpec =
   | { kind: "interferencias" }
   | { kind: "pranchas" }
   | { kind: "biblioteca" }
+  | { kind: "vinculos" }
   | { kind: "programa"; section: "tipos" | "ambientes" };
 
 export type Tool = ToolSpec & { n: number };
@@ -33,6 +34,7 @@ export type ActionId =
   | "abrirIfc"
   | "exemplo"
   | "exemploApartamento"
+  | "vincularIfc"
   | "abrirProjeto"
   | "salvarProjeto"
   | "exportarIfc"
@@ -113,6 +115,7 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
         { key: "abrir-ifc", label: "Abrir IFC", icon: "importar", action: "abrirIfc" },
         { key: "exemplo", label: "Exemplo", icon: "exemplo", action: "exemplo" },
         { key: "exemplo-apto", label: "Exemplo apartamento", icon: "planta", action: "exemploApartamento" },
+        { key: "vincular", label: "Vincular IFC", icon: "vinculo", action: "vincularIfc", needsModel: true },
       ],
     },
     {
@@ -145,6 +148,10 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
         { key: "corte", label: "Corte", icon: "corte", action: "corte", needsModel: true },
         { key: "cores", label: "Cores", icon: "cores", action: "cores", needsModel: true },
       ],
+    },
+    {
+      label: "Referências",
+      buttons: [{ key: "vinculos", label: "Vínculos IFC", icon: "vinculo", tool: { kind: "vinculos" }, needsModel: true }],
     },
     {
       label: "Consulta",

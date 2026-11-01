@@ -178,24 +178,45 @@ export class Viewer {
 
   load(meshes: ElementMesh[], disciplineColorOf: (expressID: number) => string) {
     this.clear();
+    this.addModelMeshes(meshes, disciplineColorOf);
+    this.placeGrid();
+    this.fitTo();
+  }
+
+  /** Acrescenta malhas de modelo (vínculos IFC) sem limpar a cena; opacity < 1 deixa transparente. */
+  addModelMeshes(meshes: ElementMesh[], disciplineColorOf: (expressID: number) => string, opacity = 1) {
     for (const m of meshes) {
-      if (!m.positions.length) continue;
+      if (!m.positions.length || this.entries.has(m.expressID)) continue;
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", new THREE.BufferAttribute(m.positions, 3));
       geometry.setAttribute("normal", new THREE.BufferAttribute(m.normals, 3));
       geometry.setIndex(new THREE.BufferAttribute(m.indices, 1));
       geometry.computeBoundingBox();
       geometry.computeBoundingSphere();
-      const ifcMaterial = this.material(m.color[0], m.color[1], m.color[2], m.color[3]);
+      const alpha = Math.min(m.color[3], opacity);
+      const ifcMaterial = this.material(m.color[0], m.color[1], m.color[2], alpha);
       const disciplineColor = new THREE.Color(disciplineColorOf(m.expressID));
-      const disciplineMaterial = this.material(disciplineColor.r, disciplineColor.g, disciplineColor.b, m.color[3] < 1 ? 0.4 : 1);
+      const disciplineMaterial = this.material(disciplineColor.r, disciplineColor.g, disciplineColor.b, m.color[3] < 1 ? Math.min(0.4, opacity) : opacity);
       const mesh = new THREE.Mesh(geometry, this.colorMode === "ifc" ? ifcMaterial : disciplineMaterial);
       mesh.userData.expressID = m.expressID;
       this.modelGroup.add(mesh);
       this.entries.set(m.expressID, { mesh, ifcMaterial, disciplineMaterial, layer: "model" });
     }
-    this.placeGrid();
-    this.fitTo();
+    this.setVisible(this.visible);
+  }
+
+  /** Remove malhas de modelo (vínculo desligado ou removido). */
+  removeModelMeshes(ids: Iterable<number>) {
+    for (const id of ids) {
+      const e = this.entries.get(id);
+      if (!e || e.layer !== "model") continue;
+      this.modelGroup.remove(e.mesh);
+      e.mesh.geometry.dispose();
+      this.entries.delete(id);
+      this.selected.delete(id);
+      this.highlighted.delete(id);
+    }
+    this.requestRender();
   }
 
   clear() {

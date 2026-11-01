@@ -81,6 +81,13 @@ const P: Record<string, ReactNode> = {
       <path d="M8 10 H16 M8 13.5 H16 M8 17 H13" />
     </>
   ),
+  vinculo: (
+    <>
+      <path d="M10 14 L14 10" />
+      <path d="M8.5 12.5 L6.5 14.5 A3 3 0 0 0 10.7 18.7 L12.7 16.7" />
+      <path d="M15.5 11.5 L17.5 9.5 A3 3 0 0 0 13.3 5.3 L11.3 7.3" />
+    </>
+  ),
   selecionar: <path d="M5 3 L19 12 L12.5 13.5 L16 20.5 L13.5 21.5 L10 14.5 L5 19 Z" />,
   propriedades: (
     <>

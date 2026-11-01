@@ -5,6 +5,8 @@ const ALLOWED = new Set(["menu:open", "menu:fit", "ifc:pending-available"]);
 
 const api: DesktopApi = {
   openIfc: () => ipcRenderer.invoke("ifc:open"),
+  openIfcMany: () => ipcRenderer.invoke("ifc:openMany"),
+  readIfcPath: (path) => ipcRenderer.invoke("ifc:readPath", path),
   takePendingIfc: () => ipcRenderer.invoke("ifc:pending"),
   saveFile: (req) => ipcRenderer.invoke("file:save", req),
   openTextFile: (filters) => ipcRenderer.invoke("file:openText", filters),

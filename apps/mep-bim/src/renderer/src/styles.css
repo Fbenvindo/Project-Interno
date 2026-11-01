@@ -1674,3 +1674,40 @@ h3 {
   padding: 2px 8px;
   border-bottom: 1px solid var(--border);
 }
+
+/* ---- Vínculos IFC -------------------------------------------------------------- */
+.link-card {
+  padding: 8px 12px 10px;
+}
+.link-card.off {
+  opacity: 0.6;
+}
+.link-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.link-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.link-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: var(--navy);
+  color: #fff;
+}
+.link-disc {
+  margin-right: 8px;
+  white-space: nowrap;
+}
+.link-translucent {
+  align-self: end;
+  padding-bottom: 6px;
+}
+.vinculos .form-grid select {
+  width: 100%;
+}

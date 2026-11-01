@@ -23,6 +23,8 @@ import { buildPlan } from "../../core/plan/build";
 import { renderSheet } from "../../core/plan/sheet";
 import { connectedPairs, runElements, runFittings, runIdOfElement, runProperties, runSegments, RUN_TYPE_BY_ID, segmentElementId, fittingElementId } from "../../core/runs";
 import { usePointsStore } from "./locacao/usePointsStore";
+import { federate, prepareLink, type LinkData, type LinkMeta } from "../../ifc/federate";
+import { openIfcMany, readIfcPath } from "./platform";
 import { boxElements, boxIndexOf, boxProperties, pullBoxes } from "../../core/conduits";
 import { defaultTitleBlockId, titleBlockById, useTitleBlocks } from "./planta/titleBlocks";
 import { useProjectFiles } from "./locacao/useProjectFiles";
@@ -31,6 +33,7 @@ import { Ribbon } from "./shell/Ribbon";
 import { ParamsPanel } from "./shell/ParamsPanel";
 import { BibliotecaPanel } from "./library/BibliotecaPanel";
 import { ProgramaPanel, ProgramaTiposOnly } from "./programa/ProgramaPanel";
+import { VinculosPanel } from "./links/VinculosPanel";
 import { loadFamilyLibrary } from "./library/familyLibrary";
 import { getLibraryVersion, onLibraryChange } from "../../core/library";
 import { makeCeilingResolver, makeSlabProbe } from "./locacao/ceiling";
@@ -74,13 +77,18 @@ const TOOL_HINT: Record<ToolSpec["kind"], string> = {
   pranchas: "Roda do mouse: zoom · arrastar: mover · duplo clique: enquadrar a folha",
   biblioteca: "Importe famílias exportadas do Revit e loque-as como qualquer item da biblioteca",
   programa: "Defina as instalações por tipo de equipamento e por ambiente e gere os pontos no modelo",
+  vinculos: "Modelos de outras disciplinas sobrepostos ao principal, pelas coordenadas do projeto",
 };
 
 export function App() {
   const viewerHost = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
   const modelRef = useRef<LoadedModel | null>(null);
-  const [model, setModel] = useState<LoadedModel | null>(null);
+  /** Modelo principal (o IFC aberto). O app trabalha com o federado: principal + vínculos visíveis. */
+  const [hostModel, setModel] = useState<LoadedModel | null>(null);
+  const [linkData, setLinkData] = useState<Map<string, LinkData>>(() => new Map());
+  const [linkStatus, setLinkStatus] = useState<Record<string, string>>({});
+  const linkSlot = useRef(1);
   const [fileName, setFileName] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -116,6 +124,11 @@ export function App() {
   const libraryVersion = useSyncExternalStore(onLibraryChange, getLibraryVersion, getLibraryVersion);
 
   const store = usePointsStore();
+  const fedLinks = useMemo(
+    () => store.links.filter((m) => linkData.has(m.id)).map((meta) => ({ meta, data: linkData.get(meta.id)! })),
+    [store.links, linkData],
+  );
+  const model = useMemo(() => (hostModel ? federate(hostModel, fedLinks) : null), [hostModel, fedLinks]);
   const files = useProjectFiles(store, model, fileName, () => setSelection([]));
   const pointElements = useMemo(() => store.points.map(pointToElement), [store.points]);
   const runElementList = useMemo(() => (model ? runElements(store.runs, model.storeyLevels) : []), [store.runs, model]);
@@ -347,6 +360,12 @@ export function App() {
     try {
       const api = await getIfcApi();
       modelRef.current?.close();
+      // Vínculos do modelo anterior são descartados com ele.
+      setLinkData((cur) => {
+        cur.forEach((l) => l.raw.close());
+        return new Map();
+      });
+      setLinkStatus({});
       const loaded = loadIfc(api, file.data, (stage) => setProgress(stage));
       modelRef.current = loaded;
       const disciplineOf = new Map(loaded.elements.map((e) => [e.expressID, e.discipline]));
@@ -369,6 +388,111 @@ export function App() {
       setProgress(null);
     }
   }, []);
+
+  // ---- Vínculos IFC ----------------------------------------------------------------
+  /** Lê um IFC como vínculo do modelo principal. */
+  const loadLink = useCallback(
+    async (id: string, file: { name: string; data: Uint8Array }) => {
+      const host = modelRef.current;
+      if (!host) return;
+      setLinkStatus((s) => ({ ...s, [id]: "carregando" }));
+      await new Promise((r) => setTimeout(r, 20));
+      try {
+        const api = await getIfcApi();
+        const raw = loadIfc(api, file.data);
+        const data = prepareLink(id, linkSlot.current++, raw, host);
+        setLinkData((cur) => new Map(cur).set(id, data));
+        setLinkStatus((s) => {
+          const { [id]: _drop, ...rest } = s;
+          return rest;
+        });
+      } catch (e) {
+        setLinkStatus((s) => ({ ...s, [id]: `erro: ${e instanceof Error ? e.message : e}` }));
+      }
+    },
+    [],
+  );
+
+  const addLinks = useCallback(async () => {
+    const files = await openIfcMany();
+    for (const f of files) {
+      const id = `lk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      const meta: LinkMeta = { id, name: f.name, path: f.path, discipline: "auto", visible: true, translucent: false };
+      store.setLinks((l) => [...l, meta]);
+      await loadLink(id, f);
+    }
+  }, [store, loadLink]);
+
+  const removeLink = useCallback(
+    (id: string) => {
+      store.setLinks((l) => l.filter((x) => x.id !== id));
+      setLinkData((cur) => {
+        const d = cur.get(id);
+        if (!d) return cur;
+        d.raw.close();
+        const next = new Map(cur);
+        next.delete(id);
+        return next;
+      });
+    },
+    [store],
+  );
+
+  /** Localizar de novo um vínculo (arquivo movido ou projeto aberto no navegador). */
+  const relocateLink = useCallback(
+    async (id: string) => {
+      const [f] = await openIfcMany();
+      if (!f) return;
+      store.setLinks((l) => l.map((x) => (x.id === id ? { ...x, name: f.name, path: f.path } : x)));
+      setLinkData((cur) => {
+        const d = cur.get(id);
+        if (!d) return cur;
+        d.raw.close();
+        const next = new Map(cur);
+        next.delete(id);
+        return next;
+      });
+      await loadLink(id, f);
+    },
+    [store, loadLink],
+  );
+
+  // Projeto aberto com vínculos: tenta reabrir cada um pelo caminho salvo.
+  useEffect(() => {
+    if (!hostModel) return;
+    for (const m of store.links) {
+      if (linkData.has(m.id) || linkStatus[m.id]) continue;
+      setLinkStatus((s) => ({ ...s, [m.id]: "carregando" }));
+      void readIfcPath(m.path).then((f) => {
+        if (f) void loadLink(m.id, f);
+        else setLinkStatus((s) => ({ ...s, [m.id]: "não encontrado" }));
+      });
+    }
+  }, [hostModel, store.links, linkData, linkStatus, loadLink]);
+
+  // Malhas dos vínculos na cena: entram quando visíveis; mudanças de disciplina/transparência recriam.
+  const linkInScene = useRef(new Map<string, { sig: string; ids: number[] }>());
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    const sigOf = (m: LinkMeta) => `${m.discipline}|${m.translucent}`;
+    const want = new Map(fedLinks.filter((l) => l.meta.visible).map((l) => [l.meta.id, sigOf(l.meta)]));
+    for (const [id, cur] of [...linkInScene.current]) {
+      if (want.get(id) === cur.sig) continue;
+      viewer.removeModelMeshes(cur.ids);
+      linkInScene.current.delete(id);
+    }
+    for (const l of fedLinks) {
+      if (!l.meta.visible || linkInScene.current.has(l.meta.id)) continue;
+      const byId = new Map(l.data.elements.map((e) => [e.expressID, e.discipline]));
+      const color = (id: number) => DISCIPLINE_BY_ID[l.meta.discipline !== "auto" ? l.meta.discipline : (byId.get(id) ?? "outros")].color;
+      viewer.addModelMeshes(l.data.meshes, color, l.meta.translucent ? 0.3 : 1);
+      linkInScene.current.set(l.meta.id, { sig: sigOf(l.meta), ids: l.data.meshes.map((m) => m.expressID) });
+    }
+  }, [fedLinks]);
+  useEffect(() => {
+    if (!hostModel) linkInScene.current.clear();
+  }, [hostModel]);
 
   const handleOpen = useCallback(async () => {
     const file = await openIfc();
@@ -513,6 +637,9 @@ export function App() {
           return void handleSample();
         case "exemploApartamento":
           return void handleSample("exemplo-apartamento.ifc");
+        case "vincularIfc":
+          chooseTool({ kind: "vinculos" });
+          return void addLinks();
         case "abrirProjeto":
           return void files.open();
         case "salvarProjeto":
@@ -546,7 +673,7 @@ export function App() {
           return;
       }
     },
-    [handleOpen, handleSample, files, view, leftOpen],
+    [handleOpen, handleSample, files, view, leftOpen, addLinks, chooseTool],
   );
 
   const pressed: Partial<Record<ActionId, boolean>> = {
@@ -650,6 +777,20 @@ export function App() {
             ignorePair={connected}
             onFocus={focusClash}
             onClear={clearHighlight}
+          />
+        );
+      case "vinculos":
+        return (
+          <VinculosPanel
+            hostName={fileName}
+            host={hostModel!}
+            links={store.links}
+            data={linkData}
+            status={linkStatus}
+            onAdd={() => void addLinks()}
+            onChange={(id, patch) => store.setLinks((l) => l.map((x) => (x.id === id ? { ...x, ...patch } : x)))}
+            onRemove={removeLink}
+            onRelocate={(id) => void relocateLink(id)}
           />
         );
       case "programa":
