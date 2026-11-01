@@ -90,6 +90,11 @@ const SYMBOLS: Record<string, Omit<SymbolDef, "description">> = {
   chuveiro: { footprint: false, prims: [circle(1.6, false, [0, 1.6]), text("CH", [0, 1.6], 1.0)], labelOffset: 4.5 },
   "pia-cozinha": { footprint: true, prims: [text("PIA", [0, 0], 1.4)], labelOffset: 4 },
   "registro-gaveta": { footprint: false, prims: [{ t: "poly", pts: [[-1.4, 0.4], [1.4, 2.2], [1.4, 0.4], [-1.4, 2.2]], closed: true, fill: true }], labelOffset: 4 },
+  "ponto-agua-fria": { footprint: false, prims: [circle(1.5, false, [0, 1.5]), text("AF", [0, 1.5], 1.1)], labelOffset: 4.5 },
+  "ponto-agua-quente": { footprint: false, prims: [circle(1.5, false, [0, 1.5]), text("AQ", [0, 1.5], 1.1)], labelOffset: 4.5 },
+  "ponto-esgoto": { footprint: false, prims: [circle(1.6, true), circle(2.2)], labelOffset: 3.5 },
+  "saida-esgoto-parede": { footprint: false, prims: [circle(1.5, true, [0, 1.5])], labelOffset: 4.5 },
+  "ponto-gas": { footprint: false, prims: [circle(1.5, false, [0, 1.5]), text("G", [0, 1.5], 1.2)], labelOffset: 4.5 },
   "ralo-sifonado": { footprint: false, prims: [circle(1.5), ...x(1.05)], labelOffset: 3 },
   // Climatização
   "difusor-6060": { footprint: true, prims: x(1.4), labelOffset: 3 },

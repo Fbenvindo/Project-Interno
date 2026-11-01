@@ -6,11 +6,14 @@ import { deserializePoints, serializePoints, type LocacaoFile, type PlacedPoint 
 import { newRunId, RUN_TYPE_BY_ID, type Run } from "./runs";
 import { newCircuitId, type Circuit, type CircuitType } from "./circuits";
 import type { Vec3 } from "./types";
+import { EMPTY_PROGRAM, type ProgramState } from "./program";
 
 export interface ProjectData {
   points: PlacedPoint[];
   runs: Run[];
   circuits: Circuit[];
+  /** Programa de necessidades por ambiente (versão 4). */
+  program?: ProgramState;
 }
 
 interface StoredCircuit {
@@ -44,6 +47,7 @@ interface StoredRun {
 export interface ProjectFile extends LocacaoFile {
   trechos?: StoredRun[];
   circuitos?: StoredCircuit[];
+  programa?: ProgramState;
 }
 
 const round6 = (v: number) => Math.round(v * 1e6) / 1e6;
@@ -51,7 +55,7 @@ const round6 = (v: number) => Math.round(v * 1e6) / 1e6;
 export function serializeProject(data: ProjectData, cs: CoordinateSystem, modelName: string | null): ProjectFile {
   return {
     ...serializePoints(data.points, cs, modelName),
-    versao: 3,
+    versao: 4,
     trechos: data.runs.map((r) => ({
       guid: r.guid,
       tipo: r.typeId,
@@ -77,6 +81,7 @@ export function serializeProject(data: ProjectData, cs: CoordinateSystem, modelN
       fca: c.correction,
       quedaMaxima: c.dropLimit,
     })),
+    ...(data.program && Object.keys(data.program.rooms).length ? { programa: data.program } : {}),
   };
 }
 
@@ -111,5 +116,6 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
     correction: c.fca ?? 1,
     dropLimit: c.quedaMaxima ?? 4,
   }));
-  return { points, runs, circuits };
+  const program: ProgramState = file.programa && typeof file.programa === "object" && file.programa.rooms ? file.programa : EMPTY_PROGRAM;
+  return { points, runs, circuits, program };
 }

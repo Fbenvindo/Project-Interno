@@ -183,7 +183,7 @@ interface StoredPoint {
 
 export interface LocacaoFile {
   formato: typeof LOCACAO_FORMAT;
-  versao: 1 | 2 | 3;
+  versao: 1 | 2 | 3 | 4;
   modeloIfc: string | null;
   salvoEm: string;
   pontos: StoredPoint[];

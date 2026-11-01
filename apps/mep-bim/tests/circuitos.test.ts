@@ -164,7 +164,7 @@ describe("arquivo e IFC", () => {
     const c = circuit({ name: "C7", description: "Tomadas sala" });
     const p = { ...pt("tomada-baixa", [1, 0.3, 0], { Circuito: "C7" }), circuit: c.uid };
     const json = JSON.parse(JSON.stringify(serializeProject({ points: [p], runs: [{ ...conduit([[0, 0, 0], [1, 0, 0]]), circuit: c.uid }], circuits: [c] }, cs, "m.ifc")));
-    expect(json.versao).toBe(3);
+    expect(json.versao).toBe(4);
     const back = deserializeProject(json, cs);
     expect(back.circuits[0]).toMatchObject({ uid: c.uid, name: "C7", description: "Tomadas sala", poles: 1 });
     expect(back.points[0].circuit).toBe(c.uid);

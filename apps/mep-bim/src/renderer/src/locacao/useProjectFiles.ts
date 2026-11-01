@@ -13,7 +13,7 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel | null, f
 
   const save = useCallback(async () => {
     if (!model) return;
-    const json = JSON.stringify(serializeProject({ points: store.points, runs: store.runs, circuits: store.circuits }, model.coordinates, fileName), null, 2);
+    const json = JSON.stringify(serializeProject({ points: store.points, runs: store.runs, circuits: store.circuits, program: store.program }, model.coordinates, fileName), null, 2);
     const saved = await saveFile({
       defaultName: `${base(fileName)}.locacao.json`,
       content: json,
@@ -32,8 +32,8 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel | null, f
     if (!file) return;
     try {
       const json = JSON.parse(file.content);
-      const { points, runs, circuits } = deserializeProject(json, model.coordinates);
-      store.reset(points, runs, circuits);
+      const { points, runs, circuits, program } = deserializeProject(json, model.coordinates);
+      store.reset(points, runs, circuits, program);
       onOpened?.();
       const other = json.modeloIfc && fileName && json.modeloIfc !== fileName;
       setMessage(

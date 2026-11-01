@@ -30,6 +30,7 @@ import { EMPTY_FILTERS, Navigator, NO_STOREY, type Filters } from "./shell/Navig
 import { Ribbon } from "./shell/Ribbon";
 import { ParamsPanel } from "./shell/ParamsPanel";
 import { BibliotecaPanel } from "./library/BibliotecaPanel";
+import { ProgramaPanel, ProgramaTiposOnly } from "./programa/ProgramaPanel";
 import { loadFamilyLibrary } from "./library/familyLibrary";
 import { getLibraryVersion, onLibraryChange } from "../../core/library";
 import { makeCeilingResolver, makeSlabProbe } from "./locacao/ceiling";
@@ -72,6 +73,7 @@ const TOOL_HINT: Record<ToolSpec["kind"], string> = {
   interferencias: "Clique em uma interferência para enquadrá-la",
   pranchas: "Roda do mouse: zoom · arrastar: mover · duplo clique: enquadrar a folha",
   biblioteca: "Importe famílias exportadas do Revit e loque-as como qualquer item da biblioteca",
+  programa: "Defina as instalações por tipo de equipamento e por ambiente e gere os pontos no modelo",
 };
 
 export function App() {
@@ -143,6 +145,7 @@ export function App() {
       setTop(t);
       // Arquivo mantém a ferramenta (salvar no meio da edição); as demais abas começam pela consulta.
       if (t === "pranchas") chooseTool({ kind: "pranchas" });
+      else if (t === "programa" && t !== top) chooseTool({ kind: "programa", section: "ambientes" });
       else if (t !== "arquivo" && t !== top) chooseTool({ kind: "propriedades" });
     },
     [chooseTool, top],
@@ -372,10 +375,13 @@ export function App() {
     if (file) await openFile(file);
   }, [openFile]);
 
-  const handleSample = useCallback(async () => {
-    const res = await fetch(new URL("samples/exemplo-mep.ifc", document.baseURI));
-    await openFile({ name: "exemplo-mep.ifc", path: null, data: new Uint8Array(await res.arrayBuffer()) });
-  }, [openFile]);
+  const handleSample = useCallback(
+    async (name = "exemplo-mep.ifc") => {
+      const res = await fetch(new URL(`samples/${name}`, document.baseURI));
+      await openFile({ name, path: null, data: new Uint8Array(await res.arrayBuffer()) });
+    },
+    [openFile],
+  );
 
   useEffect(() => {
     const d = desktop;
@@ -505,6 +511,8 @@ export function App() {
           return void handleOpen();
         case "exemplo":
           return void handleSample();
+        case "exemploApartamento":
+          return void handleSample("exemplo-apartamento.ifc");
         case "abrirProjeto":
           return void files.open();
         case "salvarProjeto":
@@ -562,7 +570,7 @@ export function App() {
   const selectedOne = selection.length === 1 ? (elementById.get(selection[0]) ?? null) : null;
   const viewer = viewerRef.current;
   // Sem ferramenta ativa (seleção), o painel da direita some: as propriedades ficam na coluna esquerda.
-  const rightWidth = tool.kind === "propriedades" ? 0 : tool.kind === "pranchas" ? 400 : 460;
+  const rightWidth = tool.kind === "propriedades" ? 0 : tool.kind === "pranchas" ? 400 : tool.kind === "programa" ? 620 : 460;
   const resolveCeiling = useMemo(() => (viewer && model ? makeCeilingResolver(viewer, elementById, model.storeyLevels) : null), [viewer, model, elementById]);
   const slabAt = useMemo(() => (viewer && model ? makeSlabProbe(viewer, elementById, model.storeyLevels) : null), [viewer, model, elementById]);
   const projectName = (fileName ?? "").replace(/\.ifc$/i, "");
@@ -582,6 +590,8 @@ export function App() {
           }}
         />
       );
+    if (tool.kind === "programa" && tool.section === "tipos" && !(model && viewer && resolveCeiling))
+      return <ProgramaTiposOnly onSection={(section) => chooseTool({ kind: "programa", section })} />;
     if (!model || !viewer) return <div className="empty-side">Abra um modelo IFC em Arquivo › Abrir IFC.</div>;
     switch (tool.kind) {
       case "propriedades":
@@ -630,6 +640,20 @@ export function App() {
             ignorePair={connected}
             onFocus={focusClash}
             onClear={clearHighlight}
+          />
+        );
+      case "programa":
+        if (!resolveCeiling) return null;
+        return (
+          <ProgramaPanel
+            section={tool.section}
+            model={model}
+            store={store}
+            viewer={viewer}
+            elementById={elementById}
+            resolveCeiling={resolveCeiling}
+            onSelect={selectPoints}
+            onSection={(section) => chooseTool({ kind: "programa", section })}
           />
         );
       case "pranchas":
@@ -819,8 +843,11 @@ export function App() {
                   <button className="btn primary" onClick={handleOpen}>
                     Abrir IFC…
                   </button>
-                  <button className="btn" onClick={handleSample}>
+                  <button className="btn" onClick={() => handleSample()}>
                     Abrir modelo de exemplo
+                  </button>
+                  <button className="btn" onClick={() => handleSample("exemplo-apartamento.ifc")}>
+                    Exemplo de apartamento
                   </button>
                 </div>
               </div>

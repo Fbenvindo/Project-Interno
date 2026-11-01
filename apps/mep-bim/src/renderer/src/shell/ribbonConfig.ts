@@ -1,11 +1,12 @@
 // Menu superior (por disciplina) e faixa de ferramentas de cada um.
 
-export type TopTab = "arquivo" | "modelo" | "eletrica" | "hidraulica" | "incendio" | "climatizacao" | "pranchas";
+export type TopTab = "arquivo" | "modelo" | "programa" | "eletrica" | "hidraulica" | "incendio" | "climatizacao" | "pranchas";
 export type DisciplineTab = "eletrica" | "hidraulica" | "incendio" | "climatizacao";
 
 export const TOP_TABS: { id: TopTab; label: string }[] = [
   { id: "arquivo", label: "Arquivo" },
   { id: "modelo", label: "Modelo" },
+  { id: "programa", label: "Programa" },
   { id: "eletrica", label: "Elétrica" },
   { id: "hidraulica", label: "Hidráulica" },
   { id: "incendio", label: "Incêndio" },
@@ -23,13 +24,15 @@ export type ToolSpec =
   | { kind: "quantitativos" }
   | { kind: "interferencias" }
   | { kind: "pranchas" }
-  | { kind: "biblioteca" };
+  | { kind: "biblioteca" }
+  | { kind: "programa"; section: "tipos" | "ambientes" };
 
 export type Tool = ToolSpec & { n: number };
 
 export type ActionId =
   | "abrirIfc"
   | "exemplo"
+  | "exemploApartamento"
   | "abrirProjeto"
   | "salvarProjeto"
   | "exportarIfc"
@@ -109,6 +112,7 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
       buttons: [
         { key: "abrir-ifc", label: "Abrir IFC", icon: "importar", action: "abrirIfc" },
         { key: "exemplo", label: "Exemplo", icon: "exemplo", action: "exemplo" },
+        { key: "exemplo-apto", label: "Exemplo apartamento", icon: "planta", action: "exemploApartamento" },
       ],
     },
     {
@@ -150,6 +154,16 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
         { key: "quantitativos", label: "Quantitativos", icon: "quantitativos", tool: { kind: "quantitativos" }, needsModel: true },
         { key: "interferencias", label: "Interferências", icon: "interferencias", tool: { kind: "interferencias" }, needsModel: true },
       ],
+    },
+  ],
+  programa: [
+    {
+      label: "Padrão do escritório",
+      buttons: [{ key: "prog-tipos", label: "Equipamentos", icon: "equipamento", tool: { kind: "programa", section: "tipos" } }],
+    },
+    {
+      label: "Projeto",
+      buttons: [{ key: "prog-ambientes", label: "Ambientes", icon: "planta", tool: { kind: "programa", section: "ambientes" }, needsModel: true }],
     },
   ],
   eletrica: [
@@ -269,5 +283,6 @@ export function sameTool(a: ToolSpec, b: ToolSpec | undefined): boolean {
   if (a.kind === "locacao" && b.kind === "locacao") return a.componentId === b.componentId;
   if (a.kind === "tracado" && b.kind === "tracado") return a.typeId === b.typeId;
   if (a.kind === "calc" && b.kind === "calc") return a.which === b.which;
+  if (a.kind === "programa" && b.kind === "programa") return a.section === b.section;
   return true;
 }

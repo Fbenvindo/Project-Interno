@@ -2,11 +2,13 @@ import { useCallback, useMemo, useState } from "react";
 import type { PlacedPoint } from "../../../core/points";
 import type { Run } from "../../../core/runs";
 import type { Circuit } from "../../../core/circuits";
+import { EMPTY_PROGRAM, type ProgramState } from "../../../core/program";
 
 interface ProjectState {
   points: PlacedPoint[];
   runs: Run[];
   circuits: Circuit[];
+  program: ProgramState;
 }
 
 interface History {
@@ -19,7 +21,7 @@ interface History {
 }
 
 const LIMIT = 200;
-const EMPTY: ProjectState = { points: [], runs: [], circuits: [] };
+const EMPTY: ProjectState = { points: [], runs: [], circuits: [], program: EMPTY_PROGRAM };
 
 type Patch<T> = (item: T) => Partial<T>;
 
@@ -44,7 +46,7 @@ export function usePointsStore() {
   const commit = useCallback((fn: (cur: ProjectState) => ProjectState, key: string | null = null) => {
     setH((s) => {
       const next = fn(s.present);
-      if (next.points === s.present.points && next.runs === s.present.runs && next.circuits === s.present.circuits) return s;
+      if (next.points === s.present.points && next.runs === s.present.runs && next.circuits === s.present.circuits && next.program === s.present.program) return s;
       if (key && key === s.lastKey) return { ...s, present: next, future: [] };
       return { ...s, past: [...s.past.slice(-LIMIT + 1), s.present], present: next, future: [], lastKey: key };
     });
@@ -116,9 +118,12 @@ export function usePointsStore() {
   /** Aplica uma alteração livre ao projeto inteiro (um passo de desfazer). */
   const mutate = useCallback((fn: (cur: ProjectState) => ProjectState) => commit((cur) => syncNames(fn(cur))), [commit]);
 
+  /** Programa de necessidades (agrupa digitação seguida no mesmo campo). */
+  const setProgram = useCallback((fn: (p: ProgramState) => ProgramState, key: string | null = null) => commit((cur) => ({ ...cur, program: fn(cur.program) }), key && `prog:${key}`), [commit]);
+
   /** Substitui todo o projeto e zera o histórico (abrir arquivo ou novo modelo). */
-  const reset = useCallback((points: PlacedPoint[], runs: Run[] = [], circuits: Circuit[] = []) => {
-    const state = { points, runs, circuits };
+  const reset = useCallback((points: PlacedPoint[], runs: Run[] = [], circuits: Circuit[] = [], program: ProgramState = EMPTY_PROGRAM) => {
+    const state = { points, runs, circuits, program };
     setH({ past: [], present: state, future: [], saved: state, lastKey: null });
   }, []);
 
@@ -147,10 +152,11 @@ export function usePointsStore() {
       points: h.present.points,
       runs: h.present.runs,
       circuits: h.present.circuits,
+      program: h.present.program,
       canUndo: h.past.length > 0,
       canRedo: h.future.length > 0,
       dirty: h.present !== h.saved,
-      isEmpty: !h.present.points.length && !h.present.runs.length && !h.present.circuits.length,
+      isEmpty: !h.present.points.length && !h.present.runs.length && !h.present.circuits.length && !Object.keys(h.present.program.rooms).length,
       add,
       update,
       remove,
@@ -162,12 +168,13 @@ export function usePointsStore() {
       removeCircuits,
       assignPoints,
       mutate,
+      setProgram,
       reset,
       markSaved,
       undo,
       redo,
     }),
-    [h, add, update, remove, addRuns, updateRuns, removeRuns, addCircuits, updateCircuits, removeCircuits, assignPoints, mutate, reset, markSaved, undo, redo],
+    [h, add, update, remove, addRuns, updateRuns, removeRuns, addCircuits, updateCircuits, removeCircuits, assignPoints, mutate, setProgram, reset, markSaved, undo, redo],
   );
 }
 

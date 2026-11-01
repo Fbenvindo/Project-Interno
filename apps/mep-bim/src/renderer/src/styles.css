@@ -1466,3 +1466,97 @@ h3 {
   padding-left: 18px;
   line-height: 1.5;
 }
+
+/* ---- Programa de necessidades ------------------------------------------------ */
+.programa .panel-head {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.programa .segmented {
+  margin: 0;
+}
+.programa .btn-row select,
+.programa .search.inline {
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+}
+.programa .search.inline {
+  width: auto;
+  flex: 1;
+  min-width: 140px;
+}
+.programa .card {
+  padding: 4px 12px 8px;
+}
+.room-body .field-label {
+  margin-top: 12px;
+}
+.eq-row {
+  border-top: 1px solid var(--border);
+  padding: 6px 0;
+}
+.eq-row.off .eq-name {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.eq-head,
+.eq-row.other {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.eq-head select,
+.eq-row.other select,
+.req-table select,
+.req-table input {
+  padding: 3px 5px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  font-size: 12px;
+}
+.eq-head select {
+  max-width: 190px;
+}
+.eq-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.eq-summary {
+  margin: 4px 0 0 24px;
+  line-height: 1.5;
+}
+.tag-padrao {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  margin-right: 4px;
+}
+.req-table {
+  margin: 6px 0 4px;
+}
+.req-table .grid-table td {
+  padding: 3px 3px;
+  vertical-align: middle;
+}
+.req-table select {
+  width: 100%;
+  max-width: 220px;
+}
+.req-table input[type="number"] {
+  width: 64px;
+  text-align: right;
+}
+.with-unit {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.danger-link {
+  color: var(--fail) !important;
+}
