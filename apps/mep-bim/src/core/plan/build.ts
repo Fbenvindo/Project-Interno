@@ -9,6 +9,7 @@ import { runFittings, runSegments, RUN_TYPE_BY_ID, segmentElementId, type Run } 
 import type { Discipline, ElementInfo, Vec3 } from "../types";
 import { LAYER_PREFIX, PEN, PRINT_COLOR, type LegendItem, type PlanDrawing, type Prim, type SymbolPrim } from "./drawing";
 import { chainSegments, cutMesh, type P2 } from "./section";
+import { centroid, pointInPolygon, type Space } from "../spaces";
 import { LEGEND_LINE, RISER_DOWN, RISER_UP, symbolFor, TEE_MARK } from "./symbols";
 
 export interface PlanLabels {
@@ -33,6 +34,8 @@ export interface PlanInput {
   /** Disciplinas exibidas (arquitetura/estrutura controlam o corte do IFC). */
   disciplines: Set<Discipline>;
   labels: PlanLabels;
+  /** Ambientes (IfcSpace): nome e área no centro, quando a arquitetura está visível. */
+  spaces?: Space[];
 }
 
 /** Tipos cortados com hachura cheia (poché). */
@@ -93,6 +96,19 @@ export function buildPlan(input: PlanInput): PlanDrawing {
         color: isMep ? color : "#222222",
         id: e.expressID,
       });
+    }
+  }
+
+  // ---- Ambientes: número/nome e área ----------------------------------------------------
+  if (input.disciplines.has("arquitetura")) {
+    for (const sp of input.spaces ?? []) {
+      if (sp.storey !== storey) continue;
+      let c = centroid(sp.polygon);
+      if (!pointInPolygon(c, sp.polygon)) c = sp.polygon[0];
+      const h = 2.5 * m;
+      prims.push({ t: "text", p: [c[0], c[1] + h * 0.7], text: (sp.name || sp.number).toUpperCase(), height: h, anchor: "middle", layer: "ARQ-AMBIENTES", color: "#333333" });
+      const area = `${sp.number ? sp.number + " · " : ""}${sp.area.toFixed(2).replace(".", ",")} m²`;
+      prims.push({ t: "text", p: [c[0], c[1] - h * 0.7], text: area, height: 2 * m, anchor: "middle", layer: "ARQ-AMBIENTES", color: "#555555" });
     }
   }
 

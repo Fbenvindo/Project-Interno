@@ -57,6 +57,7 @@ export class Viewer {
   private pointsGroup = new THREE.Group();
   private runsGroup = new THREE.Group();
   private staticPreviewGroup = new THREE.Group();
+  private spacesGroup = new THREE.Group();
   private shiftDown = false;
   private removeKeyListeners = () => {};
   private previewGroup = new THREE.Group();
@@ -101,7 +102,7 @@ export class Viewer {
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
     sun.position.set(30, 50, 20);
     this.scene.add(sun);
-    this.scene.add(this.modelGroup, this.pointsGroup, this.runsGroup, this.previewGroup, this.staticPreviewGroup);
+    this.scene.add(this.modelGroup, this.pointsGroup, this.runsGroup, this.previewGroup, this.staticPreviewGroup, this.spacesGroup);
 
     const grid = new THREE.GridHelper(100, 100, 0x3a4250, 0x262c35);
     grid.name = "grid";
@@ -240,6 +241,52 @@ export class Viewer {
       if (n && Math.abs(n.y) > 0.7) return h.point.y;
     }
     return null;
+  }
+
+  /**
+   * Primeira superfície do modelo (visível) atingida por um raio, com a normal
+   * voltada para a origem. `accept` filtra pela normal (ex.: só faces de teto).
+   */
+  castRay(origin: Vec3, direction: Vec3, maxDistance: number, accept: (normal: Vec3) => boolean = () => true): SurfaceHit | null {
+    this.raycaster.set(new THREE.Vector3(...origin), new THREE.Vector3(...direction).normalize());
+    this.raycaster.far = maxDistance;
+    const hits = this.raycaster.intersectObjects(this.pickTargets(), false);
+    this.raycaster.far = Infinity;
+    for (const h of hits) {
+      const n = this.worldNormal(h);
+      if (!n) continue;
+      const normal: Vec3 = [n.x, n.y, n.z];
+      if (accept(normal)) return { point: [h.point.x, h.point.y, h.point.z], normal };
+    }
+    return null;
+  }
+
+  /**
+   * Destaca ambientes: contorno e preenchimento translúcido sobre o piso.
+   * Cada ambiente é uma lista de vértices na cena (já na cota desejada).
+   */
+  setSpaceOutlines(loops: { points: Vec3[]; selected: boolean }[]) {
+    this.spacesGroup.clear();
+    for (const { points, selected } of loops) {
+      if (points.length < 3) continue;
+      const color = selected ? 0x00e5ff : 0x7f8c9d;
+      const line = new THREE.LineLoop(
+        new THREE.BufferGeometry().setFromPoints(points.map((p) => new THREE.Vector3(...p))),
+        new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: selected ? 1 : 0.6 }),
+      );
+      line.renderOrder = 3;
+      this.spacesGroup.add(line);
+      if (selected) {
+        const tris = THREE.ShapeUtils.triangulateShape(points.map((p) => new THREE.Vector2(p[0], p[2])), []);
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute("position", new THREE.Float32BufferAttribute(points.flat(), 3));
+        geom.setIndex(tris.flat());
+        const fill = new THREE.Mesh(geom, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false }));
+        fill.renderOrder = 3;
+        this.spacesGroup.add(fill);
+      }
+    }
+    this.requestRender();
   }
 
   setColorMode(mode: ColorMode) {

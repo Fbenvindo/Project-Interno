@@ -244,6 +244,23 @@ for (const x of [1500, 4000, 8500]) {
 element("OUTLET", "Tomada 2P+T 10A", box(2000, 120, 3300, 100, 30, 100), "POWEROUTLET", pav1, { system: ELE });
 element("OUTLET", "Ponto de dados RJ45", box(6000, 120, 300, 100, 30, 100), "DATAOUTLET", terreo, { system: TEL });
 
+// ---- Ambientes (IfcSpace) ----------------------------------------------------
+// Volume do piso à face inferior da laje do 1º pavimento, entre as paredes.
+const spaces = [];
+function space(number, longName, x0, y0, x1, y1, height) {
+  const geom = box((x0 + x1) / 2, (y0 + y1) / 2, 0, x1 - x0, y1 - y0, height);
+  const id = add(
+    `IFCSPACE('${guid()}',$,'${number}',$,$,${ref(geom.placement)},${ref(geom.shape)},'${longName}',.ELEMENT.,.SPACE.,$)`,
+  );
+  const area = add(`IFCQUANTITYAREA('NetFloorArea',$,$,${num(((x1 - x0) * (y1 - y0)) / 1e6)},$)`);
+  const qto = add(`IFCELEMENTQUANTITY('${guid()}',$,'Qto_SpaceBaseQuantities',$,$,${list([area])})`);
+  add(`IFCRELDEFINESBYPROPERTIES('${guid()}',$,$,$,${list([id])},${ref(qto)})`);
+  spaces.push(id);
+}
+space("101", "Sala técnica", 75, 75, 6925, 5925, 3000);
+space("102", "Depósito", 7075, 75, 10000, 5925, 3000);
+add(`IFCRELAGGREGATES('${guid()}',$,$,$,${ref(terreo.id)},${list(spaces)})`);
+
 // ---- Relações espaciais e de sistemas --------------------------------------
 for (const s of storeys) {
   add(`IFCRELCONTAINEDINSPATIALSTRUCTURE('${guid()}',$,$,$,${list(s.elements)},${ref(s.id)})`);

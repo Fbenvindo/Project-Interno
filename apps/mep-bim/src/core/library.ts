@@ -41,6 +41,7 @@ export interface ComponentDef {
 
 const P = {
   potW: (v: number): ComponentParam => ({ name: "Potência", unit: "W", default: v }),
+  fluxo: (v: number): ComponentParam => ({ name: "Fluxo luminoso", unit: "lm", default: v }),
   potVA: (v: number): ComponentParam => ({ name: "Potência", unit: "VA", default: v }),
   tensao: (v = 127): ComponentParam => ({ name: "Tensão", unit: "V", default: v }),
   circuito: (): ComponentParam => ({ name: "Circuito", default: "" }),
@@ -53,9 +54,9 @@ const def = (d: Def): ComponentDef => ({ params: [], ...d });
 
 export const COMPONENTS: ComponentDef[] = [
   // ---- Iluminação ----------------------------------------------------------
-  def({ id: "lum-embutir-6060", group: "Iluminação", label: "Luminária de embutir 600×600", discipline: "eletrica", ifcType: "IFCLIGHTFIXTURE", predefinedType: "POINTSOURCE", mounting: "teto", defaultHeight: 0, size: [600, 600, 80], shape: "caixa", system: "Iluminação", systemType: "LIGHTING", tagPrefix: "L", params: [P.potW(40), P.tensao(220), P.circuito()] }),
-  def({ id: "lum-sobrepor-300", group: "Iluminação", label: "Luminária de sobrepor Ø300", discipline: "eletrica", ifcType: "IFCLIGHTFIXTURE", predefinedType: "POINTSOURCE", mounting: "teto", defaultHeight: 0, size: [300, 300, 80], shape: "cilindro", system: "Iluminação", systemType: "LIGHTING", tagPrefix: "L", params: [P.potW(18), P.tensao(220), P.circuito()] }),
-  def({ id: "lum-linear-1200", group: "Iluminação", label: "Luminária linear 1200 mm", discipline: "eletrica", ifcType: "IFCLIGHTFIXTURE", predefinedType: "POINTSOURCE", mounting: "teto", defaultHeight: 0, size: [1200, 150, 60], shape: "caixa", system: "Iluminação", systemType: "LIGHTING", tagPrefix: "L", params: [P.potW(36), P.tensao(220), P.circuito()] }),
+  def({ id: "lum-embutir-6060", group: "Iluminação", label: "Luminária de embutir 600×600", discipline: "eletrica", ifcType: "IFCLIGHTFIXTURE", predefinedType: "POINTSOURCE", mounting: "teto", defaultHeight: 0, size: [600, 600, 80], shape: "caixa", system: "Iluminação", systemType: "LIGHTING", tagPrefix: "L", params: [P.potW(40), P.fluxo(3600), P.tensao(220), P.circuito()] }),
+  def({ id: "lum-sobrepor-300", group: "Iluminação", label: "Luminária de sobrepor Ø300", discipline: "eletrica", ifcType: "IFCLIGHTFIXTURE", predefinedType: "POINTSOURCE", mounting: "teto", defaultHeight: 0, size: [300, 300, 80], shape: "cilindro", system: "Iluminação", systemType: "LIGHTING", tagPrefix: "L", params: [P.potW(18), P.fluxo(1500), P.tensao(220), P.circuito()] }),
+  def({ id: "lum-linear-1200", group: "Iluminação", label: "Luminária linear 1200 mm", discipline: "eletrica", ifcType: "IFCLIGHTFIXTURE", predefinedType: "POINTSOURCE", mounting: "teto", defaultHeight: 0, size: [1200, 150, 60], shape: "caixa", system: "Iluminação", systemType: "LIGHTING", tagPrefix: "L", params: [P.potW(36), P.fluxo(3400), P.tensao(220), P.circuito()] }),
   def({ id: "arandela", group: "Iluminação", label: "Arandela", discipline: "eletrica", ifcType: "IFCLIGHTFIXTURE", predefinedType: "DIRECTIONSOURCE", mounting: "parede", defaultHeight: 2000, size: [200, 120, 150], shape: "caixa", system: "Iluminação", systemType: "LIGHTING", tagPrefix: "L", params: [P.potW(10), P.tensao(220), P.circuito()] }),
   def({ id: "emergencia", group: "Iluminação", label: "Luminária de emergência", discipline: "eletrica", ifcType: "IFCLIGHTFIXTURE", predefinedType: "SECURITYLIGHTING", mounting: "parede", defaultHeight: 2200, size: [300, 60, 80], shape: "caixa", system: "Iluminação de emergência", systemType: "LIGHTING", tagPrefix: "LE", params: [P.potW(3), P.circuito()] }),
 

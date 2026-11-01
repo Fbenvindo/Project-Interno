@@ -114,6 +114,7 @@ export function App() {
       scale: planSettings.scale,
       disciplines: new Set(planSettings.disciplines),
       labels: planSettings.labels,
+      spaces: model.spaces,
     });
   }, [tab, model, meshById, planSettings, store.points, store.runs]);
 

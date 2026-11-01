@@ -152,6 +152,13 @@ describe("planta do pavimento", () => {
     expect(texts).toContain("ELD-1 Ø25 C2");
   });
 
+  it("nome e área dos ambientes no centro", () => {
+    const d = buildPlan(input({ spaces: model.spaces }));
+    const texts = byLayer(d.prims, "ARQ-AMBIENTES").map((p) => (p.t === "text" ? p.text : ""));
+    expect(texts).toEqual(expect.arrayContaining(["SALA TÉCNICA", "101 · 40,07 m²", "DEPÓSITO", "102 · 17,11 m²"]));
+    expect(byLayer(buildPlan(input({ spaces: model.spaces, storey: "1º Pavimento" })).prims, "ARQ-AMBIENTES")).toHaveLength(0);
+  });
+
   it("respeita as disciplinas desligadas", () => {
     const d = buildPlan(input({ disciplines: new Set(["eletrica"]) }));
     expect(d.prims.every((p) => p.layer.startsWith("ELE"))).toBe(true);

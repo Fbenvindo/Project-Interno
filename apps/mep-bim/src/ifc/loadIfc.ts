@@ -11,13 +11,17 @@ import {
   IFCRELDEFINESBYPROPERTIES,
   IFCRELDEFINESBYTYPE,
   IFCRELNESTS,
+  IFCSPACE,
   IFCUNITASSIGNMENT,
+  type FlatMesh,
   type IfcAPI,
 } from "web-ifc";
 import { classifyDiscipline, getCategory, isGenericMepType, isKnownIfcType } from "../core/disciplines";
 import { CoordinateSystem } from "../core/math";
 import type { StoreyLevel } from "../core/points";
 import { deriveLength, deriveSize, systemsFromProps } from "../core/quantities";
+import { chainSegments, cutMesh, type P2 } from "../core/plan/section";
+import { ccw, polygonArea, type Space } from "../core/spaces";
 import type { BBox, ElementInfo, PropertyGroup, PropertyValue } from "../core/types";
 
 export interface ElementMesh {
@@ -41,6 +45,8 @@ export interface LoadedModel {
   storeys: string[];
   /** Cota de cada pavimento na cena (Y, metros). */
   storeyLevels: StoreyLevel[];
+  /** Ambientes (IfcSpace) com contorno em planta. */
+  spaces: Space[];
   /** Conversão entre coordenadas da cena e do IFC. */
   coordinates: CoordinateSystem;
   systems: string[];
@@ -67,7 +73,7 @@ export function loadIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn =
   // ---- Geometria -----------------------------------------------------------
   onProgress("Gerando geometria", 0.1);
   const meshes: ElementMesh[] = [];
-  api.StreamAllMeshes(modelID, (flat) => {
+  const buildMesh = (flat: FlatMesh): ElementMesh => {
     const parts: { pos: Float32Array; nor: Float32Array; idx: Uint32Array }[] = [];
     let color: ElementMesh["color"] = [0.8, 0.8, 0.8, 1];
     const n = flat.geometries.size();
@@ -80,8 +86,9 @@ export function loadIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn =
       parts.push({ ...transform(verts, placed.flatTransformation), idx: Uint32Array.from(index) });
       geom.delete();
     }
-    meshes.push({ expressID: flat.expressID, ...merge(parts), color });
-  });
+    return { expressID: flat.expressID, ...merge(parts), color };
+  };
+  api.StreamAllMeshes(modelID, (flat) => meshes.push(buildMesh(flat)));
 
   // ---- Unidades e coordenadas ------------------------------------------------
   const unitToMeters = readLengthUnit();
@@ -239,6 +246,42 @@ export function loadIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn =
     });
   }
 
+  // ---- Ambientes (IfcSpace): não vêm no StreamAllMeshes; são pedidos à parte ------
+  const spaces: Space[] = [];
+  const spaceIds = idsOf(IFCSPACE);
+  if (spaceIds.length) {
+    const spaceMeshes: ElementMesh[] = [];
+    api.StreamMeshes(modelID, spaceIds, (flat) => spaceMeshes.push(buildMesh(flat)));
+    for (const mesh of spaceMeshes) {
+      const bbox = computeBBox(mesh.positions);
+      if (!bbox) continue;
+      // Contorno: corte horizontal na meia altura do volume do ambiente.
+      const midY = (bbox.min[1] + bbox.max[1]) / 2;
+      const segs = cutMesh(mesh.positions, mesh.indices, midY).map(({ a, b }): [P2, P2] => {
+        const pa = coordinates.worldToIfc(a);
+        const pb = coordinates.worldToIfc(b);
+        return [[pa[0], pa[1]], [pb[0], pb[1]]];
+      });
+      const loops = chainSegments(segs).filter((c) => c.closed && c.points.length >= 3);
+      if (!loops.length) continue;
+      const outer = loops.reduce((best, c) => (Math.abs(polygonArea(c.points)) > Math.abs(polygonArea(best.points)) ? c : best));
+      const polygon = ccw(outer.points);
+      const data = line(mesh.expressID);
+      spaces.push({
+        expressID: mesh.expressID,
+        globalId: val(data.GlobalId) ?? "",
+        number: String(val(data.Name) ?? ""),
+        name: String(val(data.LongName) ?? ""),
+        storey: storeyOf(mesh.expressID),
+        polygon,
+        floorY: bbox.min[1],
+        topY: bbox.max[1],
+        area: Math.abs(polygonArea(polygon)),
+      });
+    }
+    spaces.sort((a, b) => (a.storey ?? "").localeCompare(b.storey ?? "", "pt-BR") || a.number.localeCompare(b.number, "pt-BR", { numeric: true }));
+  }
+
   const sortedStoreys = [...storeyInfo.values()].sort((a, b) => a.elevation - b.elevation);
   const storeys = sortedStoreys.map((s) => s.name);
   const storeyLevels = sortedStoreys.map((s) => ({
@@ -255,6 +298,7 @@ export function loadIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn =
     meshes,
     storeys,
     storeyLevels,
+    spaces,
     coordinates,
     systems: [...systemNames].sort((a, b) => a.localeCompare(b, "pt-BR")),
     getProperties,

@@ -686,3 +686,29 @@ summary {
   border: 1px solid var(--warn);
   color: #ffcc80;
 }
+
+/* ---- Ambientes ------------------------------------------------------------ */
+.spaces-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.spaces-head .field-label {
+  margin: 0;
+  flex: 1;
+}
+.spaces-head select {
+  padding: 3px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.spaces-list {
+  max-height: 180px;
+  overflow-y: auto;
+  margin: 6px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 6px;
+}

@@ -19,6 +19,8 @@ import type { LoadedModel } from "../../../ifc/loadIfc";
 import type { PreviewItem, Viewer } from "../viewer/Viewer";
 import type { PointsStore } from "./usePointsStore";
 import { useProjectFiles } from "./useProjectFiles";
+import { AmbientesSection } from "./AmbientesSection";
+import { spaceAt, spaceLabel } from "../../../core/spaces";
 
 interface Props {
   model: LoadedModel;
@@ -31,7 +33,7 @@ interface Props {
   systems: string[];
 }
 
-type Mode = "ponto" | "area";
+type Mode = "ponto" | "area" | "ambiente";
 type AreaBy = "quantidade" | "espacamento";
 
 const SNAP_OPTIONS = [0, 10, 50, 100, 250];
@@ -48,6 +50,7 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
   const [system, setSystem] = useState("");
   const [params, setParams] = useState<Record<string, string | number>>({});
   const [mode, setMode] = useState<Mode>("ponto");
+  const [selectedSpaces, setSelectedSpaces] = useState<number[]>([]);
   const [areaBy, setAreaBy] = useState<AreaBy>("quantidade");
   const [rows, setRows] = useState(2);
   const [cols, setCols] = useState(3);
@@ -91,8 +94,8 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
   );
 
   // Estado mais recente para os callbacks do visualizador (sem reinstalar o modo a cada mudança).
-  const live = useRef({ def, height, rotationDeg, snapMm, system, params, mode, areaBy, rows, cols, spacing, corner, movingPoint, points });
-  live.current = { def, height, rotationDeg, snapMm, system, params, mode, areaBy, rows, cols, spacing, corner, movingPoint, points };
+  const live = useRef({ def, height, rotationDeg, snapMm, system, params, mode, areaBy, rows, cols, spacing, corner, movingPoint, points, selectedSpaces });
+  live.current = { def, height, rotationDeg, snapMm, system, params, mode, areaBy, rows, cols, spacing, corner, movingPoint, points, selectedSpaces };
 
   const gridFor = useCallback(
     (c: SurfaceHit, hit: SurfaceHit): Placement[] => {
@@ -108,11 +111,17 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
     [place],
   );
 
+  const toPlan = (v: [number, number, number]): [number, number] => {
+    const p = model.coordinates.worldToIfc(v);
+    return [p[0], p[1]];
+  };
+
   const buildPoints = (d: ComponentDef, placements: Placement[]): PlacedPoint[] => {
     const L = live.current;
     const all = [...L.points];
     const out: PlacedPoint[] = [];
     for (const pl of placements) {
+      const room = spaceAt(model.spaces, toPlan, pl.position);
       const p: PlacedPoint = {
         id: newPointId(),
         guid: newGuid(),
@@ -124,7 +133,7 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
         refLevel: pl.refLevel,
         storey: storeyForMounting(d.mounting, pl.refLevel, model.storeyLevels),
         system: L.system.trim(),
-        params: { ...L.params },
+        params: { ...L.params, ...(room ? { Ambiente: spaceLabel(room) } : {}) },
       };
       all.push(p);
       out.push(p);
@@ -155,6 +164,11 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
         const d = mp ? COMPONENT_BY_ID[mp.componentId] : L.def!;
         if (!hit) {
           setStatus(instructions(d, L.mode, L.corner != null, mp != null));
+          return [];
+        }
+        if (!mp && L.mode === "ambiente") {
+          const room = spaceAt(model.spaces, toPlan, hit.point);
+          setStatus(room ? `${spaceLabel(room)} — clique para ${L.selectedSpaces.includes(room.expressID) ? "desmarcar" : "marcar"}` : "Aponte para um ambiente");
           return [];
         }
         if (!mp && L.mode === "area" && L.corner) {
@@ -190,6 +204,13 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
           return;
         }
         const d = L.def!;
+        if (L.mode === "ambiente") {
+          const room = spaceAt(model.spaces, toPlan, hit.point);
+          if (room) {
+            setSelectedSpaces((cur) => (cur.includes(room.expressID) ? cur.filter((x) => x !== room.expressID) : [...cur, room.expressID]));
+          }
+          return;
+        }
         if (L.mode === "area") {
           if (!L.corner) {
             const pl = place(d, hit, L.height, 0, L.snapMm / 1000);
@@ -375,16 +396,37 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
             ))}
           </datalist>
 
+          <div className="segmented">
+            <button className={mode === "ponto" ? "on" : ""} onClick={() => (setMode("ponto"), setCorner(null))}>
+              Pontual
+            </button>
+            {def.mounting !== "parede" && (
+              <button className={mode === "area" ? "on" : ""} onClick={() => setMode("area")}>
+                Distribuir em área
+              </button>
+            )}
+            {model.spaces.length > 0 && (
+              <button className={mode === "ambiente" ? "on" : ""} onClick={() => (setMode("ambiente"), setCorner(null))}>
+                Por ambiente
+              </button>
+            )}
+          </div>
+          {mode === "ambiente" && (
+            <AmbientesSection
+              model={model}
+              viewer={viewer}
+              def={def}
+              height={height}
+              rotationDeg={rotationDeg}
+              params={params}
+              selected={selectedSpaces}
+              onSelectedChange={setSelectedSpaces}
+              existing={points}
+              onCreate={(items) => store.add(buildPoints(def, items.map((i) => i.placement)))}
+            />
+          )}
           {def.mounting !== "parede" && (
             <>
-              <div className="segmented">
-                <button className={mode === "ponto" ? "on" : ""} onClick={() => (setMode("ponto"), setCorner(null))}>
-                  Pontual
-                </button>
-                <button className={mode === "area" ? "on" : ""} onClick={() => setMode("area")}>
-                  Distribuir em área
-                </button>
-              </div>
               {mode === "area" && (
                 <div className="form-grid">
                   <label>
@@ -463,6 +505,7 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
 
 function instructions(d: ComponentDef, mode: Mode, hasCorner: boolean, moving: boolean): string {
   if (moving) return "Clique no novo local · Esc cancela";
+  if (mode === "ambiente") return "Marque os ambientes na lista ou clicando neles na vista 3D";
   const where = d.mounting === "parede" ? "em uma parede" : d.mounting === "teto" ? "no teto/forro" : "no piso";
   if (d.mounting !== "parede" && mode === "area") return hasCorner ? "Clique no canto oposto da área" : `Clique no primeiro canto da área ${where}`;
   return `Clique ${where} para locar · Esc encerra`;
