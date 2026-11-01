@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DISCIPLINE_BY_ID } from "../../../core/disciplines";
 import { formatNumber } from "../../../core/format";
-import { exportPointsIfc } from "../../../core/ifcExport";
 import { COMPONENTS, COMPONENT_BY_ID, COMPONENT_GROUPS, MOUNTING_LABEL, type ComponentDef } from "../../../core/library";
 import { computePlacement, countForSpacing, elevationFor, gridPoints, sizeMeters, type Placement, type SurfaceHit } from "../../../core/placement";
 import {
   defaultParams,
-  deserializePoints,
   heightLabel,
   newGuid,
   newPointId,
   nextTag,
-  serializePoints,
   storeyAt,
   storeyForMounting,
   type PlacedPoint,
@@ -19,9 +16,9 @@ import {
 import type { CoordinateSystem } from "../../../core/math";
 import type { ElementInfo } from "../../../core/types";
 import type { LoadedModel } from "../../../ifc/loadIfc";
-import { openTextFile, saveFile } from "../platform";
 import type { PreviewItem, Viewer } from "../viewer/Viewer";
 import type { PointsStore } from "./usePointsStore";
+import { useProjectFiles } from "./useProjectFiles";
 
 interface Props {
   model: LoadedModel;
@@ -42,7 +39,6 @@ const MAX_AREA_POINTS = 400;
 const FLOOR_TYPES = new Set(["IFCSLAB", "IFCCOVERING", "IFCROOF", "IFCRAMP", "IFCSTAIRFLIGHT"]);
 
 const isTyping = (t: EventTarget | null) => t instanceof HTMLElement && /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName);
-const base = (name: string | null) => (name ?? "modelo").replace(/\.ifc$/i, "");
 
 export function LocacaoPanel({ model, fileName, store, viewer, elementById, selection, onSelect, systems }: Props) {
   const [componentId, setComponentId] = useState<string | null>(null);
@@ -59,7 +55,6 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
   const [corner, setCorner] = useState<SurfaceHit | null>(null);
   const [moveId, setMoveId] = useState<number | null>(null);
   const [status, setStatus] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
   const def = componentId ? COMPONENT_BY_ID[componentId] : null;
@@ -178,6 +173,7 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
         return [preview(d, pl)];
       },
       click(hit) {
+        if (!hit) return;
         const L = live.current;
         const mp = L.movingPoint;
         if (mp) {
@@ -219,44 +215,8 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
   useEffect(() => viewer.refreshPlacement());
 
   // ---- Arquivos ---------------------------------------------------------------
-  const saveLocacao = useCallback(async () => {
-    const json = JSON.stringify(serializePoints(store.points, model.coordinates, fileName), null, 2);
-    const saved = await saveFile({
-      defaultName: `${base(fileName)}.locacao.json`,
-      content: json,
-      filters: [{ name: "Locação MEP", extensions: ["json"] }],
-    });
-    if (saved) {
-      store.markSaved();
-      setMessage(`Locação salva: ${saved}`);
-    }
-  }, [store, model.coordinates, fileName]);
-
-  const openLocacao = async () => {
-    if (store.dirty && store.points.length && !window.confirm("Há pontos não salvos. Substituir pela locação do arquivo?")) return;
-    const file = await openTextFile([{ name: "Locação MEP", extensions: ["json"] }]);
-    if (!file) return;
-    try {
-      const json = JSON.parse(file.content);
-      const pts = deserializePoints(json, model.coordinates);
-      store.reset(pts);
-      onSelect([]);
-      const other = json.modeloIfc && fileName && json.modeloIfc !== fileName;
-      setMessage(`${pts.length} pontos carregados de ${file.name}.${other ? ` Atenção: salvos para o modelo "${json.modeloIfc}".` : ""}`);
-    } catch (e) {
-      setMessage(`Não foi possível abrir: ${e instanceof Error ? e.message : e}`);
-    }
-  };
-
-  const exportIfc = async () => {
-    const text = exportPointsIfc(store.points, { modelName: fileName, storeys: model.storeyLevels, cs: model.coordinates });
-    const saved = await saveFile({
-      defaultName: `${base(fileName)}-locacao-mep.ifc`,
-      content: text,
-      filters: [{ name: "IFC", extensions: ["ifc"] }],
-    });
-    if (saved) setMessage(`IFC exportado: ${saved}. Abra junto com o modelo original para federar.`);
-  };
+  const files = useProjectFiles(store, model, fileName, () => onSelect([]));
+  const saveLocacao = files.save;
 
   // ---- Teclado ------------------------------------------------------------------
   useEffect(() => {
@@ -482,17 +442,17 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
       </section>
 
       <div className="btn-row wrap">
-        <button className="btn primary" onClick={saveLocacao} disabled={!points.length} title="Ctrl+S">
-          Salvar locação{store.dirty && points.length ? " •" : ""}
+        <button className="btn primary" onClick={files.save} disabled={store.isEmpty} title="Ctrl+S">
+          Salvar projeto{store.dirty && !store.isEmpty ? " •" : ""}
         </button>
-        <button className="btn" onClick={openLocacao}>
-          Abrir locação…
+        <button className="btn" onClick={files.open}>
+          Abrir projeto…
         </button>
-        <button className="btn" onClick={exportIfc} disabled={!points.length}>
+        <button className="btn" onClick={files.exportIfc} disabled={store.isEmpty}>
           Exportar IFC
         </button>
       </div>
-      {message && <div className="status small">{message}</div>}
+      {files.message && <div className="status small">{files.message}</div>}
       <p className="muted small">
         Atalhos: Esc encerra · R gira (teto e piso) · Delete exclui · Ctrl+Z / Ctrl+Y · Ctrl+S salva. Pontos aparecem também em Quantitativos e
         Interferências.

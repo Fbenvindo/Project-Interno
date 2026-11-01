@@ -68,3 +68,14 @@ export class CoordinateSystem {
     return this.coordination;
   }
 }
+
+/** Interseção de um raio com um plano; null se paralelo ou atrás da origem. */
+export function intersectRayPlane(origin: Vec3, direction: Vec3, planePoint: Vec3, planeNormal: Vec3): Vec3 | null {
+  const denom = direction[0] * planeNormal[0] + direction[1] * planeNormal[1] + direction[2] * planeNormal[2];
+  if (Math.abs(denom) < 1e-9) return null;
+  const t =
+    ((planePoint[0] - origin[0]) * planeNormal[0] + (planePoint[1] - origin[1]) * planeNormal[1] + (planePoint[2] - origin[2]) * planeNormal[2]) /
+    denom;
+  if (t < 0) return null;
+  return [origin[0] + direction[0] * t, origin[1] + direction[1] * t, origin[2] + direction[2] * t];
+}

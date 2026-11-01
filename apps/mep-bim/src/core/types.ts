@@ -30,6 +30,8 @@ export interface BBox {
   max: Vec3;
 }
 
+import type { OBB } from "./obb";
+
 export type PropertyValue = string | number | boolean | null;
 
 export interface PropertyGroup {
@@ -57,4 +59,6 @@ export interface ElementInfo {
   size: string | null;
   /** "locacao" para pontos criados no app; ausente para elementos do IFC. */
   origin?: "ifc" | "locacao";
+  /** Caixa orientada exata (elementos criados no app), para interferências precisas. */
+  obb?: OBB;
 }

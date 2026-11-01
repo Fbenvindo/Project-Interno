@@ -3,7 +3,8 @@
 // As coordenadas são as do IFC de origem, então os modelos se sobrepõem.
 import { COMPONENT_BY_ID } from "./library";
 import type { CoordinateSystem } from "./math";
-import { newGuid, type PlacedPoint, type StoreyLevel } from "./points";
+import { newGuid, storeyAt, type PlacedPoint, type StoreyLevel } from "./points";
+import { derivedGuid, runFittings, runSegments, RUN_TYPE_BY_ID, segmentBasis, type Run } from "./runs";
 import type { Vec3 } from "./types";
 
 class StepWriter {
@@ -55,9 +56,11 @@ export interface ExportOptions {
   modelName: string | null;
   storeys: StoreyLevel[];
   cs: CoordinateSystem;
+  /** Trechos de tubulação, eletroduto e eletrocalha a exportar junto. */
+  runs?: Run[];
 }
 
-export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs }: ExportOptions): string {
+export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs, runs = [] }: ExportOptions): string {
   const w = new StepWriter();
   const MM = 1000;
   const pt = ([x, y, z]: Vec3) => w.add(`IFCCARTESIANPOINT((${num(x)},${num(y)},${num(z)}))`);
@@ -140,6 +143,85 @@ export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs 
       sys.members.push(el);
       systems.set(p.system, sys);
     }
+  }
+
+  // ---- Trechos: segmentos e conexões ------------------------------------------
+  const addToStoreyAndSystem = (el: number, y: number, system: string, systemType: string) => {
+    const name = storeyAt(y, storeys);
+    const storey = name ? storeyIds.get(name) : undefined;
+    (storey ? storey.elements : looseElements).push(el);
+    if (system) {
+      const sys = systems.get(system) ?? { type: systemType, members: [] };
+      sys.members.push(el);
+      systems.set(system, sys);
+    }
+  };
+  const sectionProfile = (profile: "circular" | "retangular", width: number, height: number) =>
+    profile === "circular"
+      ? `IFCCIRCLEPROFILEDEF(.AREA.,$,${ref(origin2d)},${num(width / 2)})`
+      : `IFCRECTANGLEPROFILEDEF(.AREA.,$,${ref(origin2d)},${num(width)},${num(height)})`;
+  const body = (profileEntity: string, depth: number) => {
+    const solid = w.add(`IFCEXTRUDEDAREASOLID(${ref(w.add(profileEntity))},${ref(solidPosition)},${ref(zAxis)},${num(depth)})`);
+    const rep = w.add(`IFCSHAPEREPRESENTATION(${ref(context)},'Body','SweptSolid',${list([solid])})`);
+    return w.add(`IFCPRODUCTDEFINITIONSHAPE($,$,${list([rep])})`);
+  };
+  const toMm = (v: Vec3): Vec3 => cs.worldToIfc(v).map((c) => c * MM) as Vec3;
+
+  for (const r of runs) {
+    const t = RUN_TYPE_BY_ID[r.typeId];
+    for (const seg of runSegments(r)) {
+      if (seg.length < 0.0005) continue;
+      const dirWorld = seg.end.map((v, i) => (v - seg.start[i]) / seg.length) as Vec3;
+      const { x } = segmentBasis(dirWorld);
+      const axis = cs.worldDirToIfc(dirWorld);
+      const ref2 = cs.worldDirToIfc(x);
+      const pl = placement(toMm(seg.start), dir(axis), dir(ref2));
+      const shape = body(sectionProfile(t.profile, r.size.width, r.size.height), seg.length * MM);
+      const el = w.add(
+        `IFC${t.segmentType.replace(/^IFC/, "")}('${derivedGuid(r.guid, seg.index)}',$,${str(`${r.tag} - ${t.label} ${r.size.label}`)},$,${str(t.label)},${ref(pl)},${ref(shape)},${str(r.tag)},.${t.segmentPredefined}.)`,
+      );
+      const props = [
+        w.add(`IFCPROPERTYSINGLEVALUE('Etiqueta',$,IFCLABEL(${str(r.tag)}),$)`),
+        w.add(`IFCPROPERTYSINGLEVALUE('Bitola',$,IFCLABEL(${str(r.size.label)}),$)`),
+        w.add(`IFCPROPERTYSINGLEVALUE('Material',$,IFCLABEL(${str(t.material)}),$)`),
+        w.add(`IFCPROPERTYSINGLEVALUE('Sistema',$,IFCLABEL(${str(r.system)}),$)`),
+        ...(t.profile === "circular"
+          ? [w.add(`IFCPROPERTYSINGLEVALUE('NominalDiameter',$,IFCPOSITIVELENGTHMEASURE(${num(r.size.width)}),$)`)]
+          : [
+              w.add(`IFCPROPERTYSINGLEVALUE('Width',$,IFCPOSITIVELENGTHMEASURE(${num(r.size.width)}),$)`),
+              w.add(`IFCPROPERTYSINGLEVALUE('Height',$,IFCPOSITIVELENGTHMEASURE(${num(r.size.height)}),$)`),
+            ]),
+        ...(r.slope ? [w.add(`IFCPROPERTYSINGLEVALUE('Declividade (%)',$,IFCREAL(${num(r.slope)}),$)`)] : []),
+        ...Object.entries(r.params)
+          .filter(([, v]) => v !== "")
+          .map(([k, v]) => w.add(`IFCPROPERTYSINGLEVALUE(${str(k)},$,${typeof v === "number" ? `IFCREAL(${num(v)})` : `IFCLABEL(${str(String(v))})`},$)`)),
+      ];
+      const pset = w.add(`IFCPROPERTYSET('${newGuid()}',$,'Pset_MEP_Tracado',$,${list(props)})`);
+      w.add(`IFCRELDEFINESBYPROPERTIES('${newGuid()}',$,$,$,${list([el])},${ref(pset)})`);
+      const qtoName = t.segmentType === "IFCPIPESEGMENT" ? "Qto_PipeSegmentBaseQuantities" : "Qto_CableCarrierSegmentBaseQuantities";
+      const q = w.add(`IFCQUANTITYLENGTH('Length',$,$,${num(seg.length * MM)},$)`);
+      const qto = w.add(`IFCELEMENTQUANTITY('${newGuid()}',$,'${qtoName}',$,$,${list([q])})`);
+      w.add(`IFCRELDEFINESBYPROPERTIES('${newGuid()}',$,$,$,${list([el])},${ref(qto)})`);
+      addToStoreyAndSystem(el, Math.min(seg.start[1], seg.end[1]), r.system, t.systemType);
+    }
+  }
+
+  for (const f of runFittings(runs)) {
+    const t = RUN_TYPE_BY_ID[f.typeId];
+    const r = runs.find((x) => x.id === f.runId)!;
+    const d = Math.max(f.size.width, f.size.height) * 1.2;
+    const center = toMm(f.position);
+    const pl = placement([center[0], center[1], center[2] - d / 2]);
+    const shape = body(
+      t.profile === "circular"
+        ? `IFCCIRCLEPROFILEDEF(.AREA.,$,${ref(origin2d)},${num(d / 2)})`
+        : `IFCRECTANGLEPROFILEDEF(.AREA.,$,${ref(origin2d)},${num(f.size.width * 1.2)},${num(f.size.height * 1.2)})`,
+      t.profile === "circular" ? d : f.size.height * 1.2,
+    );
+    const el = w.add(
+      `IFC${t.fittingType.replace(/^IFC/, "")}('${derivedGuid(r.guid, 500 + f.index)}',$,${str(`${r.tag} - ${f.label} ${f.size.label}`)},$,${str(f.label)},${ref(pl)},${ref(shape)},${str(r.tag)},.${f.kind === "curva" ? t.bendPredefined : t.teePredefined}.)`,
+    );
+    addToStoreyAndSystem(el, f.position[1], f.system, t.systemType);
   }
 
   for (const s of storeyIds.values()) {

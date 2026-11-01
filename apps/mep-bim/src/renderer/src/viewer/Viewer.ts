@@ -2,37 +2,49 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { Shape } from "../../../core/library";
 import type { SurfaceHit } from "../../../core/placement";
+import { segmentBasis, type Profile } from "../../../core/runs";
 import type { Vec3 } from "../../../core/types";
 import type { ElementMesh } from "../../../ifc/loadIfc";
 
 export type ColorMode = "ifc" | "disciplina";
 
-/** Representação de um componente locado (ou de sua pré-visualização). */
-export interface PointVisual {
-  id: number;
-  shape: Shape;
-  /** [largura, profundidade, altura] em metros. */
-  size: Vec3;
-  position: Vec3;
-  rotation: number;
-  color: string;
+/** Geometria de um objeto criado no app (ou de sua pré-visualização). Medidas em metros. */
+export type Visual =
+  /** Componente locado: caixa ou cilindro girado em torno do eixo vertical. */
+  | { kind?: "solido"; shape: Shape; size: Vec3; position: Vec3; rotation: number }
+  /** Segmento de trecho entre dois pontos do eixo. */
+  | { kind: "segmento"; profile: Profile; width: number; height: number; start: Vec3; end: Vec3 }
+  /** Nó do trecho (curva, tê ou vértice em desenho). */
+  | { kind: "no"; profile: Profile; width: number; height: number; position: Vec3 };
+
+export type PointVisual = Visual & { id: number; color: string };
+export type PreviewItem = Visual & { ok: boolean };
+
+export type ExtraLayer = "points" | "runs";
+
+/** Contexto do cursor entregue ao modo de edição. */
+export interface PointerContext {
+  /** Raio da câmera pelo cursor (cena). */
+  ray: { origin: Vec3; direction: Vec3 };
+  shift: boolean;
+  /** Objeto criado no app (ponto ou trecho) sob o cursor, se estiver na frente do modelo. */
+  objectId: number | null;
+  objectPoint: Vec3 | null;
 }
 
-export interface PreviewItem extends Omit<PointVisual, "id" | "color"> {
-  ok: boolean;
-}
-
-/** Modo de locação: o visualizador informa a superfície sob o cursor e os cliques. */
+/** Modo de edição: o visualizador informa a superfície sob o cursor e os cliques. */
 export interface PlacementHandler {
-  hover(hit: SurfaceHit | null): PreviewItem[];
-  click(hit: SurfaceHit): void;
+  hover(hit: SurfaceHit | null, ctx: PointerContext): PreviewItem[];
+  click(hit: SurfaceHit | null, ctx: PointerContext): void;
+  /** Duplo clique (ex.: finalizar um trecho). */
+  doubleClick?(): void;
 }
 
 interface Entry {
   mesh: THREE.Mesh;
   ifcMaterial: THREE.Material;
   disciplineMaterial: THREE.Material;
-  isPoint: boolean;
+  layer: "model" | ExtraLayer;
 }
 
 /** Visualizador 3D: um THREE.Mesh por elemento IFC ou ponto locado, com seleção, filtros e locação. */
@@ -43,6 +55,10 @@ export class Viewer {
   private controls: OrbitControls;
   private modelGroup = new THREE.Group();
   private pointsGroup = new THREE.Group();
+  private runsGroup = new THREE.Group();
+  private staticPreviewGroup = new THREE.Group();
+  private shiftDown = false;
+  private removeKeyListeners = () => {};
   private previewGroup = new THREE.Group();
   private entries = new Map<number, Entry>();
   private materialCache = new Map<string, THREE.Material>();
@@ -85,7 +101,7 @@ export class Viewer {
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
     sun.position.set(30, 50, 20);
     this.scene.add(sun);
-    this.scene.add(this.modelGroup, this.pointsGroup, this.previewGroup);
+    this.scene.add(this.modelGroup, this.pointsGroup, this.runsGroup, this.previewGroup, this.staticPreviewGroup);
 
     const grid = new THREE.GridHelper(100, 100, 0x3a4250, 0x262c35);
     grid.name = "grid";
@@ -99,8 +115,9 @@ export class Viewer {
       this.pointerDown = null;
       if (moved >= 4 || e.button !== 0) return;
       if (this.placement) {
-        const hit = this.surfaceHit(e.clientX, e.clientY);
-        if (hit) this.placement.click(hit);
+        this.shiftDown = e.shiftKey;
+        const { hit, ctx } = this.probe(e.clientX, e.clientY);
+        this.placement.click(hit, ctx);
         this.refreshPlacement();
       } else {
         this.onPick(this.pick(e.clientX, e.clientY), e.ctrlKey || e.metaKey || e.shiftKey);
@@ -109,6 +126,7 @@ export class Viewer {
     canvas.addEventListener("pointermove", (e) => {
       if (!this.placement) return;
       this.hoverPos = { x: e.clientX, y: e.clientY };
+      this.shiftDown = e.shiftKey;
       this.hoverDirty = true;
     });
     canvas.addEventListener("pointerleave", () => {
@@ -117,8 +135,21 @@ export class Viewer {
       this.hoverDirty = true;
     });
     canvas.addEventListener("dblclick", () => {
-      if (!this.placement) this.fitTo(this.selected.size ? [...this.selected] : undefined);
+      if (this.placement) this.placement.doubleClick?.();
+      else this.fitTo(this.selected.size ? [...this.selected] : undefined);
     });
+    const onShift = (e: KeyboardEvent) => {
+      if (e.key === "Shift" && this.placement && this.shiftDown !== e.type.endsWith("down")) {
+        this.shiftDown = e.type.endsWith("down");
+        this.hoverDirty = true;
+      }
+    };
+    window.addEventListener("keydown", onShift);
+    window.addEventListener("keyup", onShift);
+    this.removeKeyListeners = () => {
+      window.removeEventListener("keydown", onShift);
+      window.removeEventListener("keyup", onShift);
+    };
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
@@ -142,16 +173,17 @@ export class Viewer {
       const mesh = new THREE.Mesh(geometry, this.colorMode === "ifc" ? ifcMaterial : disciplineMaterial);
       mesh.userData.expressID = m.expressID;
       this.modelGroup.add(mesh);
-      this.entries.set(m.expressID, { mesh, ifcMaterial, disciplineMaterial, isPoint: false });
+      this.entries.set(m.expressID, { mesh, ifcMaterial, disciplineMaterial, layer: "model" });
     }
     this.placeGrid();
     this.fitTo();
   }
 
   clear() {
-    for (const { mesh, isPoint } of this.entries.values()) if (!isPoint) mesh.geometry.dispose();
+    for (const { mesh, layer } of this.entries.values()) if (layer === "model") mesh.geometry.dispose();
     this.modelGroup.clear();
     this.pointsGroup.clear();
+    this.runsGroup.clear();
     this.entries.clear();
     this.selected.clear();
     this.highlighted.clear();
@@ -159,19 +191,24 @@ export class Viewer {
     this.requestRender();
   }
 
-  /** Substitui os pontos locados exibidos. */
-  setPoints(points: PointVisual[]) {
-    for (const [id, e] of this.entries) if (e.isPoint) this.entries.delete(id);
-    this.pointsGroup.clear();
-    for (const p of points) {
+  /** Substitui os objetos criados no app de uma camada (pontos locados ou trechos). */
+  setExtras(layer: ExtraLayer, items: PointVisual[]) {
+    for (const [id, e] of this.entries) if (e.layer === layer) this.entries.delete(id);
+    const group = layer === "points" ? this.pointsGroup : this.runsGroup;
+    group.clear();
+    for (const p of items) {
       const c = new THREE.Color(p.color);
       const mat = this.material(c.r, c.g, c.b, 1);
-      const mesh = this.shapeMesh(p, mat);
+      const mesh = this.buildMesh(p, mat);
       mesh.userData.expressID = p.id;
-      this.pointsGroup.add(mesh);
-      this.entries.set(p.id, { mesh, ifcMaterial: mat, disciplineMaterial: mat, isPoint: true });
+      group.add(mesh);
+      this.entries.set(p.id, { mesh, ifcMaterial: mat, disciplineMaterial: mat, layer });
     }
     this.setVisible(this.visible);
+  }
+
+  setPoints(points: PointVisual[]) {
+    this.setExtras("points", points);
   }
 
   /** Ativa (ou desativa, com null) o modo de locação. */
@@ -280,6 +317,7 @@ export class Viewer {
   dispose() {
     cancelAnimationFrame(this.frame);
     this.resizeObserver.disconnect();
+    this.removeKeyListeners();
     this.clear();
     this.materialCache.forEach((m) => m.dispose());
     this.geometryCache.forEach((g) => g.dispose());
@@ -288,25 +326,70 @@ export class Viewer {
     this.renderer.domElement.remove();
   }
 
-  private shapeMesh(p: Omit<PointVisual, "id" | "color">, material: THREE.Material): THREE.Mesh {
-    const [w, d, h] = p.size;
-    const key = `${p.shape}:${w}:${d}:${h}`;
-    let geometry = this.geometryCache.get(key);
-    if (!geometry) {
-      geometry = p.shape === "cilindro" ? new THREE.CylinderGeometry(w / 2, w / 2, h, 24) : new THREE.BoxGeometry(w, h, d);
-      this.geometryCache.set(key, geometry);
+  private cachedGeometry(key: string, make: () => THREE.BufferGeometry): THREE.BufferGeometry {
+    let g = this.geometryCache.get(key);
+    if (!g) {
+      g = make();
+      this.geometryCache.set(key, g);
     }
+    return g;
+  }
+
+  private buildMesh(v: Visual, material: THREE.Material): THREE.Mesh {
+    if (v.kind === "segmento") {
+      // Geometria de comprimento unitário ao longo de Y, escalada e orientada pela base do perfil.
+      const geometry =
+        v.profile === "circular"
+          ? this.cachedGeometry(`seg:c:${v.width}`, () => new THREE.CylinderGeometry(v.width / 2, v.width / 2, 1, 16).translate(0, 0.5, 0))
+          : this.cachedGeometry(`seg:r:${v.width}:${v.height}`, () => new THREE.BoxGeometry(v.width, 1, v.height).translate(0, 0.5, 0));
+      const mesh = new THREE.Mesh(geometry, material);
+      const start = new THREE.Vector3(...v.start);
+      const dir = new THREE.Vector3(...v.end).sub(start);
+      const length = Math.max(dir.length(), 1e-4);
+      const { x, z } = segmentBasis([dir.x, dir.y, dir.z]);
+      const basis = new THREE.Matrix4().makeBasis(new THREE.Vector3(...x), dir.clone().normalize(), new THREE.Vector3(...z));
+      mesh.quaternion.setFromRotationMatrix(basis);
+      mesh.scale.set(1, length, 1);
+      mesh.position.copy(start);
+      mesh.updateMatrixWorld();
+      return mesh;
+    }
+    if (v.kind === "no") {
+      const geometry =
+        v.profile === "circular"
+          ? this.cachedGeometry(`no:c:${v.width}`, () => new THREE.SphereGeometry(v.width * 0.6, 16, 12))
+          : this.cachedGeometry(`no:r:${v.width}:${v.height}`, () => new THREE.BoxGeometry(v.width * 1.05, v.height * 1.05, v.width * 1.05));
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(...v.position);
+      mesh.updateMatrixWorld();
+      return mesh;
+    }
+    const [w, d, h] = v.size;
+    const geometry = this.cachedGeometry(`${v.shape}:${w}:${d}:${h}`, () =>
+      v.shape === "cilindro" ? new THREE.CylinderGeometry(w / 2, w / 2, h, 24) : new THREE.BoxGeometry(w, h, d),
+    );
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(...p.position);
-    mesh.rotation.y = p.rotation;
+    mesh.position.set(...v.position);
+    mesh.rotation.y = v.rotation;
     mesh.updateMatrixWorld();
     return mesh;
+  }
+
+  /** Pré-visualização fixa, independente do cursor (ex.: traçado automático proposto). */
+  setStaticPreview(items: PreviewItem[]) {
+    this.staticPreviewGroup.clear();
+    for (const it of items) {
+      const mesh = this.buildMesh(it, it.ok ? this.previewOk : this.previewBad);
+      mesh.renderOrder = 2;
+      this.staticPreviewGroup.add(mesh);
+    }
+    this.requestRender();
   }
 
   private showPreview(items: PreviewItem[]) {
     this.previewGroup.clear();
     for (const it of items) {
-      const mesh = this.shapeMesh(it, it.ok ? this.previewOk : this.previewBad);
+      const mesh = this.buildMesh(it, it.ok ? this.previewOk : this.previewBad);
       mesh.renderOrder = 2;
       this.previewGroup.add(mesh);
     }
@@ -331,18 +414,34 @@ export class Viewer {
     return n;
   }
 
-  private surfaceHit(clientX: number, clientY: number): SurfaceHit | null {
+  /** Superfície do modelo e objeto do app sob o cursor, mais o raio da câmera. */
+  private probe(clientX: number, clientY: number): { hit: SurfaceHit | null; ctx: PointerContext } {
     this.raycaster.setFromCamera(this.ndc(clientX, clientY), this.camera);
-    const hit = this.raycaster.intersectObjects(this.pickTargets(), false)[0];
-    const n = hit && this.worldNormal(hit);
-    if (!hit || !n) return null;
-    return { point: [hit.point.x, hit.point.y, hit.point.z], normal: [n.x, n.y, n.z] };
+    const { origin, direction } = this.raycaster.ray;
+    const modelHit = this.raycaster.intersectObjects(this.pickTargets(), false)[0];
+    const n = modelHit && this.worldNormal(modelHit);
+    const extras = [...this.pointsGroup.children, ...this.runsGroup.children].filter((o) => o.visible);
+    const extraHit = this.raycaster.intersectObjects(extras, false)[0];
+    const extraInFront = extraHit && (!modelHit || extraHit.distance <= modelHit.distance + 0.05);
+    return {
+      hit: modelHit && n ? { point: [modelHit.point.x, modelHit.point.y, modelHit.point.z], normal: [n.x, n.y, n.z] } : null,
+      ctx: {
+        ray: { origin: [origin.x, origin.y, origin.z], direction: [direction.x, direction.y, direction.z] },
+        shift: this.shiftDown,
+        objectId: extraInFront ? (extraHit.object.userData.expressID as number) : null,
+        objectPoint: extraInFront ? [extraHit.point.x, extraHit.point.y, extraHit.point.z] : null,
+      },
+    };
   }
 
   private updateHover() {
     if (!this.placement) return;
-    const hit = this.hoverPos ? this.surfaceHit(this.hoverPos.x, this.hoverPos.y) : null;
-    this.showPreview(this.placement.hover(hit));
+    if (!this.hoverPos) {
+      this.showPreview([]);
+      return;
+    }
+    const { hit, ctx } = this.probe(this.hoverPos.x, this.hoverPos.y);
+    this.showPreview(this.placement.hover(hit, ctx));
   }
 
   private refreshMaterials() {
@@ -377,7 +476,7 @@ export class Viewer {
 
   private pick(clientX: number, clientY: number): number | null {
     this.raycaster.setFromCamera(this.ndc(clientX, clientY), this.camera);
-    const targets = [...this.pointsGroup.children, ...this.modelGroup.children].filter(
+    const targets = [...this.pointsGroup.children, ...this.runsGroup.children, ...this.modelGroup.children].filter(
       (o) => o.visible && (o as THREE.Mesh).material !== this.ghostMaterial,
     );
     const hit = this.raycaster.intersectObjects(targets, false)[0];

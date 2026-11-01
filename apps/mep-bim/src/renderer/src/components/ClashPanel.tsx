@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { detectClashes, type Clash } from "../../../core/clash";
 import { DISCIPLINES, DISCIPLINE_BY_ID, MEP_DISCIPLINES } from "../../../core/disciplines";
 import { formatNumber, toCsv } from "../../../core/format";
+import type { TriangleMesh } from "../../../core/obb";
 import type { Discipline, ElementInfo } from "../../../core/types";
 import { saveFile } from "../platform";
 
@@ -9,6 +10,10 @@ interface Props {
   elements: ElementInfo[];
   elementById: Map<number, ElementInfo>;
   fileName: string | null;
+  /** Malhas do IFC por expressID, para a verificação exata. */
+  meshes: Map<number, TriangleMesh>;
+  /** Pares conectados (trecho × equipamento, trecho × trecho) a ignorar. */
+  ignorePair?: (a: number, b: number) => boolean;
   onFocus: (ids: number[]) => void;
   onClear: () => void;
 }
@@ -33,7 +38,7 @@ function DisciplinePicker({ value, onChange }: { value: Discipline[]; onChange: 
   );
 }
 
-export function ClashPanel({ elements, elementById, fileName, onFocus, onClear }: Props) {
+export function ClashPanel({ elements, elementById, fileName, meshes, ignorePair, onFocus, onClear }: Props) {
   const [groupA, setGroupA] = useState<Discipline[]>(MEP_DISCIPLINES);
   const [groupB, setGroupB] = useState<Discipline[]>(DISCIPLINES.map((d) => d.id));
   const [clearanceMm, setClearanceMm] = useState(0);
@@ -50,7 +55,7 @@ export function ClashPanel({ elements, elementById, fileName, onFocus, onClear }
     const t0 = performance.now();
     const items = elements
       .filter((e) => e.bbox)
-      .map((e) => ({ id: e.expressID, discipline: e.discipline, bbox: e.bbox!, systems: e.systems }));
+      .map((e) => ({ id: e.expressID, discipline: e.discipline, bbox: e.bbox!, systems: e.systems, obb: e.obb, mesh: meshes.get(e.expressID) }));
     setClashes(
       detectClashes(items, {
         groupA,
@@ -58,6 +63,7 @@ export function ClashPanel({ elements, elementById, fileName, onFocus, onClear }
         clearance: clearanceMm / 1000,
         tolerance: toleranceMm / 1000,
         ignoreSameSystem,
+        ignorePair,
       }),
     );
     setElapsed(performance.now() - t0);
@@ -89,7 +95,7 @@ export function ClashPanel({ elements, elementById, fileName, onFocus, onClear }
           b.name,
           DISCIPLINE_BY_ID[b.discipline].label,
           b.globalId,
-          c.distance * 1000,
+          c.distance < 0 ? `< ${clearanceMm}` : c.distance * 1000,
           a.storey ?? b.storey ?? "",
           ...c.point,
         ];
@@ -112,7 +118,8 @@ export function ClashPanel({ elements, elementById, fileName, onFocus, onClear }
         )}
       </div>
       <p className="muted small">
-        Triagem por caixas envolventes nos elementos visíveis. Elementos inclinados podem gerar falsos positivos.
+        Elementos visíveis. Pontos e trechos criados no app são verificados contra a geometria real do IFC; entre dois elementos do IFC a
+        verificação é por caixas envolventes (pode haver falsos positivos em peças inclinadas ou em anel).
       </p>
 
       <div className="field-label">Grupo A</div>
@@ -160,7 +167,11 @@ export function ClashPanel({ elements, elementById, fileName, onFocus, onClear }
                       <span className="swatch" style={{ background: DISCIPLINE_BY_ID[b.discipline].color }} /> {label(c.b)}
                     </div>
                     <div className="muted small">
-                      {c.kind === "fisica" ? "Penetração" : "Distância livre"}: {formatNumber(c.distance * 1000, 0)} mm
+                      {c.kind === "fisica"
+                        ? `Penetração: ${formatNumber(c.distance * 1000, 0)} mm`
+                        : c.distance < 0
+                          ? `Distância livre abaixo de ${formatNumber(clearanceMm, 0)} mm`
+                          : `Distância livre: ${formatNumber(c.distance * 1000, 0)} mm`}
                       {(a.storey || b.storey) && ` · ${a.storey ?? b.storey}`}
                     </div>
                   </div>

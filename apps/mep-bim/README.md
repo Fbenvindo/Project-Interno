@@ -14,7 +14,8 @@ Trabalha sobre modelos **IFC** de qualquer software (Revit, Archicad, Tekla, etc
 | **Filtros** | Por disciplina (com "só" para isolar), pavimento, sistema e busca por nome, tipo ou dimensão. |
 | **Propriedades** | Disciplina, tipo, pavimento, sistema, dimensão nominal, comprimento, GlobalId e todos os Psets/Qto do elemento e do seu tipo. |
 | **Quantitativos** | Tubos, dutos, eletrodutos e eletrocalhas em metros; conexões, acessórios, terminais e equipamentos em unidades. Agrupa por disciplina, tipo, descrição, dimensão, sistema e pavimento. Clique na linha para selecionar no modelo. Exporta **CSV** compatível com Excel pt-BR. |
-| **Interferências** | Grupo A × Grupo B por disciplina, tolerância de penetração, **folga mínima** (interferência "de folga"), ignora elementos do mesmo sistema. Clique para destacar o par e deixar o resto translúcido. Exporta CSV com GlobalIds. |
+| **Traçado** | Tubulações (água fria e quente, esgoto e pluvial com declividade, incêndio, gás), **eletrodutos** (PVC rígido, flexível, aço, dados) e **eletrocalhas**, com bitolas comerciais. Desenho ortogonal clique a clique no plano de trabalho (Shift = vertical), encaixe em pontos locados e em trechos existentes (gera tê), **traçado automático** ligando pontos selecionados a um destino (individual ou em cadeia). Curvas e tês automáticos, etiquetas (ELD-1, AF-2…), circuito, edição de bitola e sistema. |
+| **Interferências** | Grupo A × Grupo B por disciplina, tolerância de penetração, **folga mínima** (interferência "de folga"), ignora elementos do mesmo sistema e trechos ligados ao próprio equipamento. Pontos e trechos criados no app são verificados contra a **geometria real** do IFC (caixa orientada × triângulos). Clique para destacar o par e deixar o resto translúcido. Exporta CSV com GlobalIds. |
 | **Dimensionamento** | Queda de tensão e seção mínima (NBR 5410), trecho de água fria por pesos/Fair-Whipple-Hsiao (NBR 5626), Hazen-Williams, velocidade e diâmetro equivalente de dutos. Usa comprimento e dimensão do segmento selecionado. |
 
 ![Verificação de interferências](docs/tela-interferencias.png)
@@ -43,6 +44,26 @@ Como cada fixação funciona:
 - Para locar no teto vendo por baixo, oculte Arquitetura/Estrutura que estiverem na frente pelos filtros: elementos ocultos não recebem cliques.
 
 As alturas padrão da biblioteca são valores usuais de projeto no Brasil, não exigências de norma. Ajuste-as ao padrão do cliente e ao memorial.
+
+### Traçado de tubulações e eletrodutos
+
+Na aba **Traçado**, escolha o tipo (eletroduto, eletrocalha, água fria…), a bitola, o sistema, o circuito e a **elevação de trabalho** (altura acima do piso em que os trechos horizontais correm, por exemplo logo abaixo da laje ou do forro).
+
+**Desenhar** (clique a clique):
+1. Clique em **Desenhar trecho** e no ponto de início: um ponto locado (ex.: o quadro), um trecho existente (vira **tê**) ou uma superfície (o trecho fica apoiado nela).
+2. `E` (ou o botão ↕) sobe ou desce até a elevação de trabalho. Os próximos cliques seguem no plano do último vértice; com **Ortogonal** ligado, cada trecho fica em X ou Y do projeto. Segure **Shift** para um trecho vertical.
+3. Clicar num ponto locado ou num trecho liga até ele (ortogonalmente) e finaliza. `Enter` ou duplo clique finaliza onde está, `Backspace` desfaz o último vértice e `Esc` cancela.
+
+**Ligar pontos** (automático): selecione os pontos de origem (na aba Locação, na lista ou com Ctrl+clique), escolha o destino no modelo (ex.: quadro ou um trecho) e o modo:
+- **Em cadeia:** o destino liga ao ponto mais próximo, que liga ao próximo, e assim por diante. É o caso típico de tomadas no mesmo circuito.
+- **Individual:** cada ponto vai direto ao destino.
+
+O traçado proposto aparece em verde antes de gerar. Cada trecho sobe do ponto até a elevação de trabalho, segue em X e depois em Y do projeto e desce ao destino.
+
+- **Curvas** em cada mudança de direção e **tês** quando um trecho termina no meio de outro da mesma rede são criados automaticamente e contados nos quantitativos (por ângulo e bitola).
+- **Declividade:** esgoto (2% até DN 75 e 1% a partir de DN 100, NBR 8160) e pluvial (0,5%) vêm com o padrão, que é editável. É aplicada aos trechos horizontais, no sentido do desenho (do primeiro ao último clique).
+- Os trechos entram nos quantitativos (metros por tipo e bitola, curvas e tês), nas interferências, no arquivo de projeto (`.locacao.json`, versão 2) e no **IFC exportado** (`IfcPipeSegment`/`IfcCableCarrierSegment` com `Qto_*` de comprimento, conexões `IfcPipeFitting`/`IfcCableCarrierFitting` e `Pset_MEP_Tracado`).
+- As conexões com equipamentos usam o **centro** do ponto locado. Dois trechos que chegam ao mesmo equipamento são considerados ligados entre si.
 
 ### Como a disciplina é definida
 
@@ -83,18 +104,21 @@ apps/mep-bim/
 │   ├── core/            # Domínio puro, sem UI e sem IFC (testável)
 │   │   ├── disciplines.ts   # Classificação de tipos IFC por disciplina
 │   │   ├── quantities.ts    # Comprimento, dimensão nominal e quantitativos
-│   │   ├── clash.ts         # Detecção de interferências (sweep and prune)
+│   │   ├── clash.ts         # Detecção de interferências (sweep and prune + verificação exata)
+│   │   ├── obb.ts           # Caixa orientada × triângulos (eixos separadores)
+│   │   ├── runs.ts          # Traçado: tipos, bitolas, geometria, curvas, tês, rota automática
+│   │   ├── project.ts       # Arquivo de projeto (pontos + trechos)
 │   │   ├── library.ts       # Biblioteca de componentes para locação
 │   │   ├── placement.ts     # Encaixe em parede/teto/piso e distribuição em grade
 │   │   ├── points.ts        # Pontos locados, etiquetas e arquivo .locacao.json
-│   │   ├── ifcExport.ts     # Exportação dos pontos para IFC4
+│   │   ├── ifcExport.ts     # Exportação de pontos e trechos para IFC4
 │   │   ├── math.ts          # Matrizes e conversão cena ⇄ coordenadas do IFC
 │   │   └── calc/            # eletrica.ts, hidraulica.ts, hvac.ts
 │   ├── ifc/loadIfc.ts   # Leitura do IFC com web-ifc (geometria, pavimentos, sistemas, Psets)
 │   ├── main/            # Processo principal do Electron (janela, menus, diálogos, protocolo app://)
 │   ├── preload/         # Ponte segura entre Electron e a interface
 │   ├── shared/ipc.ts    # Contrato de comunicação main ⇄ renderer
-│   └── renderer/        # Interface React + visualizador Three.js (locacao/ = aba de locação)
+│   └── renderer/        # Interface React + visualizador Three.js (locacao/ e tracado/ = abas de autoria)
 ├── samples/             # Modelo IFC de exemplo
 ├── scripts/             # Gerador do IFC de exemplo e preparação de assets
 └── tests/               # Vitest
@@ -109,6 +133,8 @@ apps/mep-bim/
 - A leitura do IFC roda na thread da interface: modelos muito grandes (centenas de MB) travam a janela durante o carregamento.
 - Interferências por caixa envolvente: rápido, mas trechos inclinados ou curvos geram falsos positivos.
 - A queda de tensão não substitui a verificação por **capacidade de condução de corrente** (NBR 5410, tabelas 36–39), que ainda não está implementada.
+- Traçado: a rota automática é ortogonal e não desvia de obstáculos (as interferências mostram onde ajustar). Ao mudar a bitola, a geometria acompanha, mas a declividade não é recalculada. Redução de bitola entre trechos ainda não gera peça de redução.
+- Interferências entre dois elementos do próprio IFC continuam só por caixa envolvente.
 - Locação: a grade da distribuição em área segue os eixos X/Y do projeto (não gira com ambientes inclinados). Itens de parede ficam sobrepostos à face, não embutidos. O piso de referência só é detectado em lajes e revestimentos modelados.
 - `web-ifc-api.js` tem ~6 MB (traz todas as classes do schema IFC). Num app desktop isso não pesa.
 
@@ -128,11 +154,18 @@ Concluído (etapa 1, locação de pontos):
 - ✅ Locação por clique com pré-visualização, encaixe em superfícies e arredondamento; distribuição em grade.
 - ✅ Edição, mover, girar, desfazer/refazer; arquivo de locação; exportação **IFC4** federável.
 
+Concluído (etapa 2, traçado):
+- ✅ Tubulações, eletrodutos e eletrocalhas com bitolas comerciais; desenho ortogonal com plano de trabalho e encaixe em pontos e trechos.
+- ✅ Traçado automático (individual ou em cadeia) dos pontos até o destino; curvas e tês automáticos; declividade para esgoto e pluvial.
+- ✅ Trechos nos quantitativos, nas interferências (verificação exata contra o IFC), no arquivo de projeto e no IFC exportado.
+
 Próximas etapas:
+- Rota automática com **desvio de obstáculos** (busca em grade evitando vigas, pilares e outras redes) e tronco compartilhado entre pontos.
+- Edição geométrica de trechos (arrastar vértice, dividir, unir), reduções e pontos de conexão definidos por equipamento.
 - Locação por **ambiente** (`IfcSpace`): distribuir luminárias, sprinklers e detectores pelo contorno real do ambiente, com área, iluminância e cobertura.
 - Biblioteca editável pelo usuário (tipos próprios, dimensões, alturas e parâmetros do escritório), com importação e exportação.
 - Cópia e matriz de pontos, alinhamento, distância a cantos e vãos, cotas.
-- Traçado de **tubulações, eletrodutos, eletrocalhas, leitos e dutos** ligando os pontos, com conexões automáticas (curvas, tês, reduções), declividade para esgoto e pluvial e desvio de obstáculos.
+- Dutos de ar e leitos para cabos no traçado.
 - Sistemas e conectividade (portas IFC), circuitos ligados ao quadro, verificação de redes desconectadas.
 - Planta 2D por pavimento com simbologia (NBR 5444 para elétrica) para conferência e pranchas.
 

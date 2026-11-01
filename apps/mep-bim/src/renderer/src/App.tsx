@@ -14,13 +14,16 @@ import { ClashPanel } from "./components/ClashPanel";
 import { CalcPanel } from "./components/CalcPanel";
 import type { OpenedFile } from "../../shared/ipc";
 import { LocacaoPanel } from "./locacao/LocacaoPanel";
+import { TracadoPanel } from "./tracado/TracadoPanel";
+import { connectedPairs, runElements, runFittings, runIdOfElement, runProperties, runSegments, RUN_TYPE_BY_ID, segmentElementId, fittingElementId } from "../../core/runs";
 import { usePointsStore } from "./locacao/usePointsStore";
 
-type Tab = "modelo" | "locacao" | "quantitativos" | "interferencias" | "dimensionamento";
+type Tab = "modelo" | "locacao" | "tracado" | "quantitativos" | "interferencias" | "dimensionamento";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "modelo", label: "Modelo" },
   { id: "locacao", label: "Locação" },
+  { id: "tracado", label: "Traçado" },
   { id: "quantitativos", label: "Quantitativos" },
   { id: "interferencias", label: "Interferências" },
   { id: "dimensionamento", label: "Dimensionamento" },
@@ -57,21 +60,32 @@ export function App() {
 
   const store = usePointsStore();
   const pointElements = useMemo(() => store.points.map(pointToElement), [store.points]);
-  const allElements = useMemo(() => (model ? [...model.elements, ...pointElements] : []), [model, pointElements]);
+  const runElementList = useMemo(() => (model ? runElements(store.runs, model.storeyLevels) : []), [store.runs, model]);
+  const allElements = useMemo(() => (model ? [...model.elements, ...pointElements, ...runElementList] : []), [model, pointElements, runElementList]);
   const elementById = useMemo(() => new Map(allElements.map((e) => [e.expressID, e])), [allElements]);
+  const connected = useMemo(() => connectedPairs(store.runs, store.points), [store.runs, store.points]);
+  const meshById = useMemo(() => new Map(model?.meshes.map((m) => [m.expressID, m]) ?? []), [model]);
   const allSystems = useMemo(
-    () => [...new Set([...(model?.systems ?? []), ...store.points.map((p) => p.system).filter(Boolean)])].sort((a, b) => a.localeCompare(b, "pt-BR")),
-    [model, store.points],
+    () =>
+      [...new Set([...(model?.systems ?? []), ...store.points.map((p) => p.system), ...store.runs.map((r) => r.system)].filter(Boolean))].sort((a, b) =>
+        a.localeCompare(b, "pt-BR"),
+      ),
+    [model, store.points, store.runs],
   );
   const getProperties = useCallback(
     (id: number) => {
+      const runId = runIdOfElement(id);
+      if (runId != null) {
+        const r = store.runs.find((x) => x.id === runId);
+        return r ? runProperties(r) : [];
+      }
       if (id < 0) {
         const p = store.points.find((x) => x.id === id);
         return p ? pointProperties(p) : [];
       }
       return model?.getProperties(id) ?? [];
     },
-    [model, store.points],
+    [model, store.points, store.runs],
   );
 
   // ---- Visualizador --------------------------------------------------------
@@ -92,7 +106,16 @@ export function App() {
     };
   }, []);
 
-  useEffect(() => viewerRef.current?.setSelection(selection), [selection]);
+  // Selecionar um segmento destaca o trecho inteiro.
+  useEffect(() => {
+    const runIds = new Set(selection.map(runIdOfElement).filter((x): x is number => x != null));
+    if (!runIds.size) {
+      viewerRef.current?.setSelection(selection);
+      return;
+    }
+    const extra = runElementList.filter((e) => runIds.has(runIdOfElement(e.expressID)!)).map((e) => e.expressID);
+    viewerRef.current?.setSelection([...new Set([...selection, ...extra])]);
+  }, [selection, runElementList]);
   useEffect(() => viewerRef.current?.setColorMode(colorMode), [colorMode]);
 
   // Pontos locados na cena (recriados também após abrir outro modelo).
@@ -105,17 +128,50 @@ export function App() {
     );
   }, [store.points, model]);
 
+  // Trechos na cena: segmentos e conexões.
+  useEffect(() => {
+    const visuals = store.runs.flatMap((r) => {
+      const t = RUN_TYPE_BY_ID[r.typeId];
+      const color = DISCIPLINE_BY_ID[t.discipline].color;
+      const w = r.size.width / 1000;
+      const h = r.size.height / 1000;
+      return runSegments(r).map((sg) => ({
+        id: segmentElementId(r.id, sg.index),
+        kind: "segmento" as const,
+        profile: t.profile,
+        width: w,
+        height: h,
+        start: sg.start,
+        end: sg.end,
+        color,
+      }));
+    });
+    const fittings = runFittings(store.runs).map((f) => {
+      const t = RUN_TYPE_BY_ID[f.typeId];
+      return {
+        id: fittingElementId(f.runId, f.index),
+        kind: "no" as const,
+        profile: t.profile,
+        width: f.size.width / 1000,
+        height: f.size.height / 1000,
+        position: f.position,
+        color: DISCIPLINE_BY_ID[t.discipline].color,
+      };
+    });
+    viewerRef.current?.setExtras("runs", [...visuals, ...fittings]);
+  }, [store.runs, model]);
+
   // Ganchos para testes automatizados da interface (somente em desenvolvimento).
   useEffect(() => {
     if (import.meta.env.DEV) Object.assign(window, { __mep: { viewer: viewerRef.current, model, store } });
   }, [model, store]);
 
   const dirtyRef = useRef(false);
-  dirtyRef.current = store.dirty && store.points.length > 0;
+  dirtyRef.current = store.dirty && !store.isEmpty;
 
   // ---- Abertura de arquivos ------------------------------------------------
   const openFile = useCallback(async (file: OpenedFile) => {
-    if (dirtyRef.current && !window.confirm("Há pontos locados não salvos neste modelo. Abrir outro modelo e descartá-los?")) return;
+    if (dirtyRef.current && !window.confirm("Há pontos e trechos não salvos neste modelo. Abrir outro modelo e descartá-los?")) return;
     setError(null);
     setProgress("Inicializando leitor IFC…");
     // Deixa a interface pintar a mensagem antes do processamento pesado.
@@ -127,7 +183,7 @@ export function App() {
       modelRef.current = loaded;
       const disciplineOf = new Map(loaded.elements.map((e) => [e.expressID, e.discipline]));
       viewerRef.current!.load(loaded.meshes, (id) => DISCIPLINE_BY_ID[disciplineOf.get(id) ?? "outros"].color);
-      store.reset([]);
+      store.reset([], []);
       setModel(loaded);
       setFileName(file.name);
       setFilters(EMPTY_FILTERS);
@@ -311,7 +367,7 @@ export function App() {
               Erro ao abrir o modelo: {error}
             </div>
           )}
-          {model && tab !== "locacao" && <div className="hint">Clique para selecionar · Ctrl+clique para somar · duplo clique para enquadrar</div>}
+          {model && tab !== "locacao" && tab !== "tracado" && <div className="hint">Clique para selecionar · Ctrl+clique para somar · duplo clique para enquadrar</div>}
         </section>
 
         <aside className="panel">
@@ -330,12 +386,25 @@ export function App() {
               systems={allSystems}
             />
           )}
+          {tab === "tracado" && model && viewerRef.current && (
+            <TracadoPanel
+              model={model}
+              fileName={fileName}
+              store={store}
+              viewer={viewerRef.current}
+              selection={selection}
+              onSelect={selectPoints}
+              systems={allSystems}
+            />
+          )}
           {tab === "quantitativos" && model && <QuantitiesPanel elements={visibleElements} fileName={fileName} onSelect={selectAndFrame} />}
           {tab === "interferencias" && model && (
             <ClashPanel
               elements={visibleElements}
               elementById={elementById}
               fileName={fileName}
+              meshes={meshById}
+              ignorePair={connected}
               onFocus={focusClash}
               onClear={clearHighlight}
             />

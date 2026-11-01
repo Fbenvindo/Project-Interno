@@ -1,3 +1,4 @@
+import { inflate, obbIntersectsMesh, obbMesh, type OBB, type TriangleMesh } from "./obb";
 import type { BBox, Discipline, Vec3 } from "./types";
 
 export interface ClashItem {
@@ -5,6 +6,10 @@ export interface ClashItem {
   discipline: Discipline;
   bbox: BBox;
   systems?: string[];
+  /** Caixa orientada exata (elementos criados no app). */
+  obb?: OBB;
+  /** Malha triangulada (elementos do IFC). */
+  mesh?: TriangleMesh;
 }
 
 export interface ClashOptions {
@@ -21,22 +26,26 @@ export interface ClashOptions {
   tolerance?: number;
   /** Ignora pares do mesmo sistema (conexões, registros e terminais na rede). */
   ignoreSameSystem?: boolean;
+  /** Pares a ignorar (ex.: trecho e o equipamento em que ele se conecta). */
+  ignorePair?: (a: number, b: number) => boolean;
 }
 
 export interface Clash {
   a: number;
   b: number;
   kind: "fisica" | "folga";
-  /** Penetração (física) ou distância livre (folga), em metros. */
+  /** Penetração (física) ou distância livre (folga), em metros; −1 = abaixo da folga, valor exato desconhecido. */
   distance: number;
   /** Centro da região de conflito, para posicionar a câmera. */
   point: Vec3;
 }
 
 /**
- * Detecção de interferências por caixas envolventes (AABB) com
- * "sweep and prune" no eixo X. É uma triagem rápida: elementos inclinados
- * podem gerar falsos positivos, que a verificação por malha refinará.
+ * Detecção de interferências em duas etapas:
+ * 1. triagem por caixas envolventes (AABB) com "sweep and prune" no eixo X;
+ * 2. verificação exata quando um dos lados é um elemento criado no app
+ *    (caixa orientada) e o outro tem malha ou caixa orientada.
+ * Pares entre dois elementos do IFC ficam só na triagem por AABB.
  */
 export function detectClashes(items: ClashItem[], opts: ClashOptions): Clash[] {
   const clearance = opts.clearance ?? 0;
@@ -63,14 +72,18 @@ export function detectClashes(items: ClashItem[], opts: ClashOptions): Clash[] {
         (inB.has(cur.discipline) && inA.has(other.discipline));
       if (!pairOk) continue;
       if (ignoreSameSystem && shareSystem(cur, other)) continue;
+      if (opts.ignorePair?.(cur.id, other.id)) continue;
 
       const c = compare(cur.bbox, other.bbox);
-      if (c.overlap) {
-        if (c.depth > tolerance) {
-          clashes.push({ a: other.id, b: cur.id, kind: "fisica", distance: c.depth, point: c.point });
-        }
-      } else if (clearance > 0 && c.gap < clearance) {
-        clashes.push({ a: other.id, b: cur.id, kind: "folga", distance: c.gap, point: c.point });
+      const physicalCandidate = c.overlap && c.depth > tolerance;
+      const clearanceCandidate = clearance > 0 && (c.overlap || c.gap < clearance);
+      if (!physicalCandidate && !clearanceCandidate) continue;
+      const exact = exactTest(cur, other);
+      if (physicalCandidate && (!exact || exact(-tolerance))) {
+        clashes.push({ a: other.id, b: cur.id, kind: "fisica", distance: c.depth, point: c.point });
+      } else if (clearanceCandidate && (!exact || exact(clearance))) {
+        // Caixas sobrepostas sem contato real: distância exata desconhecida (abaixo da folga).
+        clashes.push({ a: other.id, b: cur.id, kind: "folga", distance: c.overlap ? -1 : c.gap, point: c.point });
       }
     }
     active.push(cur);
@@ -79,6 +92,18 @@ export function detectClashes(items: ClashItem[], opts: ClashOptions): Clash[] {
   return clashes.sort((p, q) =>
     p.kind === q.kind ? (p.kind === "fisica" ? q.distance - p.distance : p.distance - q.distance) : p.kind === "fisica" ? -1 : 1,
   );
+}
+
+/**
+ * Teste exato entre dois itens, se possível: devolve uma função que, para uma
+ * margem (m; negativa encolhe a caixa), diz se há contato. null = sem teste exato.
+ */
+function exactTest(a: ClashItem, b: ClashItem): ((margin: number) => boolean) | null {
+  const [box, other] = a.obb ? [a, b] : b.obb ? [b, a] : [null, null];
+  if (!box || !other) return null;
+  const mesh = other.mesh ?? (other.obb ? obbMesh(other.obb) : null);
+  if (!mesh) return null;
+  return (margin) => obbIntersectsMesh(inflate(box.obb!, margin), mesh);
 }
 
 function shareSystem(a: ClashItem, b: ClashItem): boolean {

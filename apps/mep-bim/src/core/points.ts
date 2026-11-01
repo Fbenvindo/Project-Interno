@@ -3,6 +3,7 @@
 import { getCategory } from "./disciplines";
 import { COMPONENT_BY_ID, type ComponentDef } from "./library";
 import type { CoordinateSystem } from "./math";
+import type { OBB } from "./obb";
 import type { BBox, ElementInfo, PropertyGroup, Vec3 } from "./types";
 
 export interface PlacedPoint {
@@ -89,6 +90,17 @@ export function pointBBox(p: PlacedPoint, def: ComponentDef): BBox {
   return { min: [x - ex, y - h, z - ez], max: [x + ex, y + h, z + ez] };
 }
 
+/** Caixa orientada do componente (cilindros aproximados pela caixa circunscrita). */
+export function pointOBB(p: PlacedPoint, def: ComponentDef): OBB {
+  const c = Math.cos(p.rotation);
+  const s = Math.sin(p.rotation);
+  return {
+    center: p.position,
+    axes: [[c, 0, -s], [0, 1, 0], [s, 0, c]],
+    half: [def.size[0] / 2000, def.size[2] / 2000, def.size[1] / 2000],
+  };
+}
+
 export function pointToElement(p: PlacedPoint): ElementInfo {
   const def = COMPONENT_BY_ID[p.componentId];
   return {
@@ -106,6 +118,7 @@ export function pointToElement(p: PlacedPoint): ElementInfo {
     length: null,
     size: null,
     origin: "locacao",
+    obb: pointOBB(p, def),
   };
 }
 
@@ -158,7 +171,7 @@ interface StoredPoint {
 
 export interface LocacaoFile {
   formato: typeof LOCACAO_FORMAT;
-  versao: 1;
+  versao: 1 | 2;
   modeloIfc: string | null;
   salvoEm: string;
   pontos: StoredPoint[];

@@ -641,3 +641,12 @@ summary {
 .editor {
   border-color: #00a5b8;
 }
+.mode-body {
+  margin-top: 8px;
+}
+.mode-body .btn-row select {
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
