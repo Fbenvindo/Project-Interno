@@ -15,6 +15,8 @@ Trabalha sobre modelos **IFC** de qualquer software (Revit, Archicad, Tekla, etc
 | **Propriedades** | Disciplina, tipo, pavimento, sistema, dimensão nominal, comprimento, GlobalId e todos os Psets/Qto do elemento e do seu tipo. |
 | **Quantitativos** | Tubos, dutos, eletrodutos e eletrocalhas em metros; conexões, acessórios, terminais e equipamentos em unidades. Agrupa por disciplina, tipo, descrição, dimensão, sistema e pavimento. Clique na linha para selecionar no modelo. Exporta **CSV** compatível com Excel pt-BR. |
 | **Traçado** | Tubulações (água fria e quente, esgoto e pluvial com declividade, incêndio, gás), **eletrodutos** (PVC rígido, flexível, aço, dados) e **eletrocalhas**, com bitolas comerciais. Desenho ortogonal clique a clique no plano de trabalho (Shift = vertical), encaixe em pontos locados e em trechos existentes (gera tê), **traçado automático** ligando pontos selecionados a um destino (individual ou em cadeia). Curvas e tês automáticos, etiquetas (ELD-1, AF-2…), circuito, edição de bitola e sistema. |
+| **Locação por ambiente** | Usa os ambientes do IFC (`IfcSpace`) com o contorno real: grade alinhada ao ambiente para itens de teto e piso (espaçamento, linhas × colunas, quantidade ou **iluminância pelo método dos lúmens**) e pontos ao longo do **perímetro** para itens de parede, pulando portas e vãos. Cada ponto é fixado na laje, forro ou parede reais. |
+| **Circuitos** | Circuitos por **quadro** (sistema 1F, 2F ou 3F com as tensões). Os pontos selecionados são atribuídos ao circuito, e o **quadro de cargas** traz potência, corrente, **comprimento real pelo traçado**, seção (mínima, capacidade de condução da NBR 5410 tab. 36/B1 com FCA, queda de tensão), disjuntor, balanceamento de fases e exportação CSV. Um clique gera o traçado do circuito até o quadro. Os circuitos vão para o IFC como `IfcDistributionCircuit`. |
 | **Planta 2D** | Planta por pavimento gerada do **corte real do IFC** (paredes e pilares com hachura, portas e equipamentos em contorno), com a **simbologia** dos pontos locados (elétrica baseada na prática da NBR 5444), trechos (eletroduto contínuo no teto/parede e tracejado no piso, eletrocalha na largura real, subidas e descidas), etiquetas de circuito, potência e bitola, **legenda automática** e **carimbo**. Prancha A0–A4 em escala, exportada em **PDF**, **DXF** (AutoCAD, por camadas) e SVG. |
 | **Interferências** | Grupo A × Grupo B por disciplina, tolerância de penetração, **folga mínima** (interferência "de folga"), ignora elementos do mesmo sistema e trechos ligados ao próprio equipamento. Pontos e trechos criados no app são verificados contra a **geometria real** do IFC (caixa orientada × triângulos). Clique para destacar o par e deixar o resto translúcido. Exporta CSV com GlobalIds. |
 | **Dimensionamento** | Queda de tensão e seção mínima (NBR 5410), trecho de água fria por pesos/Fair-Whipple-Hsiao (NBR 5626), Hazen-Williams, velocidade e diâmetro equivalente de dutos. Usa comprimento e dimensão do segmento selecionado. |
@@ -45,6 +47,38 @@ Como cada fixação funciona:
 - Para locar no teto vendo por baixo, oculte Arquitetura/Estrutura que estiverem na frente pelos filtros: elementos ocultos não recebem cliques.
 
 As alturas padrão da biblioteca são valores usuais de projeto no Brasil, não exigências de norma. Ajuste-as ao padrão do cliente e ao memorial.
+
+### Locação por ambiente
+
+Se o IFC tiver ambientes (`IfcSpace`, os *Rooms* do Revit exportados), o modo **Por ambiente** aparece na aba Locação. Marque os ambientes na lista (há filtro por pavimento) ou clique neles na vista 3D. Eles ficam destacados em ciano e a proposta aparece em verde antes de confirmar.
+
+- **Teto e piso** (luminárias, sprinklers, detectores, difusores, ralos…): a grade segue a maior parede do ambiente, com pontos no centro de células iguais (meio espaçamento até a parede), e só ficam os pontos dentro do contorno real e a uma distância mínima das paredes. A distribuição pode ser feita por:
+  - espaçamento máximo;
+  - linhas × colunas;
+  - quantidade por ambiente;
+  - para luminárias, **iluminância**: N = E · A / (Φ · Fu · Fm), com o fluxo luminoso do parâmetro da luminária. A tabela mostra a iluminância média resultante.
+- **Parede** (tomadas, interruptores, arandelas…): pontos ao longo do perímetro com espaçamento máximo e afastamento dos cantos. Um raio procura a parede atrás de cada ponto; onde não há parede (porta, janela, vão), o ponto é pulado.
+- Cada ponto é fixado na superfície real (laje ou forro acima, piso abaixo, face da parede). Pontos já existentes no mesmo lugar não são duplicados.
+- Todo ponto, inclusive o locado à mão, guarda o ambiente em que está (parâmetro **Ambiente**, exportado no IFC). A Planta 2D mostra nome, número e área de cada ambiente numa posição livre de instalações.
+
+### Circuitos e quadro de cargas
+
+Na aba **Circuitos**, escolha o quadro (um *Quadro de distribuição* locado) e o sistema de alimentação dele (1F+N 127 V, 1F+N 220 V, 2F+N 127/220 V, 3F+N 127/220 V ou 3F+N 220/380 V).
+
+1. Selecione pontos (Ctrl+clique, lista de pontos ou *Selecionar sem circuito*) e clique em **Novo circuito com a seleção**. O tipo (iluminação, TUG, TUE) é sugerido pelos pontos; nome, descrição, fases (mono, bi, tri), ligação (A, B, C, AB…), fator de potência, FCA e queda máxima são editáveis.
+2. **Gerar traçado de Cx até o quadro** cria os eletrodutos em cadeia, já marcados com o circuito.
+3. O **quadro de cargas** calcula, para cada circuito:
+   - **Potência:** soma dos pontos (VA; em W dividido pelo fator de potência).
+   - **Corrente:** pela tensão do quadro (F-N no monofásico, F-F no bi e no trifásico).
+   - **Comprimento até o ponto mais distante:** pelo traçado de eletrodutos e eletrocalhas, passando pelos tês. Sem traçado, é estimado e aparece com `*`.
+   - **Disjuntor:** a menor corrente nominal ≥ Ib.
+   - **Seção:** a maior entre a mínima (1,5 mm² iluminação, 2,5 mm² força), a de capacidade de condução com In ≤ Iz (NBR 5410 tabela 36, método B1, cobre/PVC 70 °C, 30 °C, multiplicada pelo **FCA** de agrupamento e temperatura) e a de queda de tensão. O critério que definiu a seção é indicado.
+4. **Balancear fases** distribui os circuitos do mais carregado para o menos carregado. O rodapé mostra a carga e a corrente por fase e o desequilíbrio.
+5. **Exportar quadro de cargas (CSV)** gera a tabela para o Excel.
+
+O nome do circuito aparece nas etiquetas da planta, dos pontos e dos trechos (renomear atualiza tudo). No IFC exportado, cada circuito vira um `IfcDistributionCircuit` (ex.: `QD1-C3`) com seus pontos e trechos. Os circuitos são salvos no arquivo de projeto (versão 3).
+
+Valores de capacidade de condução e fatores devem ser conferidos com a edição vigente da NBR 5410 e com os critérios do projeto. Fator de demanda e diagrama unifilar ainda não estão implementados.
 
 ### Planta 2D e pranchas
 
@@ -194,14 +228,18 @@ Concluído (etapa 3, planta 2D):
 - ✅ Planta por pavimento a partir do corte do IFC, com simbologia, etiquetas, legenda automática e carimbo.
 - ✅ Pranchas A0–A4 em escala; exportação PDF, DXF (camadas) e SVG.
 
+Concluído (etapa 4, ambientes e circuitos):
+- ✅ Locação por ambiente (`IfcSpace`) pelo contorno real: grade alinhada, método dos lúmens e perímetro com detecção de vãos.
+- ✅ Circuitos ligados ao quadro, quadro de cargas com dimensionamento, balanceamento de fases, traçado do circuito e `IfcDistributionCircuit`.
+
 Próximas etapas:
 - Rota automática com **desvio de obstáculos** (busca em grade evitando vigas, pilares e outras redes) e tronco compartilhado entre pontos.
 - Edição geométrica de trechos (arrastar vértice, dividir, unir), reduções e pontos de conexão definidos por equipamento.
-- Locação por **ambiente** (`IfcSpace`): distribuir luminárias, sprinklers e detectores pelo contorno real do ambiente, com área, iluminância e cobertura.
 - Biblioteca editável pelo usuário (tipos próprios, dimensões, alturas e parâmetros do escritório), com importação e exportação.
 - Cópia e matriz de pontos, alinhamento, distância a cantos e vãos, cotas.
 - Dutos de ar e leitos para cabos no traçado.
-- Sistemas e conectividade (portas IFC), circuitos ligados ao quadro, verificação de redes desconectadas.
+- Diagrama unifilar e fatores de demanda no quadro de cargas; quadros alimentando quadros (alimentadores).
+- Sistemas e conectividade (portas IFC), verificação de redes desconectadas.
 - Planta 2D: cotas, projeção dos elementos abaixo do corte, várias plantas por prancha, simbologia editável pelo escritório e diagrama unifilar e quadro de cargas.
 
 ### Fase 4 — dimensionamento integrado ao modelo

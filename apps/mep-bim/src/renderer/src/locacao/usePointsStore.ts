@@ -1,10 +1,12 @@
 import { useCallback, useMemo, useState } from "react";
 import type { PlacedPoint } from "../../../core/points";
 import type { Run } from "../../../core/runs";
+import type { Circuit } from "../../../core/circuits";
 
 interface ProjectState {
   points: PlacedPoint[];
   runs: Run[];
+  circuits: Circuit[];
 }
 
 interface History {
@@ -17,7 +19,7 @@ interface History {
 }
 
 const LIMIT = 200;
-const EMPTY: ProjectState = { points: [], runs: [] };
+const EMPTY: ProjectState = { points: [], runs: [], circuits: [] };
 
 type Patch<T> = (item: T) => Partial<T>;
 
@@ -42,7 +44,7 @@ export function usePointsStore() {
   const commit = useCallback((fn: (cur: ProjectState) => ProjectState, key: string | null = null) => {
     setH((s) => {
       const next = fn(s.present);
-      if (next.points === s.present.points && next.runs === s.present.runs) return s;
+      if (next.points === s.present.points && next.runs === s.present.runs && next.circuits === s.present.circuits) return s;
       if (key && key === s.lastKey) return { ...s, present: next, future: [] };
       return { ...s, past: [...s.past.slice(-LIMIT + 1), s.present], present: next, future: [], lastKey: key };
     });
@@ -66,9 +68,57 @@ export function usePointsStore() {
   );
   const removeRuns = useCallback((ids: number[]) => commit((cur) => ({ ...cur, runs: removeFrom(cur.runs, ids) })), [commit]);
 
+  // ---- Circuitos -----------------------------------------------------------------
+  /** Mantém o parâmetro "Circuito" (nome exibido e exportado) igual ao nome do circuito. */
+  const syncNames = (st: ProjectState): ProjectState => {
+    const byUid = new Map(st.circuits.map((c) => [c.uid, c.name]));
+    const fix = <T extends { circuit?: string | null; params: Record<string, string | number> }>(list: T[]): T[] => {
+      let changed = false;
+      const next = list.map((x) => {
+        if (!x.circuit) return x;
+        const name = byUid.get(x.circuit);
+        if (name === undefined) {
+          changed = true;
+          const { Circuito: _drop, ...params } = x.params;
+          return { ...x, circuit: null, params };
+        }
+        if (x.params.Circuito === name) return x;
+        changed = true;
+        return { ...x, params: { ...x.params, Circuito: name } };
+      });
+      return changed ? next : list;
+    };
+    return { ...st, points: fix(st.points), runs: fix(st.runs) };
+  };
+
+  const addCircuits = useCallback((cs: Circuit[]) => cs.length && commit((cur) => ({ ...cur, circuits: [...cur.circuits, ...cs] })), [commit]);
+  const updateCircuits = useCallback(
+    (ids: number[], patch: Patch<Circuit>, key: string | null = null) =>
+      commit((cur) => syncNames({ ...cur, circuits: patchList(cur.circuits, ids, patch) }), key && `c:${key}:${ids.join(",")}`),
+    [commit],
+  );
+  const removeCircuits = useCallback((ids: number[]) => commit((cur) => syncNames({ ...cur, circuits: removeFrom(cur.circuits, ids) })), [commit]);
+  /** Liga pontos a um circuito (uid) ou os desliga (null). */
+  const assignPoints = useCallback(
+    (pointIds: number[], circuitUid: string | null) =>
+      commit((cur) => {
+        const set = new Set(pointIds);
+        const points = cur.points.map((p) => {
+          if (!set.has(p.id)) return p;
+          if (circuitUid) return { ...p, circuit: circuitUid };
+          const { Circuito: _drop, ...params } = p.params;
+          return { ...p, circuit: null, params };
+        });
+        return syncNames({ ...cur, points });
+      }),
+    [commit],
+  );
+  /** Aplica uma alteração livre ao projeto inteiro (um passo de desfazer). */
+  const mutate = useCallback((fn: (cur: ProjectState) => ProjectState) => commit((cur) => syncNames(fn(cur))), [commit]);
+
   /** Substitui todo o projeto e zera o histórico (abrir arquivo ou novo modelo). */
-  const reset = useCallback((points: PlacedPoint[], runs: Run[] = []) => {
-    const state = { points, runs };
+  const reset = useCallback((points: PlacedPoint[], runs: Run[] = [], circuits: Circuit[] = []) => {
+    const state = { points, runs, circuits };
     setH({ past: [], present: state, future: [], saved: state, lastKey: null });
   }, []);
 
@@ -96,22 +146,28 @@ export function usePointsStore() {
     () => ({
       points: h.present.points,
       runs: h.present.runs,
+      circuits: h.present.circuits,
       canUndo: h.past.length > 0,
       canRedo: h.future.length > 0,
       dirty: h.present !== h.saved,
-      isEmpty: !h.present.points.length && !h.present.runs.length,
+      isEmpty: !h.present.points.length && !h.present.runs.length && !h.present.circuits.length,
       add,
       update,
       remove,
       addRuns,
       updateRuns,
       removeRuns,
+      addCircuits,
+      updateCircuits,
+      removeCircuits,
+      assignPoints,
+      mutate,
       reset,
       markSaved,
       undo,
       redo,
     }),
-    [h, add, update, remove, addRuns, updateRuns, removeRuns, reset, markSaved, undo, redo],
+    [h, add, update, remove, addRuns, updateRuns, removeRuns, addCircuits, updateCircuits, removeCircuits, assignPoints, mutate, reset, markSaved, undo, redo],
   );
 }
 

@@ -24,6 +24,8 @@ export interface PlacedPoint {
   storey: string | null;
   system: string;
   params: Record<string, string | number>;
+  /** Circuito (uid) ao qual o ponto pertence. */
+  circuit?: string | null;
 }
 
 export interface StoreyLevel {
@@ -167,11 +169,12 @@ interface StoredPoint {
   pavimento: string | null;
   sistema: string;
   parametros: Record<string, string | number>;
+  circuito?: string | null;
 }
 
 export interface LocacaoFile {
   formato: typeof LOCACAO_FORMAT;
-  versao: 1 | 2;
+  versao: 1 | 2 | 3;
   modeloIfc: string | null;
   salvoEm: string;
   pontos: StoredPoint[];
@@ -194,6 +197,7 @@ export function serializePoints(points: PlacedPoint[], cs: CoordinateSystem, mod
       pavimento: p.storey,
       sistema: p.system,
       parametros: p.params,
+      ...(p.circuit ? { circuito: p.circuit } : {}),
     })),
   };
 }
@@ -218,6 +222,7 @@ export function deserializePoints(json: unknown, cs: CoordinateSystem): PlacedPo
       storey: s.pavimento,
       system: s.sistema,
       params: s.parametros ?? {},
+      circuit: s.circuito ?? null,
     };
   });
 }

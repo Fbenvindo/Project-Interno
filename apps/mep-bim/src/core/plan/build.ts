@@ -99,19 +99,6 @@ export function buildPlan(input: PlanInput): PlanDrawing {
     }
   }
 
-  // ---- Ambientes: número/nome e área ----------------------------------------------------
-  if (input.disciplines.has("arquitetura")) {
-    for (const sp of input.spaces ?? []) {
-      if (sp.storey !== storey) continue;
-      let c = centroid(sp.polygon);
-      if (!pointInPolygon(c, sp.polygon)) c = sp.polygon[0];
-      const h = 2.5 * m;
-      prims.push({ t: "text", p: [c[0], c[1] + h * 0.7], text: (sp.name || sp.number).toUpperCase(), height: h, anchor: "middle", layer: "ARQ-AMBIENTES", color: "#333333" });
-      const area = `${sp.number ? sp.number + " · " : ""}${sp.area.toFixed(2).replace(".", ",")} m²`;
-      prims.push({ t: "text", p: [c[0], c[1] - h * 0.7], text: area, height: 2 * m, anchor: "middle", layer: "ARQ-AMBIENTES", color: "#555555" });
-    }
-  }
-
   // ---- Pontos locados ------------------------------------------------------------------
   const textH = 1.8 * m;
   const place = (local: P2, origin: P2, r: P2, f: P2): P2 => [origin[0] + (local[0] * r[0] + local[1] * f[0]) * m, origin[1] + (local[0] * r[1] + local[1] * f[1]) * m];
@@ -168,9 +155,11 @@ export function buildPlan(input: PlanInput): PlanDrawing {
         const dist = Math.max(sym.labelOffset * m, sym.footprint ? d + 2 * m : 0);
         at = [origin[0] + f[0] * dist, origin[1] + f[1] * dist];
       } else {
-        // À direita do contorno real (ou do símbolo), centrado na vertical.
-        const extent = sym.footprint ? (Math.abs(r[0]) * w + Math.abs(f[0]) * d) / 2 : 2.2 * m;
-        at = [center[0] + extent + 1.5 * m, center[1]];
+        // No canto superior direito do contorno real (ou do símbolo), fora do eixo
+        // por onde os eletrodutos costumam chegar ao centro do ponto.
+        const extentX = sym.footprint ? (Math.abs(r[0]) * w + Math.abs(f[0]) * d) / 2 : 2.2 * m;
+        const extentY = sym.footprint ? (Math.abs(r[1]) * w + Math.abs(f[1]) * d) / 2 : 2.2 * m;
+        at = [center[0] + extentX + 1.2 * m, center[1] + extentY + 0.6 * m];
       }
       // Parede "vertical" na planta: texto alinhado a partir do símbolo; "horizontal": centrado acima/abaixo.
       const anchor = !wall ? "start" : Math.abs(f[0]) > Math.abs(f[1]) ? (f[0] > 0 ? "start" : "end") : "middle";
@@ -260,6 +249,32 @@ export function buildPlan(input: PlanInput): PlanDrawing {
     if (!input.disciplines.has(t.discipline)) continue;
     pushSymbol(TEE_MARK, plan(fit.position), [1, 0], [0, 1], `${LAYER_PREFIX[t.discipline]}-TRECHOS`, PRINT_COLOR[t.discipline]);
     if (!legend.has("te")) legend.set("te", { key: "te", label: "Derivação (tê)", color: "#333333", prims: TEE_MARK });
+  }
+
+  // ---- Ambientes: número/nome e área (posição livre de instalações, se possível) -------------
+  if (input.disciplines.has("arquitetura")) {
+    const mepBoxes = prims
+      .filter((p) => !/^(ARQ|EST|OUT)-/.test(p.layer))
+      .map((p) => boundsOf([p]))
+      .filter((b): b is NonNullable<typeof b> => b != null);
+    const free = (minX: number, minY: number, maxX: number, maxY: number) =>
+      !mepBoxes.some((b) => b.min[0] < maxX && b.max[0] > minX && b.min[1] < maxY && b.max[1] > minY);
+    for (const sp of input.spaces ?? []) {
+      if (sp.storey !== storey) continue;
+      const h = 2.5 * m;
+      const title = (sp.name || sp.number).toUpperCase();
+      const area = `${sp.number ? sp.number + " · " : ""}${sp.area.toFixed(2).replace(".", ",")} m²`;
+      const halfW = (Math.max(title.length * 0.62 * h, area.length * 0.55 * 2 * m) / 2) * 1.1;
+      const ys = sp.polygon.map((q) => q[1]);
+      const H = Math.max(...ys) - Math.min(...ys);
+      let c = centroid(sp.polygon);
+      if (!pointInPolygon(c, sp.polygon)) c = sp.polygon[0];
+      const options = [0, -0.18, 0.18, -0.3, 0.3, -0.4, 0.4].map((k): P2 => [c[0], c[1] + k * H]);
+      const best =
+        options.find((o) => pointInPolygon(o, sp.polygon) && free(o[0] - halfW, o[1] - 1.6 * h, o[0] + halfW, o[1] + 1.6 * h)) ?? c;
+      prims.push({ t: "text", p: [best[0], best[1] + h * 0.7], text: title, height: h, anchor: "middle", layer: "ARQ-AMBIENTES", color: "#333333" });
+      prims.push({ t: "text", p: [best[0], best[1] - h * 0.7], text: area, height: 2 * m, anchor: "middle", layer: "ARQ-AMBIENTES", color: "#555555" });
+    }
   }
 
   // Ordem de desenho: modelo, trechos, símbolos e, por cima, os textos.

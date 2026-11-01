@@ -4,6 +4,7 @@
 import { COMPONENT_BY_ID } from "./library";
 import type { CoordinateSystem } from "./math";
 import { newGuid, storeyAt, type PlacedPoint, type StoreyLevel } from "./points";
+import type { Circuit } from "./circuits";
 import { derivedGuid, runFittings, runSegments, RUN_TYPE_BY_ID, segmentBasis, type Run } from "./runs";
 import type { Vec3 } from "./types";
 
@@ -58,9 +59,11 @@ export interface ExportOptions {
   cs: CoordinateSystem;
   /** Trechos de tubulação, eletroduto e eletrocalha a exportar junto. */
   runs?: Run[];
+  /** Circuitos: exportados como IfcDistributionCircuit com seus pontos e trechos. */
+  circuits?: Circuit[];
 }
 
-export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs, runs = [] }: ExportOptions): string {
+export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs, runs = [], circuits = [] }: ExportOptions): string {
   const w = new StepWriter();
   const MM = 1000;
   const pt = ([x, y, z]: Vec3) => w.add(`IFCCARTESIANPOINT((${num(x)},${num(y)},${num(z)}))`);
@@ -97,6 +100,7 @@ export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs,
   const origin2d = w.add(`IFCAXIS2PLACEMENT2D(${ref(w.add("IFCCARTESIANPOINT((0.,0.))"))},$)`);
   const solidPosition = w.add(`IFCAXIS2PLACEMENT3D(${ref(pt([0, 0, 0]))},$,$)`);
   const systems = new Map<string, { type: string; members: number[] }>();
+  const circuitMembers = new Map<string, number[]>();
 
   for (const p of points) {
     const def = COMPONENT_BY_ID[p.componentId];
@@ -118,6 +122,7 @@ export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs,
     const el = w.add(
       `IFC${def.ifcType.replace(/^IFC/, "")}('${p.guid}',$,${str(`${p.tag} - ${def.label}`)},$,${str(def.label)},${ref(objPlacement)},${ref(shape)},${str(p.tag)},.${def.predefinedType}.)`,
     );
+    if (p.circuit) circuitMembers.set(p.circuit, [...(circuitMembers.get(p.circuit) ?? []), el]);
 
     const props: number[] = [
       w.add(`IFCPROPERTYSINGLEVALUE('Etiqueta',$,IFCLABEL(${str(p.tag)}),$)`),
@@ -180,6 +185,7 @@ export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs,
       const el = w.add(
         `IFC${t.segmentType.replace(/^IFC/, "")}('${derivedGuid(r.guid, seg.index)}',$,${str(`${r.tag} - ${t.label} ${r.size.label}`)},$,${str(t.label)},${ref(pl)},${ref(shape)},${str(r.tag)},.${t.segmentPredefined}.)`,
       );
+      if (r.circuit) circuitMembers.set(r.circuit, [...(circuitMembers.get(r.circuit) ?? []), el]);
       const props = [
         w.add(`IFCPROPERTYSINGLEVALUE('Etiqueta',$,IFCLABEL(${str(r.tag)}),$)`),
         w.add(`IFCPROPERTYSINGLEVALUE('Bitola',$,IFCLABEL(${str(r.size.label)}),$)`),
@@ -231,6 +237,17 @@ export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs,
   for (const [name, s] of systems) {
     const sys = w.add(`IFCDISTRIBUTIONSYSTEM('${newGuid()}',$,${str(name)},$,$,$,.${s.type}.)`);
     w.add(`IFCRELASSIGNSTOGROUP('${newGuid()}',$,$,$,${list(s.members)},$,${ref(sys)})`);
+  }
+
+  const panelTag = new Map(points.map((p) => [p.guid, p.tag]));
+  for (const c of circuits) {
+    const members = circuitMembers.get(c.uid);
+    if (!members?.length) continue;
+    const name = `${panelTag.get(c.panel) ?? "QD"}-${c.name}`;
+    const circ = w.add(
+      `IFCDISTRIBUTIONCIRCUIT('${/^[0-3][0-9A-Za-z_$]{21}$/.test(c.uid) ? c.uid : newGuid()}',$,${str(name)},${str(c.description || null)},$,${str(c.description || null)},.${c.type === "iluminacao" ? "LIGHTING" : "ELECTRICAL"}.)`,
+    );
+    w.add(`IFCRELASSIGNSTOGROUP('${newGuid()}',$,$,$,${list(members)},$,${ref(circ)})`);
   }
 
   const fileName = `${(modelName ?? "modelo").replace(/\.ifc$/i, "")}-locacao-mep.ifc`;

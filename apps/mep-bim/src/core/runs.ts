@@ -90,6 +90,8 @@ export interface Run {
   /** Eixo do trecho (cena). */
   vertices: Vec3[];
   params: Record<string, string | number>;
+  /** Circuito (uid) cujos condutores passam por este trecho. */
+  circuit?: string | null;
 }
 
 let runSerial = 1;

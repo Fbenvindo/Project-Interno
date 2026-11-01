@@ -15,6 +15,7 @@ import { CalcPanel } from "./components/CalcPanel";
 import type { OpenedFile } from "../../shared/ipc";
 import { LocacaoPanel } from "./locacao/LocacaoPanel";
 import { TracadoPanel } from "./tracado/TracadoPanel";
+import { CircuitosPanel } from "./circuitos/CircuitosPanel";
 import { PlanView } from "./planta/PlanView";
 import { PlantaPanel, type PlanSettings } from "./planta/PlantaPanel";
 import { buildPlan } from "../../core/plan/build";
@@ -23,12 +24,13 @@ import { DISCIPLINES } from "../../core/disciplines";
 import { connectedPairs, runElements, runFittings, runIdOfElement, runProperties, runSegments, RUN_TYPE_BY_ID, segmentElementId, fittingElementId } from "../../core/runs";
 import { usePointsStore } from "./locacao/usePointsStore";
 
-type Tab = "modelo" | "locacao" | "tracado" | "planta" | "quantitativos" | "interferencias" | "dimensionamento";
+type Tab = "modelo" | "locacao" | "tracado" | "circuitos" | "planta" | "quantitativos" | "interferencias" | "dimensionamento";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "modelo", label: "Modelo" },
   { id: "locacao", label: "Locação" },
   { id: "tracado", label: "Traçado" },
+  { id: "circuitos", label: "Circuitos" },
   { id: "planta", label: "Planta 2D" },
   { id: "quantitativos", label: "Quantitativos" },
   { id: "interferencias", label: "Interferências" },
@@ -464,6 +466,9 @@ export function App() {
               onSelect={selectPoints}
               systems={allSystems}
             />
+          )}
+          {tab === "circuitos" && model && (
+            <CircuitosPanel model={model} fileName={fileName} store={store} selection={selection} onSelect={selectPoints} />
           )}
           {tab === "planta" && model && planSettings && planDrawing && planSheet && (
             <PlantaPanel

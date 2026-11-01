@@ -712,3 +712,26 @@ summary {
   border-radius: 6px;
   padding: 2px 6px;
 }
+
+/* ---- Circuitos ------------------------------------------------------------ */
+.grid-table.loads td,
+.grid-table.loads th {
+  padding: 5px 4px;
+}
+.active-row td {
+  background: #1f2a3a;
+}
+.phase-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 10px 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.phase-bar b {
+  color: var(--text);
+}
+.status.warn.small {
+  margin: 6px 0;
+}

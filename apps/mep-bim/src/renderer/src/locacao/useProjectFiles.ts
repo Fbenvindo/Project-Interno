@@ -12,7 +12,7 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel, fileName
   const [message, setMessage] = useState<string | null>(null);
 
   const save = useCallback(async () => {
-    const json = JSON.stringify(serializeProject({ points: store.points, runs: store.runs }, model.coordinates, fileName), null, 2);
+    const json = JSON.stringify(serializeProject({ points: store.points, runs: store.runs, circuits: store.circuits }, model.coordinates, fileName), null, 2);
     const saved = await saveFile({
       defaultName: `${base(fileName)}.locacao.json`,
       content: json,
@@ -30,12 +30,12 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel, fileName
     if (!file) return;
     try {
       const json = JSON.parse(file.content);
-      const { points, runs } = deserializeProject(json, model.coordinates);
-      store.reset(points, runs);
+      const { points, runs, circuits } = deserializeProject(json, model.coordinates);
+      store.reset(points, runs, circuits);
       onOpened?.();
       const other = json.modeloIfc && fileName && json.modeloIfc !== fileName;
       setMessage(
-        `${points.length} pontos e ${runs.length} trechos carregados de ${file.name}.${other ? ` Atenção: salvos para o modelo "${json.modeloIfc}".` : ""}`,
+        `${points.length} pontos, ${runs.length} trechos e ${circuits.length} circuitos carregados de ${file.name}.${other ? ` Atenção: salvos para o modelo "${json.modeloIfc}".` : ""}`,
       );
     } catch (e) {
       setMessage(`Não foi possível abrir: ${e instanceof Error ? e.message : e}`);
@@ -43,7 +43,7 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel, fileName
   }, [store, model.coordinates, fileName, onOpened]);
 
   const exportIfc = useCallback(async () => {
-    const text = exportPointsIfc(store.points, { modelName: fileName, storeys: model.storeyLevels, cs: model.coordinates, runs: store.runs });
+    const text = exportPointsIfc(store.points, { modelName: fileName, storeys: model.storeyLevels, cs: model.coordinates, runs: store.runs, circuits: store.circuits });
     const saved = await saveFile({
       defaultName: `${base(fileName)}-mep.ifc`,
       content: text,

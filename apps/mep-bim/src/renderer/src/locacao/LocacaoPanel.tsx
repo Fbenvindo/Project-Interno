@@ -556,6 +556,8 @@ function PointEditor({
           <label>
             Circuito
             <input
+              disabled={points.some((p) => p.circuit)}
+              title={points.some((p) => p.circuit) ? "Circuito gerenciado na aba Circuitos" : undefined}
               value={commonCircuit}
               placeholder={commonCircuit || points.length === 1 ? "" : "(vários)"}
               onChange={(e) => store.update(ids, (p) => ({ params: { ...p.params, Circuito: e.target.value } }), "circuito")}

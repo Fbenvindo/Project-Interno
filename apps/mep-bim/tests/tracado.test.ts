@@ -193,8 +193,8 @@ describe("arquivo e IFC", () => {
   it("salva e reabre trechos em coordenadas do projeto (lê também a versão 1)", () => {
     const cs = model.coordinates;
     const r = makeRun("esgoto", [cs.ifcToWorld([1, 1, 0.5]), cs.ifcToWorld([1, 1, 2.5]), cs.ifcToWorld([4, 1, 2.5])], "Ø100");
-    const json = JSON.parse(JSON.stringify(serializeProject({ points: [], runs: [r] }, cs, "x.ifc")));
-    expect(json.versao).toBe(2);
+    const json = JSON.parse(JSON.stringify(serializeProject({ points: [], runs: [r], circuits: [] }, cs, "x.ifc")));
+    expect(json.versao).toBe(3);
     close(json.trechos[0].vertices[2], [4, 1, 2.5]);
     const other = new CoordinateSystem([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 3, 2, 1, 1]);
     const back = deserializeProject(json, other);
