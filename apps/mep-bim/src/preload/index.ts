@@ -8,6 +8,7 @@ const api: DesktopApi = {
   takePendingIfc: () => ipcRenderer.invoke("ifc:pending"),
   saveFile: (req) => ipcRenderer.invoke("file:save", req),
   openTextFile: (filters) => ipcRenderer.invoke("file:openText", filters),
+  savePdf: (req) => ipcRenderer.invoke("file:savePdf", req),
   on(channel, cb) {
     if (!ALLOWED.has(channel)) throw new Error(`Canal não permitido: ${channel}`);
     const listener = () => cb();

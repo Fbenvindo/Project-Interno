@@ -1,7 +1,7 @@
 // Acesso à plataforma: usa a API do Electron quando disponível e, no navegador
 // (modo de desenvolvimento "dev:web"), recorre a <input type=file> e download.
 import { IfcAPI } from "web-ifc";
-import type { DesktopApi, FileFilter, OpenedFile, OpenedTextFile, SaveRequest } from "../../shared/ipc";
+import type { DesktopApi, FileFilter, OpenedFile, OpenedTextFile, PdfRequest, SaveRequest } from "../../shared/ipc";
 
 declare global {
   interface Window {
@@ -48,6 +48,21 @@ export async function openTextFile(filters: FileFilter[]): Promise<OpenedTextFil
     };
     input.click();
   });
+}
+
+/** PDF da prancha: no app desktop, gerado direto; no navegador, pela janela de impressão. */
+export async function savePdf(req: PdfRequest): Promise<string | null> {
+  if (desktop) return desktop.savePdf(req);
+  const w = window.open("", "_blank");
+  if (!w) return null;
+  w.document.write(
+    `<!doctype html><html><head><title>${req.defaultName}</title><style>@page{size:${req.widthMm}mm ${req.heightMm}mm;margin:0}` +
+      `html,body{margin:0}svg{display:block;width:${req.widthMm}mm;height:${req.heightMm}mm}</style></head><body>${req.svg}</body></html>`,
+  );
+  w.document.close();
+  w.focus();
+  w.print();
+  return req.defaultName;
 }
 
 let ifcApi: Promise<IfcAPI> | null = null;

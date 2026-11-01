@@ -15,15 +15,21 @@ import { CalcPanel } from "./components/CalcPanel";
 import type { OpenedFile } from "../../shared/ipc";
 import { LocacaoPanel } from "./locacao/LocacaoPanel";
 import { TracadoPanel } from "./tracado/TracadoPanel";
+import { PlanView } from "./planta/PlanView";
+import { PlantaPanel, type PlanSettings } from "./planta/PlantaPanel";
+import { buildPlan } from "../../core/plan/build";
+import { renderSheet } from "../../core/plan/sheet";
+import { DISCIPLINES } from "../../core/disciplines";
 import { connectedPairs, runElements, runFittings, runIdOfElement, runProperties, runSegments, RUN_TYPE_BY_ID, segmentElementId, fittingElementId } from "../../core/runs";
 import { usePointsStore } from "./locacao/usePointsStore";
 
-type Tab = "modelo" | "locacao" | "tracado" | "quantitativos" | "interferencias" | "dimensionamento";
+type Tab = "modelo" | "locacao" | "tracado" | "planta" | "quantitativos" | "interferencias" | "dimensionamento";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "modelo", label: "Modelo" },
   { id: "locacao", label: "Locação" },
   { id: "tracado", label: "Traçado" },
+  { id: "planta", label: "Planta 2D" },
   { id: "quantitativos", label: "Quantitativos" },
   { id: "interferencias", label: "Interferências" },
   { id: "dimensionamento", label: "Dimensionamento" },
@@ -57,6 +63,7 @@ export function App() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [selection, setSelection] = useState<number[]>([]);
   const [colorMode, setColorMode] = useState<ColorMode>("disciplina");
+  const [planSettings, setPlanSettings] = useState<PlanSettings | null>(null);
 
   const store = usePointsStore();
   const pointElements = useMemo(() => store.points.map(pointToElement), [store.points]);
@@ -65,6 +72,56 @@ export function App() {
   const elementById = useMemo(() => new Map(allElements.map((e) => [e.expressID, e])), [allElements]);
   const connected = useMemo(() => connectedPairs(store.runs, store.points), [store.runs, store.points]);
   const meshById = useMemo(() => new Map(model?.meshes.map((m) => [m.expressID, m]) ?? []), [model]);
+
+  // ---- Planta 2D ---------------------------------------------------------------
+  const planAvailable = useMemo(() => DISCIPLINES.map((d) => d.id).filter((d) => allElements.some((e) => e.discipline === d)), [allElements]);
+  useEffect(() => {
+    if (!model || planSettings) return;
+    // Pavimento padrão: o que tem mais pontos e trechos; senão, o que tem mais paredes.
+    const score = new Map<string, number>();
+    for (const p of store.points) if (p.storey) score.set(p.storey, (score.get(p.storey) ?? 0) + 10);
+    for (const e of model.elements) if (e.storey && e.ifcType.startsWith("IFCWALL")) score.set(e.storey, (score.get(e.storey) ?? 0) + 1);
+    const storey = [...score.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? model.storeys[0] ?? "";
+    setPlanSettings({
+      storey,
+      cutHeight: 1.2,
+      scale: 50,
+      format: "A1",
+      disciplines: DISCIPLINES.map((d) => d.id),
+      labels: { tags: true, circuits: true, power: true, sizes: true },
+      info: {
+        projeto: (fileName ?? "").replace(/\.ifc$/i, ""),
+        conteudo: "",
+        responsavel: "",
+        data: new Date().toLocaleDateString("pt-BR"),
+        revisao: "R00",
+        folha: "01/01",
+      },
+    });
+  }, [model, planSettings, store.points, fileName]);
+
+  const planDrawing = useMemo(() => {
+    if (tab !== "planta" || !model || !planSettings) return null;
+    return buildPlan({
+      elements: model.elements,
+      meshes: meshById,
+      cs: model.coordinates,
+      storeyLevels: model.storeyLevels,
+      storey: planSettings.storey,
+      cutHeight: planSettings.cutHeight,
+      points: store.points,
+      runs: store.runs,
+      scale: planSettings.scale,
+      disciplines: new Set(planSettings.disciplines),
+      labels: planSettings.labels,
+    });
+  }, [tab, model, meshById, planSettings, store.points, store.runs]);
+
+  const planSheet = useMemo(() => {
+    if (!planDrawing || !planSettings) return null;
+    const info = { ...planSettings.info, conteudo: planSettings.info.conteudo || `Instalações MEP — Planta ${planSettings.storey}` };
+    return renderSheet(planDrawing, planSettings.format, info);
+  }, [planDrawing, planSettings]);
   const allSystems = useMemo(
     () =>
       [...new Set([...(model?.systems ?? []), ...store.points.map((p) => p.system), ...store.runs.map((r) => r.system)].filter(Boolean))].sort((a, b) =>
@@ -184,6 +241,7 @@ export function App() {
       const disciplineOf = new Map(loaded.elements.map((e) => [e.expressID, e.discipline]));
       viewerRef.current!.load(loaded.meshes, (id) => DISCIPLINE_BY_ID[disciplineOf.get(id) ?? "outros"].color);
       store.reset([], []);
+      setPlanSettings(null);
       setModel(loaded);
       setFileName(file.name);
       setFilters(EMPTY_FILTERS);
@@ -342,6 +400,15 @@ export function App() {
 
         <section className="viewport">
           <div ref={viewerHost} className="viewer-host" />
+          {tab === "planta" && planSheet && (
+            <PlanView
+              sheet={planSheet}
+              selection={selection}
+              onSelect={(ids, additive) =>
+                setSelection((cur) => (additive ? [...new Set([...cur, ...ids])] : ids))
+              }
+            />
+          )}
           {!model && !progress && (
             <div className="welcome">
               <h1>Projetos MEP em BIM</h1>
@@ -367,7 +434,7 @@ export function App() {
               Erro ao abrir o modelo: {error}
             </div>
           )}
-          {model && tab !== "locacao" && tab !== "tracado" && <div className="hint">Clique para selecionar · Ctrl+clique para somar · duplo clique para enquadrar</div>}
+          {model && tab !== "locacao" && tab !== "tracado" && tab !== "planta" && <div className="hint">Clique para selecionar · Ctrl+clique para somar · duplo clique para enquadrar</div>}
         </section>
 
         <aside className="panel">
@@ -395,6 +462,17 @@ export function App() {
               selection={selection}
               onSelect={selectPoints}
               systems={allSystems}
+            />
+          )}
+          {tab === "planta" && model && planSettings && planDrawing && planSheet && (
+            <PlantaPanel
+              settings={planSettings}
+              onChange={setPlanSettings}
+              storeys={model.storeys}
+              drawing={planDrawing}
+              sheet={planSheet}
+              fileName={fileName}
+              available={planAvailable}
             />
           )}
           {tab === "quantitativos" && model && <QuantitiesPanel elements={visibleElements} fileName={fileName} onSelect={selectAndFrame} />}

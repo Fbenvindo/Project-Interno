@@ -650,3 +650,39 @@ summary {
   border: 1px solid var(--border);
   background: var(--bg);
 }
+
+/* ---- Planta 2D ---------------------------------------------------------- */
+.plan-view {
+  position: absolute;
+  inset: 0;
+  background: #d9dde3;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.plan-view:active {
+  cursor: grabbing;
+}
+.plan-view svg {
+  display: block;
+}
+.plan-view [data-id] {
+  cursor: pointer;
+}
+.plan-hint {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(28, 32, 39, 0.85);
+  color: var(--muted);
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.status.warn {
+  border: 1px solid var(--warn);
+  color: #ffcc80;
+}

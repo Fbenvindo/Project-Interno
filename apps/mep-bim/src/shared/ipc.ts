@@ -20,11 +20,20 @@ export interface OpenedTextFile {
 
 export type FileFilter = { name: string; extensions: string[] };
 
+export interface PdfRequest {
+  defaultName: string;
+  /** Documento SVG completo da prancha. */
+  svg: string;
+  widthMm: number;
+  heightMm: number;
+}
+
 export interface DesktopApi {
   openIfc(): Promise<OpenedFile | null>;
   /** Arquivo recebido pela linha de comando / sistema operacional, se houver. */
   takePendingIfc(): Promise<OpenedFile | null>;
   saveFile(req: SaveRequest): Promise<string | null>;
   openTextFile(filters: FileFilter[]): Promise<OpenedTextFile | null>;
+  savePdf(req: PdfRequest): Promise<string | null>;
   on(channel: "menu:open" | "menu:fit" | "ifc:pending-available", cb: () => void): () => void;
 }

@@ -1,8 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from "electron";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { basename, join, normalize, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { FileFilter, OpenedFile, OpenedTextFile, SaveRequest } from "../shared/ipc";
+import type { FileFilter, OpenedFile, OpenedTextFile, PdfRequest, SaveRequest } from "../shared/ipc";
 
 // Em produção o renderer é servido por um protocolo próprio (app://), com
 // origem estável e cabeçalho CSP, em vez de file://.
@@ -103,6 +103,35 @@ ipcMain.handle("file:openText", async (_e, filters: FileFilter[]): Promise<Opene
   if (res.canceled || !res.filePaths[0]) return null;
   const path = res.filePaths[0];
   return { name: basename(path), path, content: await readFile(path, "utf8") };
+});
+
+// Prancha em PDF: o SVG é impresso por uma janela oculta, sem JavaScript, no tamanho exato do formato.
+ipcMain.handle("file:savePdf", async (_e, req: PdfRequest): Promise<string | null> => {
+  const res = await dialog.showSaveDialog(mainWindow!, {
+    title: "Exportar prancha em PDF",
+    defaultPath: req.defaultName,
+    filters: [{ name: "PDF", extensions: ["pdf"] }],
+  });
+  if (res.canceled || !res.filePath) return null;
+  const html =
+    `<!doctype html><html><head><meta charset="utf-8"><style>@page{size:${req.widthMm}mm ${req.heightMm}mm;margin:0}` +
+    `html,body{margin:0;padding:0}svg{display:block;width:${req.widthMm}mm;height:${req.heightMm}mm}</style></head><body>${req.svg}</body></html>`;
+  const tmp = join(app.getPath("temp"), `mep-bim-prancha-${Date.now()}.html`);
+  await writeFile(tmp, html, "utf8");
+  const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false } });
+  try {
+    await win.loadFile(tmp);
+    const pdf = await win.webContents.printToPDF({
+      printBackground: true,
+      preferCSSPageSize: true,
+      margins: { top: 0, bottom: 0, left: 0, right: 0 },
+    });
+    await writeFile(res.filePath, pdf);
+  } finally {
+    win.destroy();
+    await rm(tmp, { force: true });
+  }
+  return res.filePath;
 });
 
 ipcMain.handle("file:save", async (_e, req: SaveRequest): Promise<string | null> => {
