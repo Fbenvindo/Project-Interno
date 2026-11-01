@@ -11,6 +11,7 @@ const copies = [
   [join(root, "node_modules", "web-ifc", "web-ifc.wasm"), join(pub, "wasm", "web-ifc.wasm")],
   [join(root, "samples", "exemplo-mep.ifc"), join(pub, "samples", "exemplo-mep.ifc")],
   [join(root, "samples", "carimbo-exemplo.dxf"), join(pub, "samples", "carimbo-exemplo.dxf")],
+  [join(root, "samples", "familias-exemplo.sebfam"), join(pub, "samples", "familias-exemplo.sebfam")],
 ];
 
 for (const [src, dest] of copies) {

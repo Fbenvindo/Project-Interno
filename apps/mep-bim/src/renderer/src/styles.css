@@ -1428,3 +1428,41 @@ h3 {
   flex-direction: column;
   gap: 4px;
 }
+
+/* ---- Biblioteca de famílias do Revit ----------------------------------------- */
+.tag-revit {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--sel-bg);
+  color: var(--cyan-text);
+  flex-shrink: 0;
+}
+.lib-package h3 {
+  font-size: 13.5px;
+}
+.lib-family {
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+.lib-family-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 2px;
+  border: none;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.lib-family-body {
+  padding: 0 2px 8px;
+}
+.biblioteca ol {
+  padding-left: 18px;
+  line-height: 1.5;
+}

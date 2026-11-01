@@ -103,7 +103,7 @@ const SYMBOLS: Record<string, Omit<SymbolDef, "description">> = {
 const HEIGHT_TEXT = (def: ComponentDef) => (def.mounting === "parede" ? ` (h = ${def.defaultHeight} mm)` : "");
 
 export function symbolFor(def: ComponentDef): SymbolDef {
-  const s = SYMBOLS[def.id] ?? { footprint: true, prims: [circle(1.5)], labelOffset: 4 };
+  const s = SYMBOLS[def.id] ?? (def.symbolOf ? SYMBOLS[def.symbolOf] : undefined) ?? { footprint: true, prims: [circle(1.5)], labelOffset: 4 };
   return { ...s, description: `${def.label}${HEIGHT_TEXT(def)}` };
 }
 

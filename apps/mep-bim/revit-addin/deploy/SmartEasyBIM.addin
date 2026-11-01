@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>SmartEasyBIM</Name>
+    <Assembly>SmartEasyBIM\SmartEasyBIM.Revit.dll</Assembly>
+    <AddInId>6F1B7C2E-3D4A-4E8B-9C11-5A7B2C9D0E31</AddInId>
+    <FullClassName>SmartEasyBIM.Revit.App</FullClassName>
+    <VendorId>SMEB</VendorId>
+    <VendorDescription>SmartEasyBIM - projetos MEP em BIM</VendorDescription>
+  </AddIn>
+</RevitAddIns>

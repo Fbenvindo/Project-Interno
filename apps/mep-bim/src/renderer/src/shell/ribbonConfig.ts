@@ -22,7 +22,8 @@ export type ToolSpec =
   | { kind: "calc"; which: "eletrica" | "hidraulica" | "hvac" }
   | { kind: "quantitativos" }
   | { kind: "interferencias" }
-  | { kind: "pranchas" };
+  | { kind: "pranchas" }
+  | { kind: "biblioteca" };
 
 export type Tool = ToolSpec & { n: number };
 
@@ -117,6 +118,10 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
         { key: "salvar-projeto", label: "Salvar projeto", icon: "salvar", action: "salvarProjeto", needsModel: true },
         { key: "exportar-ifc", label: "Exportar IFC", icon: "exportar", action: "exportarIfc", needsModel: true },
       ],
+    },
+    {
+      label: "Biblioteca",
+      buttons: [{ key: "familias", label: "Famílias do Revit", icon: "familia", tool: { kind: "biblioteca" } }],
     },
     {
       label: "Fundo",

@@ -75,6 +75,12 @@ const P: Record<string, ReactNode> = {
       <path d="M8.5 8.5 L20 18 M8.5 15.5 L20 6" />
     </>
   ),
+  familia: (
+    <>
+      <path d="M12 3 L20 7.5 V16.5 L12 21 L4 16.5 V7.5 Z" />
+      <path d="M8 10 H16 M8 13.5 H16 M8 17 H13" />
+    </>
+  ),
   selecionar: <path d="M5 3 L19 12 L12.5 13.5 L16 20.5 L13.5 21.5 L10 14.5 L5 19 Z" />,
   propriedades: (
     <>

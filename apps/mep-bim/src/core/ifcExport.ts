@@ -110,8 +110,23 @@ export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs,
       def.shape === "cilindro"
         ? w.add(`IFCCIRCLEPROFILEDEF(.AREA.,$,${ref(origin2d)},${num(sw / 2)})`)
         : w.add(`IFCRECTANGLEPROFILEDEF(.AREA.,$,${ref(origin2d)},${num(sw)},${num(sd)})`);
-    const solid = w.add(`IFCEXTRUDEDAREASOLID(${ref(profile)},${ref(solidPosition)},${ref(zAxis)},${num(sh)})`);
-    const rep = w.add(`IFCSHAPEREPRESENTATION(${ref(context)},'Body','SweptSolid',${list([solid])})`);
+    let rep: number;
+    if (def.mesh && def.mesh.indices.length) {
+      // Família importada: malha triangulada. Eixos locais do IFC a partir do app (X, Y acima, Z para fora):
+      // X = X, Y = −Z, Z = Y + metade da altura (origem na base).
+      const pos = def.mesh.positions;
+      const coords: string[] = [];
+      for (let i = 0; i < pos.length; i += 3) coords.push(`(${num(pos[i])},${num(-pos[i + 2])},${num(pos[i + 1] + sh / 2)})`);
+      const tris: string[] = [];
+      const idx = def.mesh.indices;
+      for (let i = 0; i < idx.length; i += 3) tris.push(`(${idx[i] + 1},${idx[i + 1] + 1},${idx[i + 2] + 1})`);
+      const pl = w.add(`IFCCARTESIANPOINTLIST3D((${coords.join(",")}))`);
+      const fs = w.add(`IFCTRIANGULATEDFACESET(${ref(pl)},$,$,(${tris.join(",")}),$)`);
+      rep = w.add(`IFCSHAPEREPRESENTATION(${ref(context)},'Body','Tessellation',${list([fs])})`);
+    } else {
+      const solid = w.add(`IFCEXTRUDEDAREASOLID(${ref(profile)},${ref(solidPosition)},${ref(zAxis)},${num(sh)})`);
+      rep = w.add(`IFCSHAPEREPRESENTATION(${ref(context)},'Body','SweptSolid',${list([solid])})`);
+    }
     const shape = w.add(`IFCPRODUCTDEFINITIONSHAPE($,$,${list([rep])})`);
 
     // Origem local na base do componente; eixo X local ao longo da largura.
@@ -128,6 +143,7 @@ export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs,
     const props: number[] = [
       w.add(`IFCPROPERTYSINGLEVALUE('Etiqueta',$,IFCLABEL(${str(p.tag)}),$)`),
       w.add(`IFCPROPERTYSINGLEVALUE('Componente',$,IFCLABEL(${str(def.label)}),$)`),
+      ...(def.source ? [w.add(`IFCPROPERTYSINGLEVALUE('Familia Revit',$,IFCLABEL(${str(`${def.source.family} : ${def.source.type}`)}),$)`)] : []),
       w.add(`IFCPROPERTYSINGLEVALUE(${str("Fixação")},$,IFCLABEL(${str(def.mounting)}),$)`),
       w.add(`IFCPROPERTYSINGLEVALUE('Altura de montagem',$,IFCLENGTHMEASURE(${num(p.height)}),$)`),
       w.add(`IFCPROPERTYSINGLEVALUE('Sistema',$,IFCLABEL(${str(p.system)}),$)`),

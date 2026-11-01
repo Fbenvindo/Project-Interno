@@ -189,6 +189,7 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
       position: pl.position,
       rotation: pl.rotation,
       ok: pl.ok,
+      mesh: d.mesh,
     });
 
     viewer.setPlacementHandler({
@@ -370,6 +371,7 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
                   <button key={c.id} className={`lib-item ${componentId === c.id ? "on" : ""}`} onClick={() => selectComponent(componentId === c.id ? null : c.id)} title={`${c.label} · ${MOUNTING_LABEL[c.mounting]}`}>
                     <span className="swatch" style={{ background: DISCIPLINE_BY_ID[c.discipline].color }} />
                     <span className="grow">{c.label}</span>
+                    {c.source && <span className="tag-revit">Revit</span>}
                     <span className="muted small">{c.mounting === "parede" ? `${c.defaultHeight}` : MOUNTING_LABEL[c.mounting].split(" ")[0]}</span>
                   </button>
                 ))}

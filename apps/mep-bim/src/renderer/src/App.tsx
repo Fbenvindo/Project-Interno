@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { DISCIPLINE_BY_ID, DISCIPLINES, getTypeLabel } from "../../core/disciplines";
 import { COMPONENT_BY_ID } from "../../core/library";
 import { sizeMeters } from "../../core/placement";
@@ -29,6 +29,9 @@ import { useProjectFiles } from "./locacao/useProjectFiles";
 import { EMPTY_FILTERS, Navigator, NO_STOREY, type Filters } from "./shell/Navigator";
 import { Ribbon } from "./shell/Ribbon";
 import { ParamsPanel } from "./shell/ParamsPanel";
+import { BibliotecaPanel } from "./library/BibliotecaPanel";
+import { loadFamilyLibrary } from "./library/familyLibrary";
+import { getLibraryVersion, onLibraryChange } from "../../core/library";
 import { makeCeilingResolver, makeSlabProbe } from "./locacao/ceiling";
 import { Icon, LogoMark } from "./shell/icons";
 import { DISCIPLINE_TABS, TOP_TABS, type ActionId, type DisciplineTab, type Tool, type ToolSpec, type TopTab } from "./shell/ribbonConfig";
@@ -68,6 +71,7 @@ const TOOL_HINT: Record<ToolSpec["kind"], string> = {
   quantitativos: "Clique em uma linha para localizar os elementos",
   interferencias: "Clique em uma interferência para enquadrá-la",
   pranchas: "Roda do mouse: zoom · arrastar: mover · duplo clique: enquadrar a folha",
+  biblioteca: "Importe famílias exportadas do Revit e loque-as como qualquer item da biblioteca",
 };
 
 export function App() {
@@ -104,6 +108,10 @@ export function App() {
   const [editorCut, setEditorCut] = useState(1.2);
   const [section, setSection] = useState<SectionState>(NO_SECTION);
   const [sectionOpen, setSectionOpen] = useState(false);
+
+  // Famílias do Revit importadas: carregadas na abertura; mudanças redesenham o app.
+  useEffect(() => void loadFamilyLibrary(), []);
+  const libraryVersion = useSyncExternalStore(onLibraryChange, getLibraryVersion, getLibraryVersion);
 
   const store = usePointsStore();
   const files = useProjectFiles(store, model, fileName, () => setSelection([]));
@@ -271,10 +279,10 @@ export function App() {
     viewerRef.current?.setPoints(
       store.points.map((p) => {
         const def = COMPONENT_BY_ID[p.componentId];
-        return { id: p.id, shape: def.shape, size: sizeMeters(def), position: p.position, rotation: p.rotation, color: DISCIPLINE_BY_ID[def.discipline].color };
+        return { id: p.id, shape: def.shape, size: sizeMeters(def), position: p.position, rotation: p.rotation, color: DISCIPLINE_BY_ID[def.discipline].color, mesh: def.mesh };
       }),
     );
-  }, [store.points, model]);
+  }, [store.points, model, libraryVersion]);
 
   // Trechos na cena: segmentos e conexões.
   useEffect(() => {
@@ -561,6 +569,19 @@ export function App() {
 
   const rightPanel = () => {
     if (tool.kind === "calc") return <CalcPanel selected={selectedOne} which={tool.which} />;
+    if (tool.kind === "biblioteca")
+      return (
+        <BibliotecaPanel
+          points={store.points}
+          onPlace={(componentId) => {
+            if (!model) {
+              window.alert("Abra um modelo IFC para locar a família.");
+              return;
+            }
+            chooseTool({ kind: "locacao", componentId }, null);
+          }}
+        />
+      );
     if (!model || !viewer) return <div className="empty-side">Abra um modelo IFC em Arquivo › Abrir IFC.</div>;
     switch (tool.kind) {
       case "propriedades":

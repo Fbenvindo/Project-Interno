@@ -7,7 +7,13 @@ import type { Discipline } from "./types";
 
 /** Onde o componente é fixado. */
 export type Mounting = "parede" | "teto" | "piso";
-export type Shape = "caixa" | "cilindro";
+export type Shape = "caixa" | "cilindro" | "malha";
+
+/** Geometria própria (famílias importadas): mm, eixos locais do app (X largura, Y altura, Z para fora), centrada. */
+export interface ComponentMesh {
+  positions: Float32Array;
+  indices: Uint32Array;
+}
 
 export interface ComponentParam {
   name: string;
@@ -37,6 +43,12 @@ export interface ComponentDef {
   systemType: string;
   tagPrefix: string;
   params: ComponentParam[];
+  /** Geometria 3D própria (shape "malha"). */
+  mesh?: ComponentMesh;
+  /** Componente cujo símbolo de planta é reaproveitado. */
+  symbolOf?: string;
+  /** Origem externa (famílias do Revit importadas). */
+  source?: { kind: "revit"; packageId: string; familyUid: string; family: string; type: string };
 }
 
 const P = {
@@ -103,6 +115,44 @@ export const COMPONENTS: ComponentDef[] = [
 export const COMPONENT_BY_ID: Record<string, ComponentDef> = Object.fromEntries(COMPONENTS.map((c) => [c.id, c]));
 
 export const COMPONENT_GROUPS: string[] = [...new Set(COMPONENTS.map((c) => c.group))];
+
+/** Quantidade de componentes de fábrica (os demais vêm de bibliotecas importadas). */
+export const BUILTIN_COUNT = COMPONENTS.length;
+
+// ---- Componentes importados (famílias do Revit) -------------------------------------------
+let libraryVersion = 0;
+const libraryListeners = new Set<() => void>();
+
+/**
+ * Substitui os componentes de uma origem (pacote importado) por `defs`. As listas
+ * exportadas acima são atualizadas no lugar, para que todo o app as enxergue.
+ */
+export function registerComponents(packageId: string, defs: ComponentDef[]): void {
+  for (let i = COMPONENTS.length - 1; i >= BUILTIN_COUNT; i--) {
+    if (COMPONENTS[i].source?.packageId === packageId) {
+      delete COMPONENT_BY_ID[COMPONENTS[i].id];
+      COMPONENTS.splice(i, 1);
+    }
+  }
+  for (const d of defs) {
+    if (COMPONENT_BY_ID[d.id] && !COMPONENT_BY_ID[d.id].source) continue; // nunca substitui os de fábrica
+    if (COMPONENT_BY_ID[d.id]) {
+      const at = COMPONENTS.indexOf(COMPONENT_BY_ID[d.id]);
+      if (at >= 0) COMPONENTS.splice(at, 1);
+    }
+    COMPONENTS.push(d);
+    COMPONENT_BY_ID[d.id] = d;
+  }
+  COMPONENT_GROUPS.splice(0, COMPONENT_GROUPS.length, ...new Set(COMPONENTS.map((c) => c.group)));
+  libraryVersion++;
+  libraryListeners.forEach((l) => l());
+}
+
+export const getLibraryVersion = () => libraryVersion;
+export function onLibraryChange(cb: () => void): () => void {
+  libraryListeners.add(cb);
+  return () => libraryListeners.delete(cb);
+}
 
 export const MOUNTING_LABEL: Record<Mounting, string> = {
   parede: "parede",

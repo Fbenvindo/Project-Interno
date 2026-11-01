@@ -1,0 +1,27 @@
+SmartEasyBIM para Revit
+=======================
+
+Exporta famílias do Revit (geometria 3D, tipos, parâmetros e conectores) para a
+biblioteca do aplicativo SmartEasyBIM.
+
+Instalação
+----------
+1. Feche o Revit.
+2. Clique duas vezes em Instalar.bat. O plugin é instalado em todas as versões do
+   Revit encontradas (2022 a 2027), só para o seu usuário (não precisa de administrador).
+3. Abra o Revit. Na primeira vez, o Revit pergunta se deve carregar o plugin
+   "SmartEasyBIM": escolha "Sempre carregar".
+
+Uso
+---
+- Aba SmartEasyBIM > Exportar famílias.
+- Num projeto: marque as famílias carregadas que quer levar (as de instalações já vêm
+  marcadas) e salve o arquivo .sebfam.
+- No editor de famílias: a família aberta é exportada.
+- No SmartEasyBIM: Arquivo > Famílias do Revit > Importar famílias (.sebfam).
+
+O plugin só lê as famílias: nada é alterado no projeto nem nos arquivos .rfa.
+
+Desinstalação
+-------------
+Clique duas vezes em Desinstalar.bat.

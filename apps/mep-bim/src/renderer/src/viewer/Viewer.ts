@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { Shape } from "../../../core/library";
+import type { ComponentMesh, Shape } from "../../../core/library";
 import type { SurfaceHit } from "../../../core/placement";
 import { segmentBasis, type Profile } from "../../../core/runs";
 import type { Vec3 } from "../../../core/types";
@@ -11,7 +11,7 @@ export type ColorMode = "ifc" | "disciplina";
 /** Geometria de um objeto criado no app (ou de sua pré-visualização). Medidas em metros. */
 export type Visual =
   /** Componente locado: caixa ou cilindro girado em torno do eixo vertical. */
-  | { kind?: "solido"; shape: Shape; size: Vec3; position: Vec3; rotation: number }
+  | { kind?: "solido"; shape: Shape; size: Vec3; position: Vec3; rotation: number; mesh?: ComponentMesh }
   /** Segmento de trecho entre dois pontos do eixo. */
   | { kind: "segmento"; profile: Profile; width: number; height: number; start: Vec3; end: Vec3 }
   /** Nó do trecho (curva, tê ou vértice em desenho). */
@@ -80,6 +80,8 @@ export class Viewer {
   private entries = new Map<number, Entry>();
   private materialCache = new Map<string, THREE.Material>();
   private geometryCache = new Map<string, THREE.BufferGeometry>();
+  /** Geometria das famílias importadas (mm → m), por malha. */
+  private meshGeometry = new WeakMap<ComponentMesh, THREE.BufferGeometry>();
   private selectionMaterial = new THREE.MeshLambertMaterial({ color: 0x00e5ff, emissive: 0x004455, side: THREE.DoubleSide });
   private highlightMaterial = new THREE.MeshLambertMaterial({ color: 0xff2d55, emissive: 0x440011, side: THREE.DoubleSide });
   private ghostMaterial = new THREE.MeshLambertMaterial({ color: 0x9aa4b2, transparent: true, opacity: 0.08, depthWrite: false });
@@ -484,6 +486,23 @@ export class Viewer {
       return mesh;
     }
     const [w, d, h] = v.size;
+    if (v.mesh) {
+      let g = this.meshGeometry.get(v.mesh);
+      if (!g) {
+        g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(v.mesh.positions.map((c) => c / 1000), 3));
+        g.setIndex(new THREE.BufferAttribute(v.mesh.indices, 1));
+        g.computeVertexNormals();
+        g.computeBoundingBox();
+        g.computeBoundingSphere();
+        this.meshGeometry.set(v.mesh, g);
+      }
+      const mesh = new THREE.Mesh(g, material);
+      mesh.position.set(...v.position);
+      mesh.rotation.y = v.rotation;
+      mesh.updateMatrixWorld();
+      return mesh;
+    }
     const geometry = this.cachedGeometry(`${v.shape}:${w}:${d}:${h}`, () =>
       v.shape === "cilindro" ? new THREE.CylinderGeometry(w / 2, w / 2, h, 24) : new THREE.BoxGeometry(w, h, d),
     );

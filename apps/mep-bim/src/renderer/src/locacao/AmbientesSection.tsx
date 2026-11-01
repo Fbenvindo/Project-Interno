@@ -139,7 +139,7 @@ export function AmbientesSection({ model, viewer, def, height, ceiling, resolveC
   // Pré-visualização e destaque dos ambientes.
   useEffect(() => {
     viewer.setStaticPreview(
-      proposal.items.map(({ placement }): PreviewItem => ({ shape: def.shape, size: sizeMeters(def), position: placement.position, rotation: placement.rotation, ok: true })),
+      proposal.items.map(({ placement }): PreviewItem => ({ shape: def.shape, size: sizeMeters(def), position: placement.position, rotation: placement.rotation, ok: true, mesh: def.mesh })),
     );
     viewer.setSpaceOutlines(
       model.spaces.map((s) => ({ points: s.polygon.map((p) => planToWorld(p, s.floorY + 0.02)), selected: selected.includes(s.expressID) })),

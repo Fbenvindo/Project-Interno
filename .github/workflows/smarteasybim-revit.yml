@@ -1,0 +1,61 @@
+# Compila o plugin SmartEasyBIM para Revit (2022 a 2027) e publica o pacote de instalação.
+name: SmartEasyBIM - plugin Revit
+
+on:
+  push:
+    paths:
+      - "apps/mep-bim/revit-addin/**"
+      - ".github/workflows/smarteasybim-revit.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Compilar plugin (Revit 2022–2027)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps/mep-bim/revit-addin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Compilar Revit 2022 a 2026
+        shell: pwsh
+        run: |
+          foreach ($v in 2022, 2023, 2024, 2025, 2026) {
+            dotnet build -c Release -p:RevitVersion=$v --nologo
+            if ($LASTEXITCODE -ne 0) { throw "Falhou a compilação para o Revit $v" }
+          }
+
+      - name: Compilar Revit 2027
+        shell: pwsh
+        continue-on-error: true
+        run: dotnet build -c Release -p:RevitVersion=2027 --nologo
+
+      - name: Montar pacote de instalação
+        shell: pwsh
+        run: |
+          $out = "dist/SmartEasyBIM-Revit"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item deploy/* $out
+          Copy-Item LEIA-ME.txt $out
+          foreach ($v in 2022, 2023, 2024, 2025, 2026, 2027) {
+            $dll = "bin/Release/$v/SmartEasyBIM.Revit.dll"
+            if (Test-Path $dll) {
+              New-Item -ItemType Directory -Force -Path "$out/$v" | Out-Null
+              Copy-Item $dll "$out/$v/"
+            }
+          }
+          Get-ChildItem -Recurse $out | Select-Object FullName
+
+      - name: Publicar pacote
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartEasyBIM-Revit-${{ github.run_number }}
+          path: apps/mep-bim/revit-addin/dist/
+          retention-days: 30
