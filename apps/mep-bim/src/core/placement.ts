@@ -88,6 +88,44 @@ export function computePlacement(def: ComponentDef, hit: SurfaceHit, opts: Place
   };
 }
 
+// ---- Itens de teto: forro, entreforro ou laje -------------------------------------------
+
+/** Onde o item de teto se apoia. */
+export type CeilingRef = "forro" | "entreforro" | "laje";
+
+export interface CeilingMount {
+  ref: CeilingRef;
+  /**
+   * mm acima do piso do pavimento. Forro: altura do forro (usada quando o modelo
+   * não tem forro, IfcCovering). Entreforro: altura do fundo do item. Laje: ignorado.
+   */
+  level: number;
+}
+
+export const CEILING_REF_LABEL: Record<CeilingRef, string> = {
+  forro: "Alinhado ao forro",
+  entreforro: "No entreforro (altura informada)",
+  laje: "Encostado na laje superior",
+};
+
+export const DEFAULT_CEILING: CeilingMount = { ref: "forro", level: 2600 };
+
+/**
+ * Plano de referência (Y da cena) de um item de teto: face inferior do forro ou da
+ * laje encontrada no modelo, ou a altura informada. No entreforro, o plano é o topo
+ * do item, de modo que o fundo fique na altura informada (com afastamento zero).
+ */
+export function ceilingPlane(
+  def: ComponentDef,
+  mount: CeilingMount,
+  floorY: number,
+  found: { covering: number | null; slab: number | null },
+): number {
+  if (mount.ref === "entreforro") return floorY + mount.level / 1000 + def.size[2] / 1000;
+  if (mount.ref === "forro") return found.covering ?? floorY + mount.level / 1000;
+  return found.slab ?? found.covering ?? floorY + Math.max(mount.level / 1000, 2.6);
+}
+
 /** Recalcula a cota do centro quando a altura de montagem muda. */
 export function elevationFor(def: ComponentDef, refLevel: number, heightMm: number): number {
   const h = def.size[2] / 1000;

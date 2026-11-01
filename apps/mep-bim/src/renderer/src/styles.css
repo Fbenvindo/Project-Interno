@@ -1203,3 +1203,28 @@ h3 {
 :root[data-theme="dark"] .segmented button.on {
   color: var(--navy);
 }
+
+/* ---- Teto, carimbo -------------------------------------------------------- */
+.ceiling-ref {
+  margin-top: 10px;
+}
+.ceiling-ref .field-label {
+  margin-top: 0;
+}
+.ceiling-ref .muted {
+  margin-top: 4px;
+}
+.form-grid .span-2 {
+  grid-column: span 2;
+}
+.btn-row.tight {
+  margin-top: 4px;
+  align-items: center;
+}
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}

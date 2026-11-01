@@ -3,6 +3,7 @@
 import { getCategory } from "./disciplines";
 import { COMPONENT_BY_ID, type ComponentDef } from "./library";
 import type { CoordinateSystem } from "./math";
+import { CEILING_REF_LABEL, type CeilingMount, type CeilingRef } from "./placement";
 import type { OBB } from "./obb";
 import type { BBox, ElementInfo, PropertyGroup, Vec3 } from "./types";
 
@@ -26,6 +27,8 @@ export interface PlacedPoint {
   params: Record<string, string | number>;
   /** Circuito (uid) ao qual o ponto pertence. */
   circuit?: string | null;
+  /** Itens de teto: alinhados ao forro, no entreforro ou na laje. */
+  ceiling?: CeilingMount;
 }
 
 export interface StoreyLevel {
@@ -135,6 +138,10 @@ export function pointProperties(p: PlacedPoint): PropertyGroup[] {
         { name: "Etiqueta", value: p.tag },
         { name: "Componente", value: def.label },
         { name: "Fixação", value: def.mounting },
+        ...(p.ceiling ? [{ name: "Referência no teto", value: CEILING_REF_LABEL[p.ceiling.ref] }] : []),
+        ...(p.ceiling && p.ceiling.ref !== "laje"
+          ? [{ name: p.ceiling.ref === "forro" ? "Altura do forro (sem forro no modelo)" : "Altura do fundo (piso)", value: `${Math.round(p.ceiling.level)} mm` }]
+          : []),
         { name: heightLabel(def), value: `${Math.round(p.height)} mm` },
         { name: "Dimensões (L×P×A)", value: `${def.size.join("×")} mm` },
         ...Object.entries(p.params).map(([name, value]) => ({
@@ -170,6 +177,8 @@ interface StoredPoint {
   sistema: string;
   parametros: Record<string, string | number>;
   circuito?: string | null;
+  /** Itens de teto: referência e altura (mm acima do piso). */
+  teto?: { referencia: CeilingRef; alturaMm: number };
 }
 
 export interface LocacaoFile {
@@ -198,6 +207,7 @@ export function serializePoints(points: PlacedPoint[], cs: CoordinateSystem, mod
       sistema: p.system,
       parametros: p.params,
       ...(p.circuit ? { circuito: p.circuit } : {}),
+      ...(p.ceiling ? { teto: { referencia: p.ceiling.ref, alturaMm: p.ceiling.level } } : {}),
     })),
   };
 }
@@ -223,6 +233,7 @@ export function deserializePoints(json: unknown, cs: CoordinateSystem): PlacedPo
       system: s.sistema,
       params: s.parametros ?? {},
       circuit: s.circuito ?? null,
+      ...(s.teto && s.teto.referencia in CEILING_REF_LABEL ? { ceiling: { ref: s.teto.referencia, level: Number(s.teto.alturaMm) || 0 } } : {}),
     };
   });
 }

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatNumber } from "../../../core/format";
 import type { ComponentDef } from "../../../core/library";
-import { computePlacement, sizeMeters, type Placement, type SurfaceHit } from "../../../core/placement";
+import { computePlacement, sizeMeters, type CeilingMount, type Placement, type SurfaceHit } from "../../../core/placement";
+import type { CeilingResolver } from "./ceiling";
 import type { PlacedPoint } from "../../../core/points";
 import type { P2 } from "../../../core/plan/section";
 import { gridInSpace, lumenCount, lumenIlluminance, perimeterPoints, spaceLabel, type GridSpec, type Space } from "../../../core/spaces";
@@ -19,6 +20,9 @@ interface Props {
   viewer: Viewer;
   def: ComponentDef;
   height: number;
+  /** Itens de teto: forro, entreforro ou laje. */
+  ceiling: CeilingMount;
+  resolveCeiling: CeilingResolver;
   rotationDeg: number;
   params: Record<string, string | number>;
   selected: number[];
@@ -32,7 +36,7 @@ type GridMode = "espacamento" | "linhas" | "quantidade" | "iluminancia";
 const num = (v: string) => Number(v.replace(",", "."));
 
 /** Distribuição de um componente nos ambientes selecionados (IfcSpace). */
-export function AmbientesSection({ model, viewer, def, height, rotationDeg, params, selected, onSelectedChange, existing, onCreate }: Props) {
+export function AmbientesSection({ model, viewer, def, height, ceiling, resolveCeiling, rotationDeg, params, selected, onSelectedChange, existing, onCreate }: Props) {
   const isLight = def.params.some((p) => p.name === "Fluxo luminoso");
   const [gridMode, setGridMode] = useState<GridMode>(isLight ? "iluminancia" : "espacamento");
   const [spacing, setSpacing] = useState(def.mounting === "parede" ? 3 : 2.5);
@@ -106,9 +110,14 @@ export function AmbientesSection({ model, viewer, def, height, rotationDeg, para
         for (const p of grid.points) {
           const origin = planToWorld(p, probeY);
           const up = def.mounting === "teto";
-          let hit: SurfaceHit | null = viewer.castRay(origin, [0, up ? 1 : -1, 0], reach, (n) => (up ? n[1] < -0.7 : n[1] > 0.7));
-          if (!hit) hit = { point: planToWorld(p, up ? s.topY : s.floorY), normal: [0, up ? -1 : 1, 0] };
-          const pl = computePlacement(def, hit, { height, rotation, snap: 0, floorLevel: s.floorY });
+          let hit: SurfaceHit | null = null;
+          if (up) {
+            hit = { point: [origin[0], resolveCeiling(def, ceiling, origin[0], origin[2], s.floorY), origin[2]], normal: [0, -1, 0] };
+          } else {
+            hit = viewer.castRay(origin, [0, -1, 0], reach, (n) => n[1] > 0.7) ?? { point: planToWorld(p, s.floorY), normal: [0, 1, 0] };
+          }
+          const h = up && ceiling.ref === "entreforro" ? 0 : height;
+          const pl = computePlacement(def, hit, { height: h, rotation, snap: 0, floorLevel: s.floorY });
           if (!pl.ok || duplicate(pl)) {
             skipped++;
             continue;
@@ -125,7 +134,7 @@ export function AmbientesSection({ model, viewer, def, height, rotationDeg, para
     }
     return { items, notes };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSpaces.map((s) => s.expressID).join(","), def, height, rotationDeg, gridMode, spacing, rows, cols, count, minWall, corner, lux, fu, fm, flux, existing, viewer]);
+  }, [selectedSpaces.map((s) => s.expressID).join(","), def, height, ceiling, resolveCeiling, rotationDeg, gridMode, spacing, rows, cols, count, minWall, corner, lux, fu, fm, flux, existing, viewer]);
 
   // Pré-visualização e destaque dos ambientes.
   useEffect(() => {

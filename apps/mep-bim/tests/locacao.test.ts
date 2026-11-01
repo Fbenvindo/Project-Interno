@@ -5,7 +5,7 @@ import { IfcAPI } from "web-ifc";
 import { exportPointsIfc, num, str } from "../src/core/ifcExport";
 import { COMPONENTS, COMPONENT_BY_ID } from "../src/core/library";
 import { CoordinateSystem, invert, transformPoint } from "../src/core/math";
-import { computePlacement, countForSpacing, elevationFor, gridPoints, type SurfaceHit } from "../src/core/placement";
+import { ceilingPlane, computePlacement, countForSpacing, elevationFor, gridPoints, type SurfaceHit } from "../src/core/placement";
 import {
   defaultParams,
   deserializePoints,
@@ -159,6 +159,29 @@ describe("arquivo de locação", () => {
     close(other.worldToIfc(back[1].position), model.coordinates.worldToIfc(pts[1].position));
     expect(back[0].guid).toBe(pts[0].guid);
     expect(() => deserializePoints({ formato: "x" }, other)).toThrow();
+  });
+});
+
+describe("itens de teto: forro, entreforro e laje", () => {
+  const def = COMPONENT_BY_ID["difusor-6060"];
+  const found = { covering: 2.7, slab: 3.0 };
+  it("forro usa o forro do modelo e, sem ele, a altura informada", () => {
+    expect(ceilingPlane(def, { ref: "forro", level: 2600 }, 0, found)).toBeCloseTo(2.7);
+    expect(ceilingPlane(def, { ref: "forro", level: 2600 }, 0, { covering: null, slab: 3 })).toBeCloseTo(2.6);
+  });
+  it("laje usa a face inferior da laje, não o forro", () => {
+    expect(ceilingPlane(def, { ref: "laje", level: 0 }, 0, found)).toBeCloseTo(3.0);
+  });
+  it("entreforro põe o fundo do item na altura informada", () => {
+    const ref = ceilingPlane(def, { ref: "entreforro", level: 2850 }, 10, found);
+    const centro = elevationFor(def, ref, 0);
+    expect(centro - (def.size[2] / 1000) / 2).toBeCloseTo(12.85);
+  });
+  it("a referência de teto é salva e reaberta", () => {
+    const p = { ...makePoint("difusor-6060", hitAt([4, 4.5, 3], [0, 0, -1])), ceiling: { ref: "entreforro" as const, level: 2850 } };
+    const json = JSON.parse(JSON.stringify(serializePoints([p], model.coordinates, null)));
+    expect(json.pontos[0].teto).toEqual({ referencia: "entreforro", alturaMm: 2850 });
+    expect(deserializePoints(json, model.coordinates)[0].ceiling).toEqual({ ref: "entreforro", level: 2850 });
   });
 });
 

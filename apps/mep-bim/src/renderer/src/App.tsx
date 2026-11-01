@@ -24,6 +24,7 @@ import { buildPlan } from "../../core/plan/build";
 import { renderSheet } from "../../core/plan/sheet";
 import { connectedPairs, runElements, runFittings, runIdOfElement, runProperties, runSegments, RUN_TYPE_BY_ID, segmentElementId, fittingElementId } from "../../core/runs";
 import { usePointsStore } from "./locacao/usePointsStore";
+import { defaultTitleBlockId, titleBlockById, useTitleBlocks } from "./planta/titleBlocks";
 import { useProjectFiles } from "./locacao/useProjectFiles";
 import { EMPTY_FILTERS, Navigator, NO_STOREY, type Filters } from "./shell/Navigator";
 import { Ribbon } from "./shell/Ribbon";
@@ -165,9 +166,11 @@ export function App() {
         revisao: "R00",
         folha: "01/01",
       },
+      titleBlockId: titleBlockById(defaultTitleBlockId())?.id ?? null,
     });
   }, [model, planSettings, store.points, fileName]);
 
+  const titleBlocks = useTitleBlocks();
   const sheetSettings = useMemo(() => (planSettings ? { ...planSettings, storey } : null), [planSettings, storey]);
   const planDrawing = useMemo(() => {
     if (view !== "prancha" || !model || !sheetSettings) return null;
@@ -190,8 +193,8 @@ export function App() {
   const planSheet = useMemo(() => {
     if (!planDrawing || !sheetSettings) return null;
     const info = { ...sheetSettings.info, conteudo: sheetSettings.info.conteudo || `Instalações MEP — Planta ${sheetSettings.storey}` };
-    return renderSheet(planDrawing, sheetSettings.format, info);
-  }, [planDrawing, sheetSettings]);
+    return renderSheet(planDrawing, sheetSettings.format, info, titleBlocks.find((t) => t.id === sheetSettings.titleBlockId) ?? null);
+  }, [planDrawing, sheetSettings, titleBlocks]);
 
   const allSystems = useMemo(
     () =>

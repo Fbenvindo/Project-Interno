@@ -1,5 +1,5 @@
 // Copia para a pasta pública do renderer os arquivos carregados em tempo de
-// execução: o binário WebAssembly do web-ifc e o modelo de exemplo.
+// execução: o binário WebAssembly do web-ifc o modelo e o carimbo de exemplo.
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,7 @@ const pub = join(root, "src", "renderer", "public");
 const copies = [
   [join(root, "node_modules", "web-ifc", "web-ifc.wasm"), join(pub, "wasm", "web-ifc.wasm")],
   [join(root, "samples", "exemplo-mep.ifc"), join(pub, "samples", "exemplo-mep.ifc")],
+  [join(root, "samples", "carimbo-exemplo.dxf"), join(pub, "samples", "carimbo-exemplo.dxf")],
 ];
 
 for (const [src, dest] of copies) {

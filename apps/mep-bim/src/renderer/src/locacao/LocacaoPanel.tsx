@@ -2,7 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DISCIPLINE_BY_ID } from "../../../core/disciplines";
 import { formatNumber } from "../../../core/format";
 import { COMPONENTS, COMPONENT_BY_ID, COMPONENT_GROUPS, MOUNTING_LABEL, type ComponentDef } from "../../../core/library";
-import { computePlacement, countForSpacing, elevationFor, gridPoints, sizeMeters, type Placement, type SurfaceHit } from "../../../core/placement";
+import {
+  CEILING_REF_LABEL,
+  computePlacement,
+  countForSpacing,
+  DEFAULT_CEILING,
+  elevationFor,
+  gridPoints,
+  sizeMeters,
+  type CeilingMount,
+  type CeilingRef,
+  type Placement,
+  type SurfaceHit,
+} from "../../../core/placement";
+import { floorLevelAt, makeCeilingResolver } from "./ceiling";
 import {
   defaultParams,
   heightLabel,
@@ -49,6 +62,7 @@ const isTyping = (t: EventTarget | null) => t instanceof HTMLElement && /^(INPUT
 export function LocacaoPanel({ model, fileName, store, viewer, elementById, selection, onSelect, systems, groups, preset }: Props) {
   const [componentId, setComponentId] = useState<string | null>(null);
   const [height, setHeight] = useState(0);
+  const [ceiling, setCeiling] = useState<CeilingMount>(DEFAULT_CEILING);
   const [rotationDeg, setRotationDeg] = useState(0);
   const [snapMm, setSnapMm] = useState(50);
   const [system, setSystem] = useState("");
@@ -90,22 +104,31 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
   // ---- Cálculo da posição ----------------------------------------------------
   const acceptFloor = useCallback((id: number) => FLOOR_TYPES.has(elementById.get(id)?.ifcType ?? ""), [elementById]);
 
+  const resolveCeiling = useMemo(() => makeCeilingResolver(viewer, elementById, model.storeyLevels), [viewer, elementById, model.storeyLevels]);
+
   const place = useCallback(
-    (d: ComponentDef, hit: SurfaceHit, h: number, rotation: number, snap: number): Placement => {
+    (d: ComponentDef, hit: SurfaceHit, h: number, rotation: number, snap: number, mount: CeilingMount = DEFAULT_CEILING): Placement => {
       let floorLevel = 0;
       if (d.mounting === "parede") {
         const floor = viewer.floorBelow(hit.point, hit.normal, acceptFloor);
         const storey = storeyAt(hit.point[1], model.storeyLevels);
         floorLevel = floor ?? model.storeyLevels.find((s) => s.name === storey)?.level ?? 0;
       }
+      if (d.mounting === "teto" && hit.normal[1] < -0.7) {
+        // Forro, entreforro ou laje: o plano de referência vem do modelo ou da altura informada.
+        const floorY = floorLevelAt(hit.point[1], model.storeyLevels);
+        const y = resolveCeiling(d, mount, hit.point[0], hit.point[2], floorY);
+        hit = { point: [hit.point[0], y, hit.point[2]], normal: [0, -1, 0] };
+        if (mount.ref === "entreforro") h = 0;
+      }
       return computePlacement(d, hit, { height: h, rotation, snap, floorLevel });
     },
-    [viewer, acceptFloor, model.storeyLevels],
+    [viewer, acceptFloor, model.storeyLevels, resolveCeiling],
   );
 
   // Estado mais recente para os callbacks do visualizador (sem reinstalar o modo a cada mudança).
-  const live = useRef({ def, height, rotationDeg, snapMm, system, params, mode, areaBy, rows, cols, spacing, corner, movingPoint, points, selectedSpaces });
-  live.current = { def, height, rotationDeg, snapMm, system, params, mode, areaBy, rows, cols, spacing, corner, movingPoint, points, selectedSpaces };
+  const live = useRef({ ceiling, def, height, rotationDeg, snapMm, system, params, mode, areaBy, rows, cols, spacing, corner, movingPoint, points, selectedSpaces });
+  live.current = { ceiling, def, height, rotationDeg, snapMm, system, params, mode, areaBy, rows, cols, spacing, corner, movingPoint, points, selectedSpaces };
 
   const gridFor = useCallback(
     (c: SurfaceHit, hit: SurfaceHit): Placement[] => {
@@ -116,7 +139,7 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
       const r = L.areaBy === "quantidade" ? L.rows : countForSpacing(p2[2] - p1[2], L.spacing);
       const k = L.areaBy === "quantidade" ? L.cols : countForSpacing(p2[0] - p1[0], L.spacing);
       if (r * k > MAX_AREA_POINTS) return [];
-      return gridPoints(p1, p2, r, k).map((gp) => place(d, { point: gp, normal: c.normal }, L.height, (L.rotationDeg * Math.PI) / 180, 0));
+      return gridPoints(p1, p2, r, k).map((gp) => place(d, { point: gp, normal: c.normal }, L.height, (L.rotationDeg * Math.PI) / 180, 0, L.ceiling));
     },
     [place],
   );
@@ -139,8 +162,9 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
         tag: nextTag(all, d.tagPrefix),
         position: pl.position,
         rotation: pl.rotation,
-        height: L.height,
+        height: d.mounting === "teto" && L.ceiling.ref === "entreforro" ? 0 : L.height,
         refLevel: pl.refLevel,
+        ...(d.mounting === "teto" ? { ceiling: { ...L.ceiling } } : {}),
         storey: storeyForMounting(d.mounting, pl.refLevel, model.storeyLevels),
         system: L.system.trim(),
         params: { ...L.params, ...(room ? { Ambiente: spaceLabel(room) } : {}) },
@@ -191,8 +215,8 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
           return grid.map((pl) => preview(d, pl));
         }
         const pl = mp
-          ? place(d, hit, mp.height, mp.rotation, L.snapMm / 1000)
-          : place(d, hit, L.height, (L.rotationDeg * Math.PI) / 180, L.snapMm / 1000);
+          ? place(d, hit, mp.height, mp.rotation, L.snapMm / 1000, mp.ceiling ?? L.ceiling)
+          : place(d, hit, L.height, (L.rotationDeg * Math.PI) / 180, L.snapMm / 1000, L.ceiling);
         if (!pl.ok) setStatus(pl.reason ?? "");
         else {
           const storey = storeyForMounting(d.mounting, pl.refLevel, model.storeyLevels);
@@ -206,9 +230,11 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
         const mp = L.movingPoint;
         if (mp) {
           const d = COMPONENT_BY_ID[mp.componentId];
-          const pl = place(d, hit, mp.height, mp.rotation, L.snapMm / 1000);
+          const mount = mp.ceiling ?? L.ceiling;
+          const pl = place(d, hit, mp.height, mp.rotation, L.snapMm / 1000, mount);
           if (!pl.ok) return;
           store.update([mp.id], () => ({
+            ...(d.mounting === "teto" ? { ceiling: mount, height: mount.ref === "entreforro" ? 0 : mp.height } : {}),
             position: pl.position,
             rotation: pl.rotation,
             refLevel: pl.refLevel,
@@ -227,7 +253,7 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
         }
         if (L.mode === "area") {
           if (!L.corner) {
-            const pl = place(d, hit, L.height, 0, L.snapMm / 1000);
+            const pl = place(d, hit, L.height, 0, L.snapMm / 1000, L.ceiling);
             if (!pl.ok) return;
             const snapped: SurfaceHit = { point: [pl.position[0], hit.point[1], pl.position[2]], normal: hit.normal };
             setCorner(snapped);
@@ -239,7 +265,7 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
           setCorner(null);
           return;
         }
-        const pl = place(d, hit, L.height, (L.rotationDeg * Math.PI) / 180, L.snapMm / 1000);
+        const pl = place(d, hit, L.height, (L.rotationDeg * Math.PI) / 180, L.snapMm / 1000, L.ceiling);
         if (pl.ok) store.add(buildPoints(d, [pl]));
       },
     });
@@ -361,11 +387,47 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
           <div className="muted small">
             Fixação em {MOUNTING_LABEL[def.mounting]} · {def.size.join("×")} mm · etiqueta {def.tagPrefix}n
           </div>
+          {def.mounting === "teto" && (
+            <div className="ceiling-ref">
+              <div className="field-label">Alinhamento no teto</div>
+              <div className="segmented">
+                {(Object.keys(CEILING_REF_LABEL) as CeilingRef[]).map((r) => (
+                  <button
+                    key={r}
+                    className={ceiling.ref === r ? "on" : ""}
+                    onClick={() => setCeiling({ ref: r, level: r === "entreforro" ? (ceiling.ref === "entreforro" ? ceiling.level : 2800) : ceiling.ref === "forro" ? ceiling.level : 2600 })}
+                    title={CEILING_REF_LABEL[r]}
+                  >
+                    {r === "forro" ? "Forro" : r === "entreforro" ? "Entreforro" : "Laje"}
+                  </button>
+                ))}
+              </div>
+              <div className="muted small">
+                {ceiling.ref === "forro" && "Rente ao forro do modelo (IfcCovering). Onde não houver forro, usa a altura abaixo."}
+                {ceiling.ref === "entreforro" && "No espaço entre o forro e a laje: o fundo do item fica na altura informada."}
+                {ceiling.ref === "laje" && "Encostado na face inferior da laje superior (IfcSlab)."}
+              </div>
+            </div>
+          )}
           <div className="form-grid">
-            <label>
-              {heightLabel(def)} (mm)
-              <input type="number" value={height} step={10} onChange={(e) => setHeight(Number(e.target.value))} />
-            </label>
+            {def.mounting === "teto" && ceiling.ref !== "laje" && (
+              <label>
+                {ceiling.ref === "forro" ? "Altura do forro (m)" : "Altura do fundo (m)"}
+                <input
+                  type="number"
+                  step={0.05}
+                  value={ceiling.level / 1000}
+                  onChange={(e) => setCeiling({ ...ceiling, level: Math.round(Number(e.target.value) * 1000) })}
+                  title="Acima do piso acabado do pavimento"
+                />
+              </label>
+            )}
+            {!(def.mounting === "teto" && ceiling.ref === "entreforro") && (
+              <label>
+                {heightLabel(def)} (mm)
+                <input type="number" value={height} step={10} onChange={(e) => setHeight(Number(e.target.value))} />
+              </label>
+            )}
             <label>
               Sistema
               <input list="systems-list" value={system} onChange={(e) => setSystem(e.target.value)} />
@@ -431,6 +493,8 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
               viewer={viewer}
               def={def}
               height={height}
+              ceiling={ceiling}
+              resolveCeiling={resolveCeiling}
               rotationDeg={rotationDeg}
               params={params}
               selected={selectedSpaces}
