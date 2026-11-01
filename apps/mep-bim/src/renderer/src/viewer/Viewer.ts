@@ -33,7 +33,19 @@ export interface PointerContext {
 }
 
 /** Modo de edição: o visualizador informa a superfície sob o cursor e os cliques. */
+/** Cortes da vista 3D, em coordenadas da cena (null = desligado). */
+export interface SectionPlanes {
+  /** Mantém o que está abaixo desta cota (Y). */
+  horizontal: number | null;
+  /** Corte vertical perpendicular a X: mantém x ≤ pos (ou ≥ pos se invertido). */
+  x: { pos: number; invert: boolean } | null;
+  /** Corte vertical perpendicular a Z: mantém z ≤ pos (ou ≥ pos se invertido). */
+  z: { pos: number; invert: boolean } | null;
+}
+
 export interface PlacementHandler {
+  /** Superfície desejada quando o modo é usado na planta 2D (padrão: teto). */
+  surface?(): "parede" | "teto" | "piso";
   hover(hit: SurfaceHit | null, ctx: PointerContext): PreviewItem[];
   click(hit: SurfaceHit | null, ctx: PointerContext): void;
   /** Duplo clique (ex.: finalizar um trecho). */
@@ -59,6 +71,10 @@ export class Viewer {
   private staticPreviewGroup = new THREE.Group();
   private spacesGroup = new THREE.Group();
   private shiftDown = false;
+  private clipPlanes: THREE.Plane[] = [];
+  private placementListeners = new Set<() => void>();
+  private staticPreviewItems: PreviewItem[] = [];
+  private spaceOutlineItems: { points: Vec3[]; selected: boolean }[] = [];
   private removeKeyListeners = () => {};
   private previewGroup = new THREE.Group();
   private entries = new Map<number, Entry>();
@@ -218,11 +234,59 @@ export class Viewer {
     this.renderer.domElement.style.cursor = handler ? "crosshair" : "";
     if (!handler) this.showPreview([]);
     this.hoverDirty = true;
+    this.notifyPlacement();
   }
 
   /** Recalcula a pré-visualização (ex.: após girar ou mudar a altura). */
   refreshPlacement() {
     this.hoverDirty = true;
+    this.notifyPlacement();
+  }
+
+  /** Modo de edição ativo (usado também pelo editor em planta 2D). */
+  getPlacementHandler(): PlacementHandler | null {
+    return this.placement;
+  }
+
+  getStaticPreview(): PreviewItem[] {
+    return this.staticPreviewItems;
+  }
+
+  getSpaceOutlines() {
+    return this.spaceOutlineItems;
+  }
+
+  /** Avisa quando o modo de edição, as pré-visualizações ou os ambientes destacados mudam. */
+  onPlacementChange(cb: () => void): () => void {
+    this.placementListeners.add(cb);
+    return () => this.placementListeners.delete(cb);
+  }
+
+  private notifyPlacement() {
+    this.placementListeners.forEach((cb) => cb());
+  }
+
+  // ---- Cortes -----------------------------------------------------------------------
+  setSection(section: SectionPlanes) {
+    const planes: THREE.Plane[] = [];
+    if (section.horizontal != null) planes.push(new THREE.Plane(new THREE.Vector3(0, -1, 0), section.horizontal));
+    if (section.x) planes.push(section.x.invert ? new THREE.Plane(new THREE.Vector3(1, 0, 0), -section.x.pos) : new THREE.Plane(new THREE.Vector3(-1, 0, 0), section.x.pos));
+    if (section.z) planes.push(section.z.invert ? new THREE.Plane(new THREE.Vector3(0, 0, 1), -section.z.pos) : new THREE.Plane(new THREE.Vector3(0, 0, -1), section.z.pos));
+    this.clipPlanes = planes;
+    this.renderer.clippingPlanes = planes;
+    this.requestRender();
+    this.hoverDirty = true;
+  }
+
+  /** Limites do modelo IFC na cena (para os controles de corte). */
+  getModelBounds(): { min: Vec3; max: Vec3 } | null {
+    const box = new THREE.Box3().setFromObject(this.modelGroup);
+    if (box.isEmpty()) return null;
+    return { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] };
+  }
+
+  private clipped(p: THREE.Vector3): boolean {
+    return this.clipPlanes.some((pl) => pl.distanceToPoint(p) < -1e-6);
   }
 
   /**
@@ -247,16 +311,22 @@ export class Viewer {
    * Primeira superfície do modelo (visível) atingida por um raio, com a normal
    * voltada para a origem. `accept` filtra pela normal (ex.: só faces de teto).
    */
-  castRay(origin: Vec3, direction: Vec3, maxDistance: number, accept: (normal: Vec3) => boolean = () => true): SurfaceHit | null {
+  castRay(
+    origin: Vec3,
+    direction: Vec3,
+    maxDistance: number,
+    accept: (normal: Vec3, expressID: number) => boolean = () => true,
+    includeHidden = false,
+  ): SurfaceHit | null {
     this.raycaster.set(new THREE.Vector3(...origin), new THREE.Vector3(...direction).normalize());
     this.raycaster.far = maxDistance;
-    const hits = this.raycaster.intersectObjects(this.pickTargets(), false);
+    const hits = this.raycaster.intersectObjects(includeHidden ? this.modelGroup.children : this.pickTargets(), false);
     this.raycaster.far = Infinity;
     for (const h of hits) {
       const n = this.worldNormal(h);
       if (!n) continue;
       const normal: Vec3 = [n.x, n.y, n.z];
-      if (accept(normal)) return { point: [h.point.x, h.point.y, h.point.z], normal };
+      if (accept(normal, h.object.userData.expressID as number)) return { point: [h.point.x, h.point.y, h.point.z], normal };
     }
     return null;
   }
@@ -266,6 +336,8 @@ export class Viewer {
    * Cada ambiente é uma lista de vértices na cena (já na cota desejada).
    */
   setSpaceOutlines(loops: { points: Vec3[]; selected: boolean }[]) {
+    this.spaceOutlineItems = loops;
+    this.notifyPlacement();
     this.spacesGroup.clear();
     for (const { points, selected } of loops) {
       if (points.length < 3) continue;
@@ -424,6 +496,8 @@ export class Viewer {
 
   /** Pré-visualização fixa, independente do cursor (ex.: traçado automático proposto). */
   setStaticPreview(items: PreviewItem[]) {
+    this.staticPreviewItems = items;
+    this.notifyPlacement();
     this.staticPreviewGroup.clear();
     for (const it of items) {
       const mesh = this.buildMesh(it, it.ok ? this.previewOk : this.previewBad);
@@ -465,10 +539,10 @@ export class Viewer {
   private probe(clientX: number, clientY: number): { hit: SurfaceHit | null; ctx: PointerContext } {
     this.raycaster.setFromCamera(this.ndc(clientX, clientY), this.camera);
     const { origin, direction } = this.raycaster.ray;
-    const modelHit = this.raycaster.intersectObjects(this.pickTargets(), false)[0];
+    const modelHit = this.raycaster.intersectObjects(this.pickTargets(), false).find((h) => !this.clipped(h.point));
     const n = modelHit && this.worldNormal(modelHit);
     const extras = [...this.pointsGroup.children, ...this.runsGroup.children].filter((o) => o.visible);
-    const extraHit = this.raycaster.intersectObjects(extras, false)[0];
+    const extraHit = this.raycaster.intersectObjects(extras, false).find((h) => !this.clipped(h.point));
     const extraInFront = extraHit && (!modelHit || extraHit.distance <= modelHit.distance + 0.05);
     return {
       hit: modelHit && n ? { point: [modelHit.point.x, modelHit.point.y, modelHit.point.z], normal: [n.x, n.y, n.z] } : null,
@@ -526,7 +600,7 @@ export class Viewer {
     const targets = [...this.pointsGroup.children, ...this.runsGroup.children, ...this.modelGroup.children].filter(
       (o) => o.visible && (o as THREE.Mesh).material !== this.ghostMaterial,
     );
-    const hit = this.raycaster.intersectObjects(targets, false)[0];
+    const hit = this.raycaster.intersectObjects(targets, false).find((h) => !this.clipped(h.point));
     return hit ? (hit.object.userData.expressID as number) : null;
   }
 

@@ -9,6 +9,7 @@ Trabalha sobre modelos **IFC** de qualquer software (Revit, Archicad, Tekla, etc
 
 | Módulo | Recursos |
 | --- | --- |
+| **Vistas 3D e cortes** | Na barra lateral, **Modelo completo** ou **3D por pavimento** (isola o pavimento e enquadra). Em toda vista 3D, a ferramenta **✂ Corte** tem corte horizontal (mostra o que está abaixo da altura escolhida, com atalhos piso + 0,5/1,2/2,5 m) e cortes verticais em X e em Y do projeto, com controle deslizante e inversão de lado. Seleção e locação respeitam o corte. |
 | **Visualizador IFC** | Abre IFC2x3 / IFC4 (botão, menu `Ctrl+O`, arrastar e soltar ou duplo clique no arquivo), navegação 3D, seleção (Ctrl+clique soma), duplo clique enquadra, cores por disciplina ou cores originais do IFC. |
 | **Locação de pontos** | Biblioteca com 35 componentes (iluminação, tomadas e comandos, quadros, telecom e CFTV, incêndio, louças e ralos, climatização). Clique para locar com encaixe automático na **parede**, no **teto/forro** ou no **piso**, distribuição em **área** (linhas × colunas ou espaçamento máximo), etiquetas automáticas (L1, T1, SPK1…), sistema, circuito e parâmetros. Mover, girar, editar em lote, desfazer/refazer. Salva a locação (`.locacao.json`) e **exporta IFC4** para federar com o modelo. |
 | **Filtros** | Por disciplina (com "só" para isolar), pavimento, sistema e busca por nome, tipo ou dimensão. |
@@ -25,11 +26,17 @@ Trabalha sobre modelos **IFC** de qualquer software (Revit, Archicad, Tekla, etc
 
 ### Locação de pontos
 
-![Tomadas locadas nas paredes do modelo de exemplo](docs/tela-locacao.png)
+As abas **Locação** e **Traçado** abrem num **editor em planta 2D** do pavimento: o corte real do IFC na altura escolhida (padrão 1,20 m), com os pontos, trechos e ambientes desenhados por cima. No canto superior direito ficam o pavimento, a altura do corte e o seletor **Planta 2D | 3D**, para quem preferir editar no modelo (combinado com a ferramenta de corte).
 
-1. Na aba **Locação**, escolha um componente da biblioteca e ajuste altura, sistema, circuito e parâmetros.
-2. Passe o mouse no modelo: a pré-visualização fica **verde** onde o componente pode ser fixado e **vermelha** com o motivo (ex.: "Aponte para uma parede").
-3. Clique para locar. O modo continua ativo até `Esc`, para locar vários pontos seguidos.
+1. Escolha um componente da biblioteca e ajuste altura, sistema, circuito e parâmetros.
+2. Passe o mouse na planta:
+   - **itens de parede** encaixam na face da parede mais próxima, indicada por uma marca ciano com a seta para o ambiente;
+   - **itens de teto e piso** usam a cota real da laje ou do forro acima (ou do piso abaixo), obtida por raio no modelo, ou o topo do ambiente se não houver laje.
+3. Clique para locar. A pré-visualização fica verde (ou vermelha com o motivo) e o modo continua ativo até `Esc`. Roda do mouse dá zoom, arrastar desloca e duplo clique fora de um modo de edição enquadra.
+
+No **Traçado** em planta, os cliques seguem no plano do último vértice e `E` sobe ou desce até a elevação de trabalho. Clicar num ponto ou trecho liga até ele e finaliza.
+
+![Tomadas locadas nas paredes do modelo de exemplo (vista 3D)](docs/tela-locacao.png)
 
 Como cada fixação funciona:
 
@@ -44,13 +51,13 @@ Como cada fixação funciona:
 - Os pontos locados entram nos **filtros**, nas **propriedades**, nos **quantitativos** e nas **interferências** junto com os elementos do IFC.
 - **Arquivo de locação** (`.locacao.json`): guarda os pontos em coordenadas do projeto IFC. Reabre no lugar certo mesmo que o app desloque a cena de outra forma.
 - **Exportar IFC:** gera um IFC4 só com os pontos (mesmos pavimentos e coordenadas do modelo de origem, `IfcDistributionSystem` por sistema e `Pset_MEP_Locacao` com etiqueta, altura, circuito e parâmetros). Abra junto com o modelo original no Revit, Navisworks, Solibri ou BIMcollab para federar.
-- Para locar no teto vendo por baixo, oculte Arquitetura/Estrutura que estiverem na frente pelos filtros: elementos ocultos não recebem cliques.
+- Na vista 3D, use **3D por pavimento** e a ferramenta de corte para enxergar dentro dos ambientes. Elementos ocultos ou cortados não recebem cliques.
 
 As alturas padrão da biblioteca são valores usuais de projeto no Brasil, não exigências de norma. Ajuste-as ao padrão do cliente e ao memorial.
 
 ### Locação por ambiente
 
-Se o IFC tiver ambientes (`IfcSpace`, os *Rooms* do Revit exportados), o modo **Por ambiente** aparece na aba Locação. Marque os ambientes na lista (há filtro por pavimento) ou clique neles na vista 3D. Eles ficam destacados em ciano e a proposta aparece em verde antes de confirmar.
+Se o IFC tiver ambientes (`IfcSpace`, os *Rooms* do Revit exportados), o modo **Por ambiente** aparece na aba Locação. Marque os ambientes na lista (há filtro por pavimento) ou clique neles na planta ou na vista 3D. Eles ficam destacados em ciano e a proposta aparece em verde antes de confirmar.
 
 - **Teto e piso** (luminárias, sprinklers, detectores, difusores, ralos…): a grade segue a maior parede do ambiente, com pontos no centro de células iguais (meio espaçamento até a parede), e só ficam os pontos dentro do contorno real e a uma distância mínima das paredes. A distribuição pode ser feita por:
   - espaçamento máximo;
@@ -231,6 +238,10 @@ Concluído (etapa 3, planta 2D):
 Concluído (etapa 4, ambientes e circuitos):
 - ✅ Locação por ambiente (`IfcSpace`) pelo contorno real: grade alinhada, método dos lúmens e perímetro com detecção de vãos.
 - ✅ Circuitos ligados ao quadro, quadro de cargas com dimensionamento, balanceamento de fases, traçado do circuito e `IfcDistributionCircuit`.
+
+Concluído (etapa 5, edição em planta e vistas):
+- ✅ Locação e traçado num editor em planta 2D por pavimento, com encaixe nas faces das paredes e cota real de teto e piso.
+- ✅ Vistas 3D por pavimento e cortes horizontal e verticais (X/Y) em todas as vistas 3D.
 
 Próximas etapas:
 - Rota automática com **desvio de obstáculos** (busca em grade evitando vigas, pilares e outras redes) e tronco compartilhado entre pontos.

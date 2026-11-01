@@ -181,7 +181,7 @@ export function AmbientesSection({ model, viewer, def, height, rotationDeg, para
           </label>
         ))}
       </div>
-      <p className="muted small">Também é possível clicar no ambiente na vista 3D para marcá-lo.</p>
+      <p className="muted small">Também é possível clicar no ambiente na planta (ou na vista 3D) para marcá-lo.</p>
 
       {def.mounting === "parede" ? (
         <div className="form-grid">

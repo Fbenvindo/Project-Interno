@@ -17,6 +17,8 @@ import { LocacaoPanel } from "./locacao/LocacaoPanel";
 import { TracadoPanel } from "./tracado/TracadoPanel";
 import { CircuitosPanel } from "./circuitos/CircuitosPanel";
 import { PlanView } from "./planta/PlanView";
+import { PlanEditor } from "./planta/PlanEditor";
+import { NO_SECTION, SectionTools, sectionToPlanes, type SectionState } from "./viewer/SectionTools";
 import { PlantaPanel, type PlanSettings } from "./planta/PlantaPanel";
 import { buildPlan } from "../../core/plan/build";
 import { renderSheet } from "../../core/plan/sheet";
@@ -66,6 +68,12 @@ export function App() {
   const [selection, setSelection] = useState<number[]>([]);
   const [colorMode, setColorMode] = useState<ColorMode>("disciplina");
   const [planSettings, setPlanSettings] = useState<PlanSettings | null>(null);
+  // Editor em planta (Locação e Traçado), vistas por pavimento e cortes.
+  const [editorView, setEditorView] = useState<"2d" | "3d">("2d");
+  const [editorStorey, setEditorStorey] = useState<string>("");
+  const [editorCut, setEditorCut] = useState(1.2);
+  const [storeyView, setStoreyView] = useState<string | null>(null);
+  const [section, setSection] = useState<SectionState>(NO_SECTION);
 
   const store = usePointsStore();
   const pointElements = useMemo(() => store.points.map(pointToElement), [store.points]);
@@ -84,6 +92,7 @@ export function App() {
     for (const p of store.points) if (p.storey) score.set(p.storey, (score.get(p.storey) ?? 0) + 10);
     for (const e of model.elements) if (e.storey && e.ifcType.startsWith("IFCWALL")) score.set(e.storey, (score.get(e.storey) ?? 0) + 1);
     const storey = [...score.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? model.storeys[0] ?? "";
+    setEditorStorey(storey);
     setPlanSettings({
       storey,
       cutHeight: 1.2,
@@ -349,6 +358,34 @@ export function App() {
   );
 
   const wide = tab !== "modelo";
+  const editing2d = (tab === "locacao" || tab === "tracado") && editorView === "2d";
+  const show3d = !!model && tab !== "planta" && !editing2d;
+
+  // Cortes aplicados à vista 3D.
+  useEffect(() => {
+    if (model) viewerRef.current?.setSection(sectionToPlanes(section, model.coordinates));
+  }, [section, model]);
+
+  /** Vista 3D de um pavimento: oculta os demais e enquadra. */
+  const showStorey = useCallback(
+    (name: string | null) => {
+      if (!model) return;
+      setStoreyView(name);
+      setFilters((f) => ({
+        ...f,
+        hiddenStoreys: name ? new Set([...model.storeys, NO_STOREY].filter((s) => s !== name)) : new Set(),
+      }));
+      if (name) setEditorStorey(name);
+      setTimeout(() => viewerRef.current?.fitTo(), 60);
+    },
+    [model],
+  );
+  const storeyZ = useMemo(() => {
+    if (!model) return null;
+    const name = storeyView ?? (editing2d ? editorStorey : null) ?? null;
+    const lvl = model.storeyLevels.find((s) => s.name === (name ?? editorStorey));
+    return lvl ? model.coordinates.worldToIfc([0, lvl.level, 0])[2] : null;
+  }, [model, storeyView, editorStorey, editing2d]);
 
   return (
     <div className="app">
@@ -395,6 +432,8 @@ export function App() {
               onChange={setFilters}
               visibleCount={visibleElements.length}
               onIsolate={isolateDiscipline}
+              storeyView={storeyView}
+              onStoreyView={showStorey}
             />
           ) : (
             <div className="empty-side">Abra um modelo IFC para ver disciplinas, pavimentos e sistemas.</div>
@@ -403,6 +442,54 @@ export function App() {
 
         <section className="viewport">
           <div ref={viewerHost} className="viewer-host" />
+          {editing2d && model && viewerRef.current && editorStorey && (
+            <PlanEditor
+              viewer={viewerRef.current}
+              model={model}
+              store={store}
+              storey={editorStorey}
+              cutHeight={editorCut}
+              selection={selection}
+              elementById={elementById}
+              onPick={(id, additive) =>
+                setSelection((cur) => {
+                  if (id == null) return additive ? cur : [];
+                  if (!additive) return [id];
+                  return cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+                })
+              }
+            />
+          )}
+          {model && (tab === "locacao" || tab === "tracado") && (
+            <div className="editor-toolbar">
+              <div className="segmented">
+                <button className={editorView === "2d" ? "on" : ""} onClick={() => setEditorView("2d")}>
+                  Planta 2D
+                </button>
+                <button className={editorView === "3d" ? "on" : ""} onClick={() => setEditorView("3d")}>
+                  3D
+                </button>
+              </div>
+              {editorView === "2d" && (
+                <>
+                  <select value={editorStorey} onChange={(e) => setEditorStorey(e.target.value)} title="Pavimento">
+                    {model.storeys.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                  <label className="cut-input" title="Altura do plano de corte acima do piso">
+                    corte
+                    <input type="number" step={0.1} min={0.2} value={editorCut} onChange={(e) => setEditorCut(Math.max(0.2, Number(e.target.value)))} />m
+                  </label>
+                </>
+              )}
+            </div>
+          )}
+          {show3d && (
+            <SectionTools section={section} onChange={setSection} bounds={viewerRef.current?.getModelBounds() ?? null} cs={model!.coordinates} storeyZ={storeyZ} />
+          )}
           {tab === "planta" && planSheet && (
             <PlanView
               sheet={planSheet}

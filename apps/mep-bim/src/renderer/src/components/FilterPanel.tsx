@@ -20,6 +20,9 @@ interface Props {
   onChange: (f: Filters) => void;
   visibleCount: number;
   onIsolate: (d: Discipline) => void;
+  /** Vista 3D por pavimento (null = modelo completo). */
+  storeyView?: string | null;
+  onStoreyView?: (storey: string | null) => void;
 }
 
 function toggle<T>(set: Set<T>, value: T): Set<T> {
@@ -29,7 +32,7 @@ function toggle<T>(set: Set<T>, value: T): Set<T> {
   return next;
 }
 
-export function FilterPanel({ elements, storeys, systems, filters, onChange, visibleCount, onIsolate }: Props) {
+export function FilterPanel({ elements, storeys, systems, filters, onChange, visibleCount, onIsolate, storeyView, onStoreyView }: Props) {
   const counts = useMemo(() => {
     const disciplines = new Map<Discipline, number>();
     const storeys = new Map<string, number>();
@@ -57,6 +60,24 @@ export function FilterPanel({ elements, storeys, systems, filters, onChange, vis
       <div className="muted small">
         {visibleCount} de {elements.length} elementos visíveis
       </div>
+
+      {onStoreyView && (
+        <section>
+          <div className="section-title">Vistas 3D</div>
+          <div className="views">
+            <button className={`view-btn ${!storeyView ? "on" : ""}`} onClick={() => onStoreyView(null)}>
+              Modelo completo
+            </button>
+            {storeys
+              .filter((s) => counts.storeys.has(s))
+              .map((s) => (
+                <button key={s} className={`view-btn ${storeyView === s ? "on" : ""}`} onClick={() => onStoreyView(s)} title={`Mostrar só o pavimento ${s}`}>
+                  3D · {s}
+                </button>
+              ))}
+          </div>
+        </section>
+      )}
 
       <section>
         <div className="section-title">

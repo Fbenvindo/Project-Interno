@@ -200,3 +200,26 @@ describe("prancha e DXF", () => {
     expect(/[^\x00-\x7F]/.test(dxf)).toBe(false);
   });
 });
+
+describe("encaixe em paredes na planta", () => {
+  it("face mais próxima, com a normal para o lado do cursor", async () => {
+    const { snapToWall, wallEdges } = await import("../src/core/plan/snap");
+    const d = buildPlan(input());
+    const edges = wallEdges(d.prims);
+    // Parede interna: faces em x = 6,925 e 7,075; cursor a oeste dela.
+    const west = snapToWall([6.7, 3, 0] as unknown as P2, edges, 0.5)!;
+    expect(west.point[0]).toBeCloseTo(6.925, 4);
+    expect(west.point[1]).toBeCloseTo(3, 4);
+    expect(west.normal[0]).toBeCloseTo(-1);
+    const east = snapToWall([7.3, 3], edges, 0.5)!;
+    expect(east.point[0]).toBeCloseTo(7.075, 4);
+    expect(east.normal[0]).toBeCloseTo(1);
+    // Parede sul: face interna em y = 0,075
+    const south = snapToWall([3, 0.3], edges, 0.5)!;
+    expect(south.point[1]).toBeCloseTo(0.075, 4);
+    expect(south.normal[1]).toBeCloseTo(1);
+    expect(snapToWall([3, 3], edges, 0.5)).toBeNull();
+    // Arestas curtas (topo da parede de 15 cm) não entram
+    expect(edges.every((e) => Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]) >= 0.25)).toBe(true);
+  });
+});

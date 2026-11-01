@@ -735,3 +735,111 @@ summary {
 .status.warn.small {
   margin: 6px 0;
 }
+
+/* ---- Editor em planta, vistas e cortes ------------------------------------ */
+.plan-editor {
+  position: absolute;
+  inset: 0;
+  background: #ffffff;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.plan-editor.editing {
+  cursor: crosshair;
+}
+.plan-editor svg {
+  display: block;
+}
+.plan-editor [data-id] {
+  cursor: pointer;
+}
+.plan-fit {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+}
+.editor-toolbar {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(28, 32, 39, 0.92);
+  border: 1px solid var(--border);
+}
+.editor-toolbar .segmented {
+  margin: 0;
+}
+.editor-toolbar select,
+.cut-input input {
+  padding: 4px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.cut-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.cut-input input {
+  width: 56px;
+}
+.section-tools {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 5;
+}
+.section-panel {
+  margin-top: 6px;
+  width: 270px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(28, 32, 39, 0.95);
+  border: 1px solid var(--border);
+}
+.section-panel input[type="range"] {
+  width: 100%;
+  margin: 2px 0 8px;
+}
+.section-panel .btn-row {
+  margin: -4px 0 8px;
+  gap: 10px;
+}
+.views {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.view-btn {
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 5px 8px;
+  color: var(--text);
+  cursor: pointer;
+}
+.view-btn:hover {
+  background: var(--surface-2);
+}
+.view-btn.on {
+  border-color: var(--accent);
+  background: #1f2a3a;
+}
+
+/* Símbolos sem preenchimento também respondem ao clique na área interna. */
+#editor-planta polygon[data-id],
+#editor-planta circle[data-id],
+#prancha polygon[data-id],
+#prancha circle[data-id] {
+  pointer-events: all;
+}

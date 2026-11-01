@@ -158,6 +158,10 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
     });
 
     viewer.setPlacementHandler({
+      surface() {
+        const L = live.current;
+        return (L.movingPoint ? COMPONENT_BY_ID[L.movingPoint.componentId] : L.def!).mounting;
+      },
       hover(hit) {
         const L = live.current;
         const mp = L.movingPoint;
@@ -505,7 +509,7 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
 
 function instructions(d: ComponentDef, mode: Mode, hasCorner: boolean, moving: boolean): string {
   if (moving) return "Clique no novo local · Esc cancela";
-  if (mode === "ambiente") return "Marque os ambientes na lista ou clicando neles na vista 3D";
+  if (mode === "ambiente") return "Marque os ambientes na lista ou clicando neles na planta";
   const where = d.mounting === "parede" ? "em uma parede" : d.mounting === "teto" ? "no teto/forro" : "no piso";
   if (d.mounting !== "parede" && mode === "area") return hasCorner ? "Clique no canto oposto da área" : `Clique no primeiro canto da área ${where}`;
   return `Clique ${where} para locar · Esc encerra`;

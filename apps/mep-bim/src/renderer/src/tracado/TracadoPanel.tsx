@@ -240,6 +240,7 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
     };
 
     viewer.setPlacementHandler({
+      surface: () => "teto",
       hover(hit, ctx) {
         const L = live.current;
         if (L.mode === "ligar") {
