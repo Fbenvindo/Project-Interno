@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { DISCIPLINE_BY_ID, DISCIPLINES, getTypeLabel } from "../../core/disciplines";
 import { COMPONENT_BY_ID } from "../../core/library";
 import { sizeMeters } from "../../core/placement";
-import { pointProperties, pointToElement, type PlacedPoint } from "../../core/points";
+import { pointProperties, pointSize, pointToElement, type PlacedPoint } from "../../core/points";
 import type { Circuit } from "../../core/circuits";
 import type { Discipline, ElementInfo, Vec3 } from "../../core/types";
 import { loadIfc, type LoadedModel } from "../../ifc/loadIfc";
@@ -282,7 +282,7 @@ export function App() {
     viewerRef.current?.setPoints(
       store.points.map((p) => {
         const def = COMPONENT_BY_ID[p.componentId];
-        return { id: p.id, shape: def.shape, size: sizeMeters(def), position: p.position, rotation: p.rotation, color: DISCIPLINE_BY_ID[def.discipline].color, mesh: def.mesh };
+        return { id: p.id, shape: def.shape, size: sizeMeters({ ...def, size: pointSize(p, def) }), position: p.position, rotation: p.rotation, color: DISCIPLINE_BY_ID[def.discipline].color, mesh: def.mesh };
       }),
     );
   }, [store.points, model, libraryVersion]);
@@ -629,7 +629,17 @@ export function App() {
       case "circuitos":
         return <CircuitosPanel model={model} fileName={fileName} store={store} selection={selection} onSelect={selectPoints} />;
       case "quantitativos":
-        return <QuantitiesPanel elements={visibleElements} fileName={fileName} onSelect={selectAndFrame} />;
+        return (
+          <QuantitiesPanel
+            elements={visibleElements}
+            assemblies={(() => {
+              const visible = new Set(visibleElements.map((e) => e.expressID));
+              return store.points.filter((p) => p.assembly && visible.has(p.id)).map((p) => p.assembly!);
+            })()}
+            fileName={fileName}
+            onSelect={selectAndFrame}
+          />
+        );
       case "interferencias":
         return (
           <ClashPanel

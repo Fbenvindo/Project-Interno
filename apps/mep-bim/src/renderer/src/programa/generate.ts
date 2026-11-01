@@ -2,6 +2,7 @@
 // (na parede mais próxima, no piso ou no teto) e, para as instalações do ambiente,
 // distribuídos pelo contorno.
 import { COMPONENT_BY_ID } from "../../../core/library";
+import { assemblySize, defaultAssembly, type DeviceAssembly } from "../../../core/devices";
 import { computePlacement, DEFAULT_CEILING, type Placement, type SurfaceHit } from "../../../core/placement";
 import { newGuid, newPointId, nextTag, storeyForMounting, type PlacedPoint } from "../../../core/points";
 import { expandRequests, PROGRAM_ORIGIN, roomRequests, type EquipmentInstance, type EquipmentType, type PointRequest, type ProgramState } from "../../../core/program";
@@ -14,6 +15,14 @@ import type { P2 } from "../../../core/plan/section";
 
 const WALL_TYPES = new Set(["IFCWALL", "IFCWALLSTANDARDCASE", "IFCCURTAINWALL", "IFCCOLUMN", "IFCPLATE", "IFCCOVERING"]);
 const SPACING = 0.3; // m entre pontos iguais de um mesmo pedido
+
+/** Tomada de 20 A quando a corrente do equipamento passa de 10 A (P / V). */
+function currentFits(asm: DeviceAssembly, params: Record<string, string | number>): DeviceAssembly {
+  const p = Number(params["Potência"]);
+  const v = Number(params["Tensão"]);
+  if (!(p > 0 && v > 0) || p / v <= 10) return asm;
+  return { ...asm, modules: asm.modules.map((m) => (m === "tomada-10a" ? "tomada-20a" : m)) };
+}
 
 export interface GenerateResult {
   add: PlacedPoint[];
@@ -75,7 +84,10 @@ export function generateProgramPoints(opts: {
     let perimeterCursor = 0;
 
     for (const r of reqs) {
-      const def = COMPONENT_BY_ID[r.req.componentId];
+      const baseDef = COMPONENT_BY_ID[r.req.componentId];
+      // Tomadas e interruptores: montagem padrão (caixa 4×2 embutida com o módulo do componente).
+      const asm = baseDef ? defaultAssembly(baseDef) : null;
+      const def = baseDef && asm ? { ...baseDef, size: assemblySize(asm) } : baseDef;
       if (!def) {
         warnings.push(`${label}: componente ${r.req.componentId} não existe na biblioteca.`);
         continue;
@@ -155,6 +167,7 @@ export function generateProgramPoints(opts: {
           system: def.system,
           params: { ...paramsFor(r, i), Ambiente: label, Equipamento: r.source, Origem: PROGRAM_ORIGIN },
           ...(def.mounting === "teto" ? { ceiling: { ...DEFAULT_CEILING } } : {}),
+          ...(asm ? { assembly: currentFits(asm, paramsFor(r, i)) } : {}),
         };
         all.push(point);
         add.push(point);

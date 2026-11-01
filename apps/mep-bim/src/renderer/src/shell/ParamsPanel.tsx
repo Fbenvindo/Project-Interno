@@ -12,6 +12,9 @@ import { runIdOfElement, runLength, runSegments, RUN_TYPES, RUN_TYPE_BY_ID, type
 import type { Discipline, ElementInfo, PropertyGroup, PropertyValue } from "../../../core/types";
 import type { LoadedModel } from "../../../ifc/loadIfc";
 import { reseatCeiling, type CeilingResolver } from "../locacao/ceiling";
+import { assemblyKey, assemblySize, defaultAssembly, supportsAssembly, type DeviceAssembly } from "../../../core/devices";
+import { AssemblyEditor } from "../locacao/AssemblyEditor";
+import { pointSize } from "../../../core/points";
 import type { PointsStore } from "../locacao/usePointsStore";
 
 interface Props {
@@ -272,12 +275,22 @@ function PointTypeSelector({ points, store }: { points: PlacedPoint[]; store: Po
         // Mantém os valores de parâmetros que existem nos dois tipos.
         const params = { ...defaultParams(nd), ...Object.fromEntries(Object.entries(p.params).filter(([k]) => nd.params.some((x) => x.name === k) || !od.params.some((x) => x.name === k))) };
         let position = p.position;
+        // Montagem (tomadas/interruptores): mantém caixa e instalação; troca os módulos se eram os de fábrica.
+        let assembly: DeviceAssembly | undefined;
+        if (supportsAssembly(nd)) {
+          const nda = defaultAssembly(nd)!;
+          const oda = defaultAssembly(od);
+          assembly = p.assembly
+            ? { ...p.assembly, modules: oda && p.assembly.modules.join() === oda.modules.join() ? nda.modules : p.assembly.modules }
+            : nda;
+        }
+        const newSize = assembly ? assemblySize(assembly) : nd.size;
         if (nd.mounting === "parede") {
-          const shift = (nd.size[1] - od.size[1]) / 2000;
+          const shift = (newSize[1] - pointSize(p, od)[1]) / 2000;
           position = [p.position[0] + Math.sin(p.rotation) * shift, p.position[1], p.position[2] + Math.cos(p.rotation) * shift];
         } else position = [p.position[0], elevationFor(nd, p.refLevel, p.height), p.position[2]];
         const tag = nd.tagPrefix === od.tagPrefix ? p.tag : nextTag(all, nd.tagPrefix);
-        const updated: PlacedPoint = { ...p, componentId: id, params, position, tag };
+        const updated: PlacedPoint = { ...p, componentId: id, params, position, tag, assembly };
         all.push(updated);
         return updated;
       });
@@ -383,6 +396,18 @@ function PointRows({
     store.update(ids, (p) => ({ height: h, position: [p.position[0], elevationFor(COMPONENT_BY_ID[p.componentId], p.refLevel, h), p.position[2]] }), "height");
   };
   const setParam = (name: string, v: string | number) => store.update(ids, (p) => ({ params: { ...p.params, [name]: v } }), `param:${name}`);
+  const asmKey = common(points, (p) => (p.assembly ? assemblyKey(p.assembly) : ""));
+  const commonAssembly = !asmKey.varies && points[0].assembly ? points[0].assembly : null;
+  /** Nova montagem: a peça avança/recua da parede conforme a profundidade (caixa embutida × condulete). */
+  const setAssembly = (a: DeviceAssembly) =>
+    store.update(ids, (p) => {
+      const d = COMPONENT_BY_ID[p.componentId];
+      const shift = (assemblySize(a)[1] - pointSize(p, d)[1]) / 2000;
+      return {
+        assembly: { ...a, modules: [...a.modules] },
+        position: [p.position[0] + Math.sin(p.rotation) * shift, p.position[1], p.position[2] + Math.cos(p.rotation) * shift],
+      };
+    });
 
   // Parâmetros da disciplina: os que existem em todos os pontos selecionados.
   const paramNames = def0.params.map((x) => x.name).filter((n) => defs.every((d) => d.params.some((x) => x.name === n)));
@@ -467,16 +492,31 @@ function PointRows({
         </Group>
       )}
 
+      {defs.every((d) => supportsAssembly(d)) && (
+        <Group title="Montagem">
+          <tr>
+            <td colSpan={2} className="pcell-wide">
+              <AssemblyEditor
+                compact
+                value={commonAssembly ?? points[0].assembly ?? defaultAssembly(def0)!}
+                onChange={setAssembly}
+              />
+              {!commonAssembly && points.length > 1 && <div className="muted small">Montagens diferentes: a alteração vale para todos os selecionados.</div>}
+            </td>
+          </tr>
+        </Group>
+      )}
+
       {sameDef && (
         <Group title="Dimensões">
           <Row label="Largura (mm)">
-            <RO>{def0.size[0]}</RO>
+            <RO>{pointSize(points[0], def0)[0]}</RO>
           </Row>
           <Row label="Profundidade (mm)">
-            <RO>{def0.size[1]}</RO>
+            <RO>{pointSize(points[0], def0)[1]}</RO>
           </Row>
           <Row label="Altura (mm)">
-            <RO>{def0.size[2]}</RO>
+            <RO>{pointSize(points[0], def0)[2]}</RO>
           </Row>
         </Group>
       )}

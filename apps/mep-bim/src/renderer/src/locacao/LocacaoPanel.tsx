@@ -16,6 +16,8 @@ import {
   type SurfaceHit,
 } from "../../../core/placement";
 import { floorLevelAt, makeCeilingResolver } from "./ceiling";
+import { assemblySize, defaultAssembly, supportsAssembly, type DeviceAssembly } from "../../../core/devices";
+import { AssemblyEditor } from "./AssemblyEditor";
 import {
   defaultParams,
   heightLabel,
@@ -63,6 +65,8 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
   const [componentId, setComponentId] = useState<string | null>(null);
   const [height, setHeight] = useState(0);
   const [ceiling, setCeiling] = useState<CeilingMount>(DEFAULT_CEILING);
+  /** Tomadas e interruptores: caixa/condulete e módulos dos próximos pontos. */
+  const [assembly, setAssembly] = useState<DeviceAssembly | null>(null);
   const [rotationDeg, setRotationDeg] = useState(0);
   const [snapMm, setSnapMm] = useState(50);
   const [system, setSystem] = useState("");
@@ -92,6 +96,7 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
     setHeight(d.defaultHeight);
     setSystem(d.system);
     setParams(defaultParams(d));
+    setAssembly(defaultAssembly(d));
     setMode("ponto");
   };
 
@@ -107,7 +112,10 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
   const resolveCeiling = useMemo(() => makeCeilingResolver(viewer, elementById, model.storeyLevels), [viewer, elementById, model.storeyLevels]);
 
   const place = useCallback(
-    (d: ComponentDef, hit: SurfaceHit, h: number, rotation: number, snap: number, mount: CeilingMount = DEFAULT_CEILING): Placement => {
+    (d: ComponentDef, hit: SurfaceHit, h: number, rotation: number, snap: number, mount: CeilingMount = DEFAULT_CEILING, asm?: DeviceAssembly | null): Placement => {
+      // Tomadas/interruptores: a profundidade é a da caixa embutida ou do condulete aparente.
+      const a = asm !== undefined ? asm : live.current.assembly;
+      if (a && supportsAssembly(d)) d = { ...d, size: assemblySize(a) };
       let floorLevel = 0;
       if (d.mounting === "parede") {
         const floor = viewer.floorBelow(hit.point, hit.normal, acceptFloor);
@@ -127,8 +135,8 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
   );
 
   // Estado mais recente para os callbacks do visualizador (sem reinstalar o modo a cada mudança).
-  const live = useRef({ ceiling, def, height, rotationDeg, snapMm, system, params, mode, areaBy, rows, cols, spacing, corner, movingPoint, points, selectedSpaces });
-  live.current = { ceiling, def, height, rotationDeg, snapMm, system, params, mode, areaBy, rows, cols, spacing, corner, movingPoint, points, selectedSpaces };
+  const live = useRef({ assembly, ceiling, def, height, rotationDeg, snapMm, system, params, mode, areaBy, rows, cols, spacing, corner, movingPoint, points, selectedSpaces });
+  live.current = { assembly, ceiling, def, height, rotationDeg, snapMm, system, params, mode, areaBy, rows, cols, spacing, corner, movingPoint, points, selectedSpaces };
 
   const gridFor = useCallback(
     (c: SurfaceHit, hit: SurfaceHit): Placement[] => {
@@ -165,6 +173,7 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
         height: d.mounting === "teto" && L.ceiling.ref === "entreforro" ? 0 : L.height,
         refLevel: pl.refLevel,
         ...(d.mounting === "teto" ? { ceiling: { ...L.ceiling } } : {}),
+        ...(L.assembly && supportsAssembly(d) ? { assembly: { ...L.assembly, modules: [...L.assembly.modules] } } : {}),
         storey: storeyForMounting(d.mounting, pl.refLevel, model.storeyLevels),
         system: L.system.trim(),
         params: { ...L.params, ...(room ? { Ambiente: spaceLabel(room) } : {}) },
@@ -183,9 +192,9 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
       setStatus("");
       return;
     }
-    const preview = (d: ComponentDef, pl: Placement): PreviewItem => ({
+    const preview = (d: ComponentDef, pl: Placement, asm?: DeviceAssembly | null): PreviewItem => ({
       shape: d.shape,
-      size: sizeMeters(d),
+      size: sizeMeters(asm && supportsAssembly(d) ? { ...d, size: assemblySize(asm) } : d),
       position: pl.position,
       rotation: pl.rotation,
       ok: pl.ok,
@@ -213,17 +222,17 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
         if (!mp && L.mode === "area" && L.corner) {
           const grid = gridFor(L.corner, hit);
           setStatus(grid.length ? `${grid.length} pontos · clique para confirmar a área · Esc cancela` : `Mais de ${MAX_AREA_POINTS} pontos: aumente o espaçamento.`);
-          return grid.map((pl) => preview(d, pl));
+          return grid.map((pl) => preview(d, pl, L.assembly));
         }
         const pl = mp
-          ? place(d, hit, mp.height, mp.rotation, L.snapMm / 1000, mp.ceiling ?? L.ceiling)
+          ? place(d, hit, mp.height, mp.rotation, L.snapMm / 1000, mp.ceiling ?? L.ceiling, mp.assembly ?? null)
           : place(d, hit, L.height, (L.rotationDeg * Math.PI) / 180, L.snapMm / 1000, L.ceiling);
         if (!pl.ok) setStatus(pl.reason ?? "");
         else {
           const storey = storeyForMounting(d.mounting, pl.refLevel, model.storeyLevels);
           setStatus(`${mp ? `Mover ${mp.tag}` : d.label} · ${storey ?? "sem pavimento"} · ${instructions(d, L.mode, L.corner != null, mp != null)}`);
         }
-        return [preview(d, pl)];
+        return [preview(d, pl, mp ? (mp.assembly ?? null) : L.assembly)];
       },
       click(hit) {
         if (!hit) return;
@@ -232,7 +241,7 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
         if (mp) {
           const d = COMPONENT_BY_ID[mp.componentId];
           const mount = mp.ceiling ?? L.ceiling;
-          const pl = place(d, hit, mp.height, mp.rotation, L.snapMm / 1000, mount);
+          const pl = place(d, hit, mp.height, mp.rotation, L.snapMm / 1000, mount, mp.assembly ?? null);
           if (!pl.ok) return;
           store.update([mp.id], () => ({
             ...(d.mounting === "teto" ? { ceiling: mount, height: mount.ref === "entreforro" ? 0 : mp.height } : {}),
@@ -389,6 +398,12 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
           <div className="muted small">
             Fixação em {MOUNTING_LABEL[def.mounting]} · {def.size.join("×")} mm · etiqueta {def.tagPrefix}n
           </div>
+          {assembly && supportsAssembly(def) && (
+            <div className="assembly-config">
+              <div className="field-label">Montagem</div>
+              <AssemblyEditor value={assembly} onChange={setAssembly} />
+            </div>
+          )}
           {def.mounting === "teto" && (
             <div className="ceiling-ref">
               <div className="field-label">Alinhamento no teto</div>

@@ -4,6 +4,7 @@ import { getCategory } from "./disciplines";
 import { COMPONENT_BY_ID, type ComponentDef } from "./library";
 import type { CoordinateSystem } from "./math";
 import { CEILING_REF_LABEL, type CeilingMount, type CeilingRef } from "./placement";
+import { assemblySize, boxLabel, capacity, MODULES, modulesText, slotsUsed, type DeviceAssembly, type ModuleKind } from "./devices";
 import type { OBB } from "./obb";
 import type { BBox, ElementInfo, PropertyGroup, Vec3 } from "./types";
 
@@ -29,6 +30,13 @@ export interface PlacedPoint {
   circuit?: string | null;
   /** Itens de teto: alinhados ao forro, no entreforro ou na laje. */
   ceiling?: CeilingMount;
+  /** Tomadas e interruptores: caixa/condulete e módulos. */
+  assembly?: DeviceAssembly;
+}
+
+/** Tamanho real do ponto (mm): o da montagem (caixa/condulete), senão o do componente. */
+export function pointSize(p: Pick<PlacedPoint, "assembly">, def: ComponentDef): [number, number, number] {
+  return p.assembly ? assemblySize(p.assembly) : def.size;
 }
 
 export interface StoreyLevel {
@@ -86,7 +94,7 @@ export function defaultParams(def: ComponentDef): Record<string, string | number
 }
 
 export function pointBBox(p: PlacedPoint, def: ComponentDef): BBox {
-  const [w, d, h] = def.size.map((v) => v / 2000);
+  const [w, d, h] = pointSize(p, def).map((v) => v / 2000);
   const c = Math.abs(Math.cos(p.rotation));
   const s = Math.abs(Math.sin(p.rotation));
   const ex = c * w + s * d;
@@ -102,7 +110,7 @@ export function pointOBB(p: PlacedPoint, def: ComponentDef): OBB {
   return {
     center: p.position,
     axes: [[c, 0, -s], [0, 1, 0], [s, 0, c]],
-    half: [def.size[0] / 2000, def.size[2] / 2000, def.size[1] / 2000],
+    half: [pointSize(p, def)[0] / 2000, pointSize(p, def)[2] / 2000, pointSize(p, def)[1] / 2000],
   };
 }
 
@@ -112,7 +120,7 @@ export function pointToElement(p: PlacedPoint): ElementInfo {
     expressID: p.id,
     globalId: p.guid,
     ifcType: def.ifcType,
-    name: `${p.tag} - ${def.label}`,
+    name: `${p.tag} - ${def.label}${p.assembly ? ` (${modulesText(p.assembly.modules)})` : ""}`,
     objectType: def.label,
     predefinedType: def.predefinedType,
     storey: p.storey,
@@ -121,7 +129,7 @@ export function pointToElement(p: PlacedPoint): ElementInfo {
     category: getCategory(def.ifcType),
     bbox: pointBBox(p, def),
     length: null,
-    size: null,
+    size: p.assembly ? boxLabel(p.assembly) : null,
     origin: "locacao",
     obb: pointOBB(p, def),
   };
@@ -143,7 +151,14 @@ export function pointProperties(p: PlacedPoint): PropertyGroup[] {
           ? [{ name: p.ceiling.ref === "forro" ? "Altura do forro (sem forro no modelo)" : "Altura do fundo (piso)", value: `${Math.round(p.ceiling.level)} mm` }]
           : []),
         { name: heightLabel(def), value: `${Math.round(p.height)} mm` },
-        { name: "Dimensões (L×P×A)", value: `${def.size.join("×")} mm` },
+        ...(p.assembly
+          ? [
+              { name: "Instalação", value: p.assembly.install === "embutida" ? "Embutida na parede" : "Aparente (sobre a parede)" },
+              { name: "Caixa", value: boxLabel(p.assembly) },
+              { name: "Módulos", value: `${modulesText(p.assembly.modules)} (${slotsUsed(p.assembly.modules)}/${capacity(p.assembly.box)})` },
+            ]
+          : []),
+        { name: "Dimensões (L×P×A)", value: `${pointSize(p, def).join("×")} mm` },
         ...Object.entries(p.params).map(([name, value]) => ({
           name: unitOf.get(name) ? `${name} (${unitOf.get(name)})` : name,
           value,
@@ -179,6 +194,8 @@ interface StoredPoint {
   circuito?: string | null;
   /** Itens de teto: referência e altura (mm acima do piso). */
   teto?: { referencia: CeilingRef; alturaMm: number };
+  /** Tomadas e interruptores: instalação, caixa e módulos. */
+  montagem?: { instalacao: DeviceAssembly["install"]; caixa: DeviceAssembly["box"]; modulos: ModuleKind[] };
 }
 
 export interface LocacaoFile {
@@ -208,6 +225,7 @@ export function serializePoints(points: PlacedPoint[], cs: CoordinateSystem, mod
       parametros: p.params,
       ...(p.circuit ? { circuito: p.circuit } : {}),
       ...(p.ceiling ? { teto: { referencia: p.ceiling.ref, alturaMm: p.ceiling.level } } : {}),
+      ...(p.assembly ? { montagem: { instalacao: p.assembly.install, caixa: p.assembly.box, modulos: p.assembly.modules } } : {}),
     })),
   };
 }
@@ -234,6 +252,15 @@ export function deserializePoints(json: unknown, cs: CoordinateSystem): PlacedPo
       params: s.parametros ?? {},
       circuit: s.circuito ?? null,
       ...(s.teto && s.teto.referencia in CEILING_REF_LABEL ? { ceiling: { ref: s.teto.referencia, level: Number(s.teto.alturaMm) || 0 } } : {}),
+      ...(s.montagem
+        ? {
+            assembly: {
+              install: s.montagem.instalacao === "aparente" ? ("aparente" as const) : ("embutida" as const),
+              box: s.montagem.caixa === "4x4" ? ("4x4" as const) : ("4x2" as const),
+              modules: (s.montagem.modulos ?? []).filter((m) => m in MODULES),
+            },
+          }
+        : {}),
     };
   });
 }

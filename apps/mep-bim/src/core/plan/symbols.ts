@@ -6,6 +6,7 @@
 // tracejado no piso). Demais disciplinas: símbolos simples com sigla. Confira
 // com o padrão gráfico do escritório antes de emitir pranchas.
 import type { ComponentDef } from "../library";
+import { boxLabel, MODULES, modulesText, switchCode, type DeviceAssembly } from "../devices";
 import type { SymbolPrim } from "./drawing";
 import type { P2 } from "./section";
 
@@ -120,3 +121,45 @@ export const LEGEND_LINE: SymbolPrim[] = [{ t: "line", a: [-4, 0], b: [4, 0] }];
 export const RISER_UP: SymbolPrim[] = [circle(1.1, true)];
 export const RISER_DOWN: SymbolPrim[] = [circle(1.1, false), { t: "circle", c: [0, 0], r: 0.35, fill: true }];
 export const TEE_MARK: SymbolPrim[] = [circle(0.6, true)];
+
+/**
+ * Símbolo de um ponto montado em caixa: um triângulo por tomada (vazio, meio ou cheio pela
+ * altura, como nas tomadas simples), "20A" acima das tomadas de 20 A, um círculo com a sigla
+ * dos interruptores (S, S2, S3, S3W, S4W, S2P) e, se aparente, uma moldura em volta.
+ */
+export function assemblySymbol(asm: DeviceAssembly, heightMm: number): Omit<SymbolDef, "description"> & { description: string } {
+  const level = heightMm <= 600 ? "baixa" : heightMm <= 1500 ? "media" : "alta";
+  const items: { w: number; draw: (x: number) => SymbolPrim[] }[] = [];
+  for (const m of asm.modules) {
+    if (MODULES[m].kind !== "tomada") continue;
+    items.push({
+      w: S,
+      draw: (x) => [
+        ...outletTriangle(level).map((p) => (p.t === "poly" ? { ...p, pts: p.pts.map(([a, b]): P2 => [a + x, b]) } : p)),
+        ...(m === "tomada-20a" ? [text("20A", [x, S * 0.87 + 0.9], 1.0)] : []),
+      ],
+    });
+  }
+  const code = switchCode(asm.modules);
+  if (code) {
+    const h = code.length <= 2 ? 1.3 : code.length <= 4 ? 0.95 : 0.75;
+    items.push({ w: 3.4, draw: (x) => [circle(1.7, false, [x, 1.7]), text(code, [x, 1.7], h)] });
+  }
+  if (!items.length) items.push({ w: 2.6, draw: (x) => [box(2.6, 1.6, [x, 0.8])] });
+  const gap = 0.5;
+  const total = items.reduce((s, i) => s + i.w, 0) + gap * (items.length - 1);
+  let x = -total / 2;
+  const prims: SymbolPrim[] = [];
+  for (const it of items) {
+    prims.push(...it.draw(x + it.w / 2));
+    x += it.w + gap;
+  }
+  const top = asm.modules.includes("tomada-20a") ? S * 0.87 + 1.5 : 3.4;
+  if (asm.install === "aparente") prims.push(box(total + 1.2, top + 0.6, [0, (top + 0.6) / 2]));
+  return {
+    footprint: false,
+    prims,
+    labelOffset: top + 1.8,
+    description: `${modulesText(asm.modules)} (h = ${Math.round(heightMm)} mm) — ${boxLabel(asm)}`,
+  };
+}

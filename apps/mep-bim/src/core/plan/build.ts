@@ -10,7 +10,9 @@ import type { Discipline, ElementInfo, Vec3 } from "../types";
 import { LAYER_PREFIX, PEN, PRINT_COLOR, type LegendItem, type PlanDrawing, type Prim, type SymbolPrim } from "./drawing";
 import { chainSegments, cutMesh, type P2 } from "./section";
 import { centroid, pointInPolygon, type Space } from "../spaces";
-import { LEGEND_LINE, RISER_DOWN, RISER_UP, symbolFor, TEE_MARK } from "./symbols";
+import { assemblySymbol, LEGEND_LINE, RISER_DOWN, RISER_UP, symbolFor, TEE_MARK } from "./symbols";
+import { assemblyKey } from "../devices";
+import { pointSize } from "../points";
 import { BOX_LABEL, INSTALL_LABEL, type BoxKind, type PullBox } from "../conduits";
 
 export interface PlanLabels {
@@ -137,7 +139,8 @@ export function buildPlan(input: PlanInput): PlanDrawing {
     if (p.storey !== storey) continue;
     const def = COMPONENT_BY_ID[p.componentId];
     if (!input.disciplines.has(def.discipline)) continue;
-    const sym = symbolFor(def);
+    const sym = p.assembly ? assemblySymbol(p.assembly, p.height) : symbolFor(def);
+    const size = pointSize(p, def);
     const color = PRINT_COLOR[def.discipline];
     const prefix = LAYER_PREFIX[def.discipline];
     const f = planDir([Math.sin(p.rotation), 0, Math.cos(p.rotation)]);
@@ -145,7 +148,7 @@ export function buildPlan(input: PlanInput): PlanDrawing {
     const center = plan(p.position);
     const wall = def.mounting === "parede";
     // Itens de parede: símbolo apoiado na face da parede, voltado para o ambiente.
-    const origin: P2 = wall ? [center[0] - (f[0] * def.size[1]) / 2000, center[1] - (f[1] * def.size[1]) / 2000] : center;
+    const origin: P2 = wall ? [center[0] - (f[0] * size[1]) / 2000, center[1] - (f[1] * size[1]) / 2000] : center;
 
     if (sym.footprint) {
       const [w, d] = [def.size[0] / 1000, def.size[1] / 1000];
@@ -188,9 +191,10 @@ export function buildPlan(input: PlanInput): PlanDrawing {
       prims.push({ t: "text", p: at, text: parts.join(" · "), height: textH, anchor, layer: `${prefix}-TEXTOS`, color, id: p.id });
     }
 
-    if (!legend.has(def.id)) {
+    const legendKey = p.assembly ? `${def.id}|${assemblyKey(p.assembly)}|${sym.description}` : def.id;
+    if (!legend.has(legendKey)) {
       const lp: SymbolPrim[] = sym.footprint ? [{ t: "poly", pts: [[-3, -2], [3, -2], [3, 2], [-3, 2]], closed: true }, ...sym.prims] : sym.prims.map((s) => shiftSymbol(s, wall ? -1.5 : 0));
-      legend.set(def.id, { key: def.id, label: sym.description, color, prims: lp });
+      legend.set(legendKey, { key: legendKey, label: sym.description, color, prims: lp });
     }
   }
 

@@ -3,10 +3,11 @@
 // As coordenadas são as do IFC de origem, então os modelos se sobrepõem.
 import { COMPONENT_BY_ID } from "./library";
 import type { CoordinateSystem } from "./math";
-import { newGuid, storeyAt, type PlacedPoint, type StoreyLevel } from "./points";
+import { newGuid, pointSize, storeyAt, type PlacedPoint, type StoreyLevel } from "./points";
 import type { Circuit } from "./circuits";
 import { derivedGuid, runFittings, runSegments, RUN_TYPE_BY_ID, segmentBasis, storeyProbeY, type Run } from "./runs";
 import { boxSizeLabel, INSTALL_LABEL, pullBoxes } from "./conduits";
+import { boxLabel, modulesText } from "./devices";
 import type { Vec3 } from "./types";
 
 class StepWriter {
@@ -105,7 +106,7 @@ export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs,
 
   for (const p of points) {
     const def = COMPONENT_BY_ID[p.componentId];
-    const [sw, sd, sh] = def.size;
+    const [sw, sd, sh] = pointSize(p, def);
     const profile =
       def.shape === "cilindro"
         ? w.add(`IFCCIRCLEPROFILEDEF(.AREA.,$,${ref(origin2d)},${num(sw / 2)})`)
@@ -143,6 +144,13 @@ export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs,
     const props: number[] = [
       w.add(`IFCPROPERTYSINGLEVALUE('Etiqueta',$,IFCLABEL(${str(p.tag)}),$)`),
       w.add(`IFCPROPERTYSINGLEVALUE('Componente',$,IFCLABEL(${str(def.label)}),$)`),
+      ...(p.assembly
+        ? [
+            w.add(`IFCPROPERTYSINGLEVALUE('Instalacao',$,IFCLABEL(${str(p.assembly.install === "embutida" ? "Embutida" : "Aparente")}),$)`),
+            w.add(`IFCPROPERTYSINGLEVALUE('Caixa',$,IFCLABEL(${str(boxLabel(p.assembly))}),$)`),
+            w.add(`IFCPROPERTYSINGLEVALUE('Modulos',$,IFCLABEL(${str(modulesText(p.assembly.modules))}),$)`),
+          ]
+        : []),
       ...(def.source ? [w.add(`IFCPROPERTYSINGLEVALUE('Familia Revit',$,IFCLABEL(${str(`${def.source.family} : ${def.source.type}`)}),$)`)] : []),
       w.add(`IFCPROPERTYSINGLEVALUE(${str("Fixação")},$,IFCLABEL(${str(def.mounting)}),$)`),
       w.add(`IFCPROPERTYSINGLEVALUE('Altura de montagem',$,IFCLENGTHMEASURE(${num(p.height)}),$)`),

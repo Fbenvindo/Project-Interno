@@ -1,3 +1,4 @@
+import { deviceMaterials, type DeviceAssembly } from "../../../core/devices";
 import { useMemo, useState } from "react";
 import { MEP_DISCIPLINES } from "../../../core/disciplines";
 import { formatNumber, toCsv } from "../../../core/format";
@@ -7,11 +8,14 @@ import { saveFile } from "../platform";
 
 interface Props {
   elements: ElementInfo[];
+  /** Montagens (caixas e módulos) dos pontos de tomada e comando visíveis. */
+  assemblies?: DeviceAssembly[];
   fileName: string | null;
   onSelect: (ids: number[]) => void;
 }
 
-export function QuantitiesPanel({ elements, fileName, onSelect }: Props) {
+export function QuantitiesPanel({ elements, assemblies = [], fileName, onSelect }: Props) {
+  const materials = useMemo(() => deviceMaterials(assemblies), [assemblies]);
   const [onlyMep, setOnlyMep] = useState(true);
   const [byStorey, setByStorey] = useState(true);
   const [bySystem, setBySystem] = useState(true);
@@ -31,7 +35,10 @@ export function QuantitiesPanel({ elements, fileName, onSelect }: Props) {
   const exportCsv = async () => {
     const csv = toCsv(
       ["Disciplina", "Tipo", "Descrição", "Dimensão", "Sistema", "Pavimento", "Unidade", "Quantidade", "Nº de elementos"],
-      rows.map((r) => [r.disciplineLabel, r.typeLabel, r.description, r.size, r.system, r.storey, r.unit, r.quantity, r.count]),
+      [
+        ...rows.map((r) => [r.disciplineLabel, r.typeLabel, r.description, r.size, r.system, r.storey, r.unit, r.quantity, r.count]),
+        ...materials.map((m) => ["Elétrica", "Caixas e módulos", m.description, "", "", "", "un", m.quantity, m.quantity]),
+      ],
     );
     const base = (fileName ?? "modelo").replace(/\.ifc$/i, "");
     const saved = await saveFile({ defaultName: `${base}-quantitativos.csv`, content: csv, filters: [{ name: "CSV (Excel)", extensions: ["csv"] }] });
@@ -101,6 +108,23 @@ export function QuantitiesPanel({ elements, fileName, onSelect }: Props) {
         </tbody>
       </table>
       {!rows.length && <p className="muted">Nenhum elemento para quantificar com os filtros atuais.</p>}
+      {materials.length > 0 && (
+        <>
+          <div className="section-title" style={{ marginTop: 16 }}>
+            Caixas e módulos (tomadas e comandos)
+          </div>
+          <table className="grid-table">
+            <tbody>
+              {materials.map((m) => (
+                <tr key={m.description}>
+                  <td>{m.description}</td>
+                  <td className="num">{m.quantity} un</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   );
 }

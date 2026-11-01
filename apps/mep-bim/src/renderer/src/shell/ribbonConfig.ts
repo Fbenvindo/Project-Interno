@@ -171,7 +171,10 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
       label: "Pontos",
       buttons: [
         loc("tomada", "Tomada", "tomada", "tomada-baixa"),
-        loc("interruptor", "Interruptor", "interruptor", "interruptor-simples"),
+        loc("interruptor", "Interruptor simples", "interruptor", "interruptor-simples"),
+        loc("interruptor-paralelo", "Paralelo", "interruptor", "interruptor-paralelo"),
+        loc("interruptor-intermediario", "Intermediário", "interruptor", "interruptor-intermediario"),
+        loc("interruptor-bipolar", "Bipolar", "interruptor", "interruptor-bipolar"),
         loc("luminaria", "Luminária", "luminaria", "lum-embutir-6060"),
         loc("quadro", "Quadro", "quadro", "quadro-distribuicao"),
       ],
