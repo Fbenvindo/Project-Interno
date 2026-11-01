@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { IfcAPI } from "web-ifc";
-import { DEFAULT_CATALOG, detectType, roomInventory, roomRequests, countPoints, type ProgramState } from "../src/core/program";
+import { DEFAULT_CATALOG, detectType, roomInventory, roomRequests, countPoints, expandRequests, totalsOf, PARAM_PESO, PARAM_UHC, type ProgramState } from "../src/core/program";
 import { COMPONENT_BY_ID } from "../src/core/library";
 import { deserializeProject, serializeProject } from "../src/core/project";
 import { loadIfc, type LoadedModel } from "../src/ifc/loadIfc";
@@ -77,6 +77,35 @@ describe("levantamento por ambiente (IFC do apartamento)", () => {
     expect(countPoints(custom)).toBe(1 + 2 + 3 + 1 + 1);
     expect(custom.find((r) => r.source.startsWith("Bacia"))!.req.height).toBe(250);
     expect(custom.filter((r) => r.center == null).map((r) => r.source)).toEqual(["Ducha higiênica", "Ambiente"]);
+  });
+
+  it("leva potência, tensão, pesos e UHC do equipamento aos pontos e soma por ambiente", () => {
+    const inv = roomInventory(model.elements, model.spaces, toPlan, DEFAULT_CATALOG);
+    const defOf = (id: string) => COMPONENT_BY_ID[id];
+    const bath = model.spaces.find((s) => s.name === "Banheiro")!.globalId;
+    const pts = expandRequests(roomRequests(bath, undefined, inv.get(bath)!, DEFAULT_CATALOG), defOf);
+    const of = (src: string, comp: string) => pts.filter((p) => p.request.source.startsWith(src) && p.request.req.componentId === comp).map((p) => p.params);
+    expect(of("Bacia", "ponto-agua-fria")[0][PARAM_PESO]).toBe(0.3);
+    expect(of("Bacia", "ponto-esgoto")[0]).toMatchObject({ [PARAM_UHC]: 6, Diâmetro: 100 });
+    expect(of("Chuveiro", "tomada-alta")[0]).toMatchObject({ Potência: 5500, Tensão: 220 });
+    expect(of("Chuveiro", "ralo-sifonado")[0][PARAM_UHC]).toBe(2);
+    const t = totalsOf(pts, defOf);
+    expect(t.pesosAF).toBeCloseTo(0.3 + 0.3 + 0.4);
+    expect(t.uhc).toBe(6 + 1 + 2);
+    expect(t.potencia).toBe(5500);
+    expect(t.vazaoAF).toBeCloseTo(0.3);
+
+    // TV: só a primeira tomada recebe a potência do equipamento; a segunda fica com o padrão do ponto.
+    const sala = model.spaces.find((s) => s.name === "Sala")!.globalId;
+    const tv = expandRequests(roomRequests(sala, undefined, inv.get(sala)!, DEFAULT_CATALOG), defOf).filter((p) => p.request.req.componentId === "tomada-media");
+    const padrao = COMPONENT_BY_ID["tomada-media"].params.find((x) => x.name === "Potência")!.default;
+    expect(tv.map((p) => p.params["Potência"])).toEqual([200, padrao]);
+
+    // Ajuste por equipamento: chuveiro de 7500 W
+    const ch = inv.get(bath)!.find((i) => i.detected === "chuveiro")!;
+    const prog: ProgramState = { rooms: { [bath]: { equipment: { [ch.key]: { typeId: "chuveiro", include: true, tech: { potencia: 7500 } } }, extras: [] } } };
+    const custom = expandRequests(roomRequests(bath, prog.rooms[bath], inv.get(bath)!, DEFAULT_CATALOG), defOf);
+    expect(custom.find((p) => p.request.req.componentId === "tomada-alta")!.params).toMatchObject({ Potência: 7500, Tensão: 220 });
   });
 
   it("o programa é salvo e reaberto com o projeto", () => {

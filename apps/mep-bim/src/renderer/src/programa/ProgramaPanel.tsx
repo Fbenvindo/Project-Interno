@@ -4,6 +4,11 @@ import { formatNumber } from "../../../core/format";
 import {
   countPoints,
   effectiveReqs,
+  effectiveTech,
+  expandRequests,
+  totalsOf,
+  type ProgramTotals,
+  type TechData,
   reqId,
   roomEquipment,
   roomInventory,
@@ -22,7 +27,18 @@ import { saveFile, openTextFile } from "../platform";
 import type { Viewer } from "../viewer/Viewer";
 import { catalogFromJson, catalogToJson, resetCatalog, saveCatalog, useCatalog } from "./catalogStore";
 import { generateProgramPoints } from "./generate";
-import { ReqTable, reqSummary } from "./ReqTable";
+import { ReqTable, reqSummary, TechEditor, techSummary } from "./ReqTable";
+import { COMPONENT_BY_ID } from "../../../core/library";
+
+const defOf = (id: string) => COMPONENT_BY_ID[id];
+function TotalsLine({ t }: { t: ProgramTotals }) {
+  const parts: string[] = [];
+  if (t.potencia) parts.push(`Σ potência ${formatNumber(t.potencia, 0)} W/VA`);
+  if (t.pesosAF) parts.push(`Σ pesos AF ${formatNumber(t.pesosAF, 1)} (Q ≈ ${formatNumber(t.vazaoAF, 2)} L/s)`);
+  if (t.pesosAQ) parts.push(`Σ pesos AQ ${formatNumber(t.pesosAQ, 1)}`);
+  if (t.uhc) parts.push(`Σ ${formatNumber(t.uhc, 0)} UHC`);
+  return parts.length ? <div className="totals small">{parts.join(" · ")}</div> : null;
+}
 
 interface Props {
   section: "tipos" | "ambientes";
@@ -135,6 +151,7 @@ function TiposSection() {
               <span className="grow">
                 <b>{t.label}</b>
                 <div className="muted small">{reqSummary(t.reqs)}</div>
+                {t.tech && techSummary(t.tech) && <div className="muted small tech-line">{techSummary(t.tech)}</div>}
               </span>
               <span className={`caret ${expanded ? "open" : ""}`}>▸</span>
             </button>
@@ -153,6 +170,13 @@ function TiposSection() {
                     />
                   </label>
                 </div>
+                <div className="field-label">Dados técnicos</div>
+                <TechEditor tech={t.tech ?? {}} onChange={(tech) => update(t.id, { tech })} />
+                <p className="muted small">
+                  Potência e tensão vão para a primeira tomada do equipamento (a que o alimenta) e daí para o quadro de cargas; peso AF/AQ para o
+                  ponto de água fria/quente; UHC e Ø para a saída de esgoto.
+                </p>
+                <div className="field-label">Pontos</div>
                 <ReqTable reqs={t.reqs} onChange={(reqs) => update(t.id, { reqs })} />
                 <div className="btn-row">
                   <button className="link danger-link" onClick={() => window.confirm(`Excluir o tipo "${t.label}" do padrão?`) && saveCatalog(catalog.filter((x) => x.id !== t.id))}>
@@ -208,7 +232,9 @@ function AmbientesSection({ model, store, viewer, elementById, resolveCeiling, o
     return <p className="muted">Este IFC não tem ambientes (IfcSpace). Exporte o modelo com os ambientes (no Revit: exportar “Ambientes” no IFC) para usar o programa.</p>;
   }
 
-  const total = rooms.reduce((s, r) => s + countPoints(roomRequests(r.globalId, program.rooms[r.globalId], inventory.get(r.globalId) ?? [], catalog)), 0);
+  const allReqs = rooms.flatMap((r) => roomRequests(r.globalId, program.rooms[r.globalId], inventory.get(r.globalId) ?? [], catalog));
+  const total = countPoints(allReqs);
+  const overall = totalsOf(expandRequests(allReqs, defOf), defOf);
 
   return (
     <>
@@ -230,6 +256,7 @@ function AmbientesSection({ model, store, viewer, elementById, resolveCeiling, o
           Gerar pontos ({total})
         </button>
       </div>
+      <TotalsLine t={overall} />
       {message && (
         <div className="status small">
           {message.text}
@@ -266,6 +293,7 @@ function AmbientesSection({ model, store, viewer, elementById, resolveCeiling, o
                   {known.filter((i) => roomEquipment(room, i).include).length + manual.length} equipamento(s) · {countPoints(reqs)} ponto(s) previstos
                   {generated ? ` · ${generated} gerados` : ""}
                 </div>
+                <TotalsLine t={totalsOf(expandRequests(reqs, defOf), defOf)} />
               </span>
               <span className={`caret ${expanded ? "open" : ""}`}>▸</span>
             </button>
@@ -378,6 +406,9 @@ function EquipmentRow({
 }) {
   const reqs = effectiveReqs(eq, catalog);
   const custom = !!eq.reqs;
+  const tech = effectiveTech(eq, catalog);
+  const base = catalog.find((t) => t.id === eq.typeId)?.tech ?? {};
+  const [editTech, setEditTech] = useState(false);
   return (
     <div className={`eq-row ${eq.include ? "" : "off"}`}>
       <div className="eq-head">
@@ -402,6 +433,9 @@ function EquipmentRow({
             personalizar
           </button>
         )}
+        <button className={`link ${eq.tech ? "strong" : ""}`} onClick={() => setEditTech(!editTech)} title="Potência, tensão, pesos e UHC deste equipamento">
+          dados
+        </button>
         {onShow && (
           <button className="link" onClick={onShow}>
             ver
@@ -413,6 +447,18 @@ function EquipmentRow({
           </button>
         )}
       </div>
+      {eq.include && techSummary(tech) && (
+        <div className="muted small eq-summary tech-line">
+          {eq.tech ? <span className="tag-padrao custom">ajustado</span> : null}
+          {techSummary(tech)}
+        </div>
+      )}
+      {editTech && (
+        <div className="eq-tech">
+          <TechEditor tech={eq.tech ?? {}} base={base} onChange={(t: TechData) => onChange({ tech: Object.keys(t).length ? t : undefined }, "tech")} />
+          <div className="muted small">Vazio = valor do padrão do tipo (em cinza).</div>
+        </div>
+      )}
       {eq.include &&
         (custom ? (
           <ReqTable reqs={eq.reqs!} onChange={(next) => onChange({ reqs: next }, "reqs")} />

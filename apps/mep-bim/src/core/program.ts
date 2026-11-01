@@ -23,6 +23,8 @@ export interface Requirement {
 export interface EquipmentType {
   id: string;
   label: string;
+  /** Dados técnicos do equipamento (levados aos pontos). */
+  tech?: TechData;
   /** Palavras que identificam o equipamento no nome/tipo do objeto do IFC (sem acento, minúsculas). */
   keywords: string[];
   reqs: Requirement[];
@@ -34,6 +36,8 @@ export interface RoomEquipment {
   include: boolean;
   /** Instalações próprias deste equipamento (substituem as do tipo). */
   reqs?: Requirement[];
+  /** Dados técnicos próprios (sobrepõem os do tipo, campo a campo). */
+  tech?: TechData;
   /** Incluído à mão (sem objeto no IFC). */
   manual?: { label: string };
 }
@@ -61,45 +65,75 @@ const R = (componentId: string, extra: Omit<Requirement, "id" | "componentId" | 
 });
 
 /**
- * Padrão inicial. Alturas usuais no Brasil (eixo do ponto acima do piso acabado):
- * confira com o padrão do cliente e com os fabricantes dos equipamentos.
+ * Dados técnicos do equipamento, levados aos pontos gerados:
+ * potência e tensão → tomada que alimenta o equipamento (e daí ao quadro de cargas);
+ * pesos (NBR 5626) → pontos de água fria/quente; UHC e diâmetro (NBR 8160) → ponto de esgoto.
+ */
+export interface TechData {
+  /** W ou VA (como no catálogo do fabricante). */
+  potencia?: number;
+  tensao?: number;
+  /** Peso relativo de água fria (NBR 5626). */
+  pesoAF?: number;
+  /** Peso relativo de água quente (NBR 5626). */
+  pesoAQ?: number;
+  /** Unidades Hunter de contribuição (NBR 8160). */
+  uhc?: number;
+  /** Diâmetro nominal mínimo do ramal de descarga (mm, NBR 8160). */
+  diamEsgoto?: number;
+}
+
+export const TECH_FIELDS: { key: keyof TechData; label: string; unit: string; step: number }[] = [
+  { key: "potencia", label: "Potência", unit: "W/VA", step: 50 },
+  { key: "tensao", label: "Tensão", unit: "V", step: 1 },
+  { key: "pesoAF", label: "Peso AF", unit: "NBR 5626", step: 0.1 },
+  { key: "pesoAQ", label: "Peso AQ", unit: "NBR 5626", step: 0.1 },
+  { key: "uhc", label: "UHC", unit: "NBR 8160", step: 1 },
+  { key: "diamEsgoto", label: "Ø esgoto", unit: "mm", step: 10 },
+];
+
+/**
+ * Padrão inicial. Alturas usuais no Brasil (eixo do ponto acima do piso acabado);
+ * pesos da NBR 5626 (tabela de pesos relativos) e UHC/diâmetros mínimos da NBR 8160
+ * (aparelhos residenciais). Confira com o padrão do cliente e com os fabricantes.
  */
 export const DEFAULT_CATALOG: EquipmentType[] = [
   {
     id: "bacia",
     label: "Bacia sanitária",
     keywords: ["bacia", "vaso sanitario", "vaso", "toilet", "water closet", "wc"],
-    reqs: [R("ponto-agua-fria", { height: 300, lateral: -0.2, params: { Diâmetro: 25 } }), R("ponto-esgoto", { recuo: 0.3, params: { Diâmetro: 100 } })],
+    tech: { pesoAF: 0.3, uhc: 6, diamEsgoto: 100 },
+    reqs: [R("ponto-agua-fria", { height: 300, lateral: -0.2 }), R("ponto-esgoto", { recuo: 0.3 })],
   },
   {
     id: "ducha-higienica",
     label: "Ducha higiênica",
     keywords: ["ducha higienica", "bidet", "bide"],
-    reqs: [R("ponto-agua-fria", { height: 600, params: { Diâmetro: 20 } })],
+    tech: { pesoAF: 0.4 },
+    reqs: [R("ponto-agua-fria", { height: 600 })],
   },
   {
     id: "lavatorio",
     label: "Lavatório",
     keywords: ["lavatorio", "lavabo", "cuba de apoio", "cuba de embutir", "washbasin", "wash basin", "lavatory"],
-    reqs: [R("ponto-agua-fria", { height: 600, lateral: -0.1, params: { Diâmetro: 20 } }), R("saida-esgoto-parede", { height: 500, params: { Diâmetro: 40 } })],
+    tech: { pesoAF: 0.3, uhc: 1, diamEsgoto: 40 },
+    reqs: [R("ponto-agua-fria", { height: 600, lateral: -0.1 }), R("saida-esgoto-parede", { height: 500 })],
   },
   {
     id: "chuveiro",
     label: "Chuveiro",
     keywords: ["chuveiro", "ducha", "shower"],
-    reqs: [
-      R("ponto-agua-fria", { height: 2200, params: { Diâmetro: 25 } }),
-      R("tomada-alta", { height: 2200, lateral: 0.15, params: { Potência: 5500, Tensão: 220 } }),
-      R("ralo-sifonado", { recuo: 0.5 }),
-    ],
+    tech: { potencia: 5500, tensao: 220, pesoAF: 0.4, uhc: 2, diamEsgoto: 40 },
+    reqs: [R("ponto-agua-fria", { height: 2200 }), R("tomada-alta", { height: 2200, lateral: 0.15 }), R("ralo-sifonado", { recuo: 0.5 })],
   },
   {
     id: "pia-cozinha",
     label: "Pia de cozinha",
     keywords: ["pia", "cuba", "kitchen sink", "sink"],
+    tech: { pesoAF: 0.7, uhc: 3, diamEsgoto: 50 },
     reqs: [
-      R("ponto-agua-fria", { height: 600, lateral: -0.1, params: { Diâmetro: 25 } }),
-      R("saida-esgoto-parede", { height: 500, params: { Diâmetro: 50 } }),
+      R("ponto-agua-fria", { height: 600, lateral: -0.1 }),
+      R("saida-esgoto-parede", { height: 500 }),
       R("tomada-media", { qty: 2, height: 1100, lateral: 0.6, params: { Potência: 600, Tensão: 127 } }),
     ],
   },
@@ -107,85 +141,89 @@ export const DEFAULT_CATALOG: EquipmentType[] = [
     id: "tanque",
     label: "Tanque",
     keywords: ["tanque", "laundry tub", "utility sink"],
-    reqs: [R("ponto-agua-fria", { height: 1000, params: { Diâmetro: 25 } }), R("saida-esgoto-parede", { height: 500, params: { Diâmetro: 40 } })],
+    tech: { pesoAF: 0.7, uhc: 3, diamEsgoto: 40 },
+    reqs: [R("ponto-agua-fria", { height: 1000 }), R("saida-esgoto-parede", { height: 500 })],
   },
   {
     id: "maquina-lavar-roupa",
     label: "Máquina de lavar roupa",
     keywords: ["maquina de lavar roupa", "lavadora", "lava e seca", "washing machine", "washer"],
-    reqs: [
-      R("ponto-agua-fria", { height: 900, params: { Diâmetro: 20 } }),
-      R("saida-esgoto-parede", { height: 900, lateral: 0.2, params: { Diâmetro: 50 } }),
-      R("tomada-media", { height: 1100, lateral: -0.3, params: { Potência: 1000, Tensão: 127 } }),
-    ],
+    tech: { potencia: 1000, tensao: 127, pesoAF: 1.0, uhc: 3, diamEsgoto: 50 },
+    reqs: [R("ponto-agua-fria", { height: 900 }), R("saida-esgoto-parede", { height: 900, lateral: 0.2 }), R("tomada-media", { height: 1100, lateral: -0.3 })],
   },
   {
     id: "lava-loucas",
     label: "Máquina de lavar louça",
     keywords: ["lava loucas", "lava-loucas", "maquina de lavar louca", "dishwasher"],
-    reqs: [
-      R("ponto-agua-fria", { height: 300, params: { Diâmetro: 20 } }),
-      R("saida-esgoto-parede", { height: 400, lateral: 0.2, params: { Diâmetro: 40 } }),
-      R("tomada-baixa", { height: 300, lateral: -0.3, params: { Potência: 1500, Tensão: 220 } }),
-    ],
+    tech: { potencia: 1500, tensao: 220, pesoAF: 1.0, uhc: 2, diamEsgoto: 50 },
+    reqs: [R("ponto-agua-fria", { height: 300 }), R("saida-esgoto-parede", { height: 400, lateral: 0.2 }), R("tomada-baixa", { height: 300, lateral: -0.3 })],
   },
   {
     id: "geladeira",
     label: "Geladeira",
     keywords: ["geladeira", "refrigerador", "freezer", "refrigerator", "fridge"],
-    reqs: [R("tomada-baixa", { height: 300, params: { Potência: 500, Tensão: 127 } })],
+    tech: { potencia: 500, tensao: 127 },
+    reqs: [R("tomada-baixa", { height: 300 })],
   },
   {
     id: "fogao",
     label: "Fogão / cooktop",
     keywords: ["fogao", "cooktop", "cook top", "stove", "range", "cooker"],
-    reqs: [R("ponto-gas", { height: 300, lateral: -0.2 }), R("tomada-baixa", { height: 300, lateral: 0.3, params: { Potência: 100, Tensão: 127 } })],
+    tech: { potencia: 100, tensao: 127 },
+    reqs: [R("tomada-baixa", { height: 300, lateral: 0.3 }), R("ponto-gas", { height: 300, lateral: -0.2 })],
   },
   {
     id: "forno",
     label: "Forno elétrico",
     keywords: ["forno", "oven"],
-    reqs: [R("tomada-media", { height: 1100, params: { Potência: 2500, Tensão: 220 } })],
+    tech: { potencia: 2500, tensao: 220 },
+    reqs: [R("tomada-media", { height: 1100 })],
   },
   {
     id: "micro-ondas",
     label: "Micro-ondas",
     keywords: ["micro-ondas", "micro ondas", "microondas", "microwave"],
-    reqs: [R("tomada-alta", { height: 2000, params: { Potência: 1500, Tensão: 127 } })],
+    tech: { potencia: 1500, tensao: 127 },
+    reqs: [R("tomada-alta", { height: 2000 })],
   },
   {
     id: "coifa",
     label: "Coifa / depurador",
     keywords: ["coifa", "depurador", "exaustor de cozinha", "range hood", "hood"],
-    reqs: [R("tomada-alta", { height: 2200, params: { Potência: 300, Tensão: 127 } })],
+    tech: { potencia: 300, tensao: 127 },
+    reqs: [R("tomada-alta", { height: 2200 })],
   },
   {
     id: "aquecedor",
     label: "Aquecedor de água",
     keywords: ["aquecedor", "boiler", "water heater", "acumulador"],
+    tech: { potencia: 2000, tensao: 220, pesoAF: 0.4, pesoAQ: 0.4 },
     reqs: [
-      R("ponto-agua-fria", { height: 1500, lateral: -0.15, params: { Diâmetro: 25 } }),
-      R("ponto-agua-quente", { height: 1500, lateral: 0.15, params: { Diâmetro: 22 } }),
-      R("tomada-alta", { height: 1800, lateral: 0.4, params: { Potência: 2000, Tensão: 220 } }),
+      R("tomada-alta", { height: 1800, lateral: 0.4 }),
+      R("ponto-agua-fria", { height: 1500, lateral: -0.15 }),
+      R("ponto-agua-quente", { height: 1500, lateral: 0.15 }),
     ],
   },
   {
     id: "televisao",
     label: "Televisão",
     keywords: ["televisao", "televisor", "tv", "television", "monitor"],
-    reqs: [R("tomada-media", { qty: 2, height: 1300, params: { Potência: 200, Tensão: 127 } }), R("ponto-tv", { height: 1300, lateral: 0.3 }), R("ponto-dados", { height: 1300, lateral: -0.3 })],
+    tech: { potencia: 200, tensao: 127 },
+    reqs: [R("tomada-media", { qty: 2, height: 1300 }), R("ponto-tv", { height: 1300, lateral: 0.3 }), R("ponto-dados", { height: 1300, lateral: -0.3 })],
   },
   {
     id: "estacao-trabalho",
     label: "Estação de trabalho / mesa",
     keywords: ["estacao de trabalho", "mesa de trabalho", "mesa de escritorio", "escrivaninha", "workstation", "desk"],
-    reqs: [R("tomada-baixa", { qty: 2, height: 300, params: { Potência: 200, Tensão: 127 } }), R("ponto-dados", { qty: 2, height: 300, lateral: 0.5 })],
+    tech: { potencia: 300, tensao: 127 },
+    reqs: [R("tomada-baixa", { qty: 2, height: 300 }), R("ponto-dados", { qty: 2, height: 300, lateral: 0.5 })],
   },
   {
     id: "ar-condicionado",
     label: "Ar-condicionado (evaporadora)",
     keywords: ["evaporadora", "split", "ar condicionado", "ar-condicionado", "air conditioner", "fan coil"],
-    reqs: [R("tomada-alta", { height: 2200, lateral: 0.5, params: { Potência: 1500, Tensão: 220 } })],
+    tech: { potencia: 1500, tensao: 220 },
+    reqs: [R("tomada-alta", { height: 2200, lateral: 0.5 })],
   },
 ];
 
@@ -280,6 +318,17 @@ export function effectiveReqs(eq: RoomEquipment, catalog: EquipmentType[]): Requ
   return catalog.find((t) => t.id === eq.typeId)?.reqs ?? [];
 }
 
+/** Dados técnicos efetivos: os do equipamento sobre os do tipo. */
+export function effectiveTech(eq: RoomEquipment, catalog: EquipmentType[]): TechData {
+  const base = catalog.find((t) => t.id === eq.typeId)?.tech ?? {};
+  const out: TechData = { ...base };
+  for (const [k, v] of Object.entries(eq.tech ?? {})) {
+    if (v == null || (typeof v === "number" && !Number.isFinite(v))) delete out[k as keyof TechData];
+    else out[k as keyof TechData] = v;
+  }
+  return out;
+}
+
 /** Pedido de ponto a gerar: origem (equipamento ou ambiente) e a instalação. */
 export interface PointRequest {
   roomId: string;
@@ -288,6 +337,10 @@ export interface PointRequest {
   /** Posição do equipamento (cena), ou null para instalações do ambiente. */
   center: Vec3 | null;
   req: Requirement;
+  /** Dados técnicos do equipamento de origem. */
+  tech: TechData;
+  /** Chave do equipamento (para levar os dados técnicos a um ponto só de cada tipo). */
+  equipKey: string;
 }
 
 /** Todos os pontos que o programa de um ambiente pede. */
@@ -296,13 +349,15 @@ export function roomRequests(roomId: string, room: RoomProgram | undefined, inst
   for (const inst of instances) {
     const eq = roomEquipment(room, inst);
     if (!eq.include) continue;
-    for (const req of effectiveReqs(eq, catalog)) out.push({ roomId, source: inst.name, center: inst.center, req });
+    const tech = effectiveTech(eq, catalog);
+    for (const req of effectiveReqs(eq, catalog)) out.push({ roomId, source: inst.name, center: inst.center, req, tech, equipKey: inst.key });
   }
   for (const [key, eq] of Object.entries(room?.equipment ?? {})) {
     if (!eq.manual || !eq.include) continue;
-    for (const req of effectiveReqs(eq, catalog)) out.push({ roomId, source: eq.manual.label || key, center: null, req });
+    const tech = effectiveTech(eq, catalog);
+    for (const req of effectiveReqs(eq, catalog)) out.push({ roomId, source: eq.manual.label || key, center: null, req, tech, equipKey: key });
   }
-  for (const req of room?.extras ?? []) out.push({ roomId, source: "Ambiente", center: null, req });
+  for (const req of room?.extras ?? []) out.push({ roomId, source: "Ambiente", center: null, req, tech: {}, equipKey: "" });
   return out;
 }
 
@@ -311,3 +366,86 @@ export const countPoints = (reqs: PointRequest[]) => reqs.reduce((s, r) => s + M
 
 /** Parâmetro que marca os pontos gerados pelo programa (para regerar sem duplicar). */
 export const PROGRAM_ORIGIN = "Programa de necessidades";
+
+// ---- Parâmetros dos pontos -----------------------------------------------------------------
+
+/** Papel do ponto em relação aos dados técnicos do equipamento. */
+function roleOf(componentId: string, def: { discipline: string; params: { name: string }[] } | undefined): "eletrica" | "af" | "aq" | "esgoto" | null {
+  if (componentId === "ponto-agua-fria") return "af";
+  if (componentId === "ponto-agua-quente") return "aq";
+  if (componentId === "ponto-esgoto" || componentId === "saida-esgoto-parede" || componentId === "ralo-sifonado") return "esgoto";
+  if (def?.discipline === "eletrica" && def.params.some((p) => p.name === "Potência")) return "eletrica";
+  return null;
+}
+
+export const PARAM_PESO = "Peso (NBR 5626)";
+export const PARAM_UHC = "UHC (NBR 8160)";
+
+/**
+ * Parâmetros de cada ponto a gerar (já com a quantidade expandida). Os dados técnicos
+ * do equipamento vão para o primeiro ponto de cada papel (a tomada que o alimenta, o
+ * ponto de água fria, o de água quente e a saída de esgoto); valores informados na
+ * própria instalação prevalecem.
+ */
+export function expandRequests(
+  reqs: PointRequest[],
+  defOf: (componentId: string) => { discipline: string; params: { name: string; default: string | number }[] } | undefined,
+): { request: PointRequest; index: number; params: Record<string, string | number> }[] {
+  const used = new Set<string>();
+  const out: { request: PointRequest; index: number; params: Record<string, string | number> }[] = [];
+  for (const r of reqs) {
+    const def = defOf(r.req.componentId);
+    const role = roleOf(r.req.componentId, def);
+    for (let i = 0; i < Math.max(0, Math.round(r.req.qty)); i++) {
+      const params: Record<string, string | number> = Object.fromEntries((def?.params ?? []).map((p) => [p.name, p.default]));
+      const key = `${r.equipKey}|${role}`;
+      if (r.equipKey && role && !used.has(key)) {
+        const t = r.tech;
+        let applied = false;
+        if (role === "eletrica" && (t.potencia != null || t.tensao != null)) {
+          if (t.potencia != null) params["Potência"] = t.potencia;
+          if (t.tensao != null) params["Tensão"] = t.tensao;
+          applied = true;
+        } else if (role === "af" && t.pesoAF != null) {
+          params[PARAM_PESO] = t.pesoAF;
+          applied = true;
+        } else if (role === "aq" && t.pesoAQ != null) {
+          params[PARAM_PESO] = t.pesoAQ;
+          applied = true;
+        } else if (role === "esgoto" && (t.uhc != null || t.diamEsgoto != null)) {
+          if (t.uhc != null) params[PARAM_UHC] = t.uhc;
+          if (t.diamEsgoto != null && "Diâmetro" in params) params["Diâmetro"] = t.diamEsgoto;
+          applied = true;
+        }
+        if (applied) used.add(key);
+      }
+      Object.assign(params, r.req.params ?? {});
+      out.push({ request: r, index: i, params });
+    }
+  }
+  return out;
+}
+
+export interface ProgramTotals {
+  /** Soma das potências das tomadas (W/VA). */
+  potencia: number;
+  pesosAF: number;
+  pesosAQ: number;
+  uhc: number;
+  /** Vazão estimada de água fria pela soma dos pesos (L/s): Q = 0,3·√ΣP. */
+  vazaoAF: number;
+}
+
+export function totalsOf(points: { request: PointRequest; params: Record<string, string | number> }[], defOf: (id: string) => { discipline: string; params: { name: string }[] } | undefined): ProgramTotals {
+  const t: ProgramTotals = { potencia: 0, pesosAF: 0, pesosAQ: 0, uhc: 0, vazaoAF: 0 };
+  for (const p of points) {
+    const role = roleOf(p.request.req.componentId, defOf(p.request.req.componentId));
+    const n = (k: string) => (typeof p.params[k] === "number" ? (p.params[k] as number) : Number(p.params[k]) || 0);
+    if (role === "eletrica") t.potencia += n("Potência");
+    if (role === "af") t.pesosAF += n(PARAM_PESO);
+    if (role === "aq") t.pesosAQ += n(PARAM_PESO);
+    if (role === "esgoto") t.uhc += n(PARAM_UHC);
+  }
+  t.vazaoAF = 0.3 * Math.sqrt(t.pesosAF);
+  return t;
+}

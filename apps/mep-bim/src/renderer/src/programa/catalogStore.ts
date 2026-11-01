@@ -11,7 +11,11 @@ function load(): EquipmentType[] {
   try {
     const raw = localStorage.getItem(KEY);
     const parsed = raw ? (JSON.parse(raw) as EquipmentType[]) : null;
-    cache = Array.isArray(parsed) && parsed.length ? parsed : DEFAULT_CATALOG;
+    // Padrões salvos antes dos dados técnicos: completa com os valores iniciais do mesmo tipo.
+    cache =
+      Array.isArray(parsed) && parsed.length
+        ? parsed.map((t) => (t.tech ? t : { ...t, tech: DEFAULT_CATALOG.find((d) => d.id === t.id)?.tech }))
+        : DEFAULT_CATALOG;
   } catch {
     cache = DEFAULT_CATALOG;
   }

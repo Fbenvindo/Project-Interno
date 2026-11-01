@@ -3,8 +3,8 @@
 // distribuídos pelo contorno.
 import { COMPONENT_BY_ID } from "../../../core/library";
 import { computePlacement, DEFAULT_CEILING, type Placement, type SurfaceHit } from "../../../core/placement";
-import { defaultParams, newGuid, newPointId, nextTag, storeyForMounting, type PlacedPoint } from "../../../core/points";
-import { PROGRAM_ORIGIN, roomRequests, type EquipmentInstance, type EquipmentType, type ProgramState } from "../../../core/program";
+import { newGuid, newPointId, nextTag, storeyForMounting, type PlacedPoint } from "../../../core/points";
+import { expandRequests, PROGRAM_ORIGIN, roomRequests, type EquipmentInstance, type EquipmentType, type PointRequest, type ProgramState } from "../../../core/program";
 import { centroid, perimeterPoints, spaceLabel, type Space } from "../../../core/spaces";
 import type { ElementInfo, Vec3 } from "../../../core/types";
 import type { LoadedModel } from "../../../ifc/loadIfc";
@@ -67,6 +67,9 @@ export function generateProgramPoints(opts: {
     const label = spaceLabel(room);
     const floorY = room.floorY;
     const reqs = roomRequests(room.globalId, program.rooms[room.globalId], inventory.get(room.globalId) ?? [], catalog);
+    // Parâmetros de cada ponto, com os dados técnicos do equipamento já aplicados.
+    const expanded = expandRequests(reqs, (id) => COMPONENT_BY_ID[id]);
+    const paramsFor = (r: PointRequest, i: number) => expanded.find((e) => e.request === r && e.index === i)?.params ?? {};
     // Pontos de parede das instalações do ambiente: pelo contorno, pulando portas e vãos.
     const perimeter = perimeterPoints(room.polygon, 0.5, 0.3);
     let perimeterCursor = 0;
@@ -137,8 +140,8 @@ export function generateProgramPoints(opts: {
         }
       }
 
-      for (const pl of placements) {
-        if (!pl.ok) continue;
+      placements.forEach((pl, i) => {
+        if (!pl.ok) return;
         const point: PlacedPoint = {
           id: newPointId(),
           guid: newGuid(),
@@ -150,12 +153,12 @@ export function generateProgramPoints(opts: {
           refLevel: pl.refLevel,
           storey: storeyForMounting(def.mounting, pl.refLevel, model.storeyLevels),
           system: def.system,
-          params: { ...defaultParams(def), ...(r.req.params ?? {}), Ambiente: label, Equipamento: r.source, Origem: PROGRAM_ORIGIN },
+          params: { ...paramsFor(r, i), Ambiente: label, Equipamento: r.source, Origem: PROGRAM_ORIGIN },
           ...(def.mounting === "teto" ? { ceiling: { ...DEFAULT_CEILING } } : {}),
         };
         all.push(point);
         add.push(point);
-      }
+      });
     }
   }
   return { add, removeIds, warnings };

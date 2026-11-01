@@ -1,6 +1,6 @@
 // Tabela de instalações (pontos) de um equipamento ou ambiente.
 import { COMPONENTS, COMPONENT_BY_ID, COMPONENT_GROUPS } from "../../../core/library";
-import { reqId, type Requirement } from "../../../core/program";
+import { reqId, TECH_FIELDS, type Requirement, type TechData } from "../../../core/program";
 
 const num = (s: string) => (s.trim() === "" ? undefined : Number(s.replace(",", ".")));
 
@@ -114,4 +114,45 @@ export function ReqTable({ reqs, onChange }: { reqs: Requirement[]; onChange: (r
       </button>
     </div>
   );
+}
+
+/** Dados técnicos do equipamento (potência, tensão, pesos, UHC, Ø esgoto). */
+export function TechEditor({ tech, base, onChange }: { tech: TechData; base?: TechData; onChange: (t: TechData) => void }) {
+  return (
+    <div className="tech-editor">
+      {TECH_FIELDS.map((f) => (
+        <label key={f.key} title={f.unit}>
+          <span>
+            {f.label} <span className="muted">({f.unit})</span>
+          </span>
+          <input
+            type="number"
+            step={f.step}
+            placeholder={base?.[f.key] != null ? String(base[f.key]) : ""}
+            value={tech[f.key] ?? ""}
+            onChange={(e) => {
+              const v = e.target.value.trim() === "" ? undefined : Number(e.target.value.replace(",", "."));
+              const next = { ...tech };
+              if (v == null || !Number.isFinite(v)) delete next[f.key];
+              else next[f.key] = v;
+              onChange(next);
+            }}
+          />
+        </label>
+      ))}
+    </div>
+  );
+}
+
+const fmtN = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1).replace(".", ","));
+
+export function techSummary(t: TechData): string {
+  const parts: string[] = [];
+  if (t.potencia != null) parts.push(`${fmtN(t.potencia)} W/VA`);
+  if (t.tensao != null) parts.push(`${t.tensao} V`);
+  if (t.pesoAF != null) parts.push(`peso AF ${fmtN(t.pesoAF)}`);
+  if (t.pesoAQ != null) parts.push(`peso AQ ${fmtN(t.pesoAQ)}`);
+  if (t.uhc != null) parts.push(`${fmtN(t.uhc)} UHC`);
+  if (t.diamEsgoto != null) parts.push(`esgoto Ø${t.diamEsgoto}`);
+  return parts.join(" · ");
 }

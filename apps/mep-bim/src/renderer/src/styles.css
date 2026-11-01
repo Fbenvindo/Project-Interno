@@ -1560,3 +1560,46 @@ h3 {
 .danger-link {
   color: var(--fail) !important;
 }
+.tech-editor {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 10px;
+  margin: 4px 0;
+}
+.tech-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11.5px;
+  color: var(--text);
+}
+.tech-editor input {
+  padding: 4px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  text-align: right;
+}
+.eq-tech {
+  margin: 6px 0 4px 24px;
+  padding: 6px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+.tech-line {
+  color: var(--cyan-text);
+}
+.tag-padrao.custom {
+  background: var(--sel-bg);
+  color: var(--cyan-text);
+}
+.link.strong {
+  font-weight: 700;
+}
+.totals {
+  margin: 6px 0 2px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-variant-numeric: tabular-nums;
+}
