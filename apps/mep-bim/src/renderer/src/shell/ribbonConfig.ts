@@ -1,10 +1,14 @@
 // Menu superior (por disciplina) e faixa de ferramentas de cada um.
+import type { DraftCmd } from "../desenho/useDraftTool";
 
-export type TopTab = "arquivo" | "modelo" | "programa" | "eletrica" | "hidraulica" | "incendio" | "climatizacao" | "pranchas";
+export type TopTab = "arquivo" | "criar" | "modificar" | "geral" | "modelo" | "programa" | "eletrica" | "hidraulica" | "incendio" | "climatizacao" | "pranchas";
 export type DisciplineTab = "eletrica" | "hidraulica" | "incendio" | "climatizacao";
 
 export const TOP_TABS: { id: TopTab; label: string }[] = [
   { id: "arquivo", label: "Arquivo" },
+  { id: "criar", label: "Criar" },
+  { id: "modificar", label: "Modificar" },
+  { id: "geral", label: "Geral" },
   { id: "modelo", label: "Modelo" },
   { id: "programa", label: "Programa" },
   { id: "eletrica", label: "Elétrica" },
@@ -27,6 +31,7 @@ export type ToolSpec =
   | { kind: "biblioteca" }
   | { kind: "vinculos" }
   | { kind: "coordenadas" }
+  | { kind: "desenho"; cmd: DraftCmd }
   | { kind: "programa"; section: "tipos" | "ambientes" };
 
 export type Tool = ToolSpec & { n: number };
@@ -46,6 +51,7 @@ export type ActionId =
   | "vista3d"
   | "enquadrar"
   | "corte"
+  | "removerCortes"
   | "propriedades";
 
 export interface RibbonButton {
@@ -105,6 +111,7 @@ export const DISCIPLINE_TABS: Record<DisciplineTab, DisciplineCfg> = {
   },
 };
 
+const draw = (cmd: DraftCmd, label: string, icon: string): RibbonButton => ({ key: `d-${cmd}`, label, icon, tool: { kind: "desenho", cmd }, needsModel: true });
 const loc = (key: string, label: string, icon: string, componentId: string): RibbonButton => ({ key, label, icon, tool: { kind: "locacao", componentId }, needsModel: true });
 const run = (key: string, label: string, icon: string, typeId: string): RibbonButton => ({ key, label, icon, tool: { kind: "tracado", typeId }, needsModel: true });
 
@@ -137,6 +144,66 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
         { key: "tema-claro", label: "Branco", icon: "sol", action: "temaClaro" },
         { key: "tema-escuro", label: "Preto", icon: "lua", action: "temaEscuro" },
       ],
+    },
+  ],
+  criar: [
+    {
+      label: "Desenho",
+      buttons: [
+        draw("linha", "Linha", "dLinha"),
+        draw("arco", "Arco", "dArco"),
+        draw("circulo", "Círculo", "dCirculo"),
+        draw("elipse", "Elipse", "dElipse"),
+      ],
+    },
+    {
+      label: "Formas",
+      buttons: [
+        draw("quadrado", "Quadrado", "dQuadrado"),
+        draw("retangulo", "Retângulo", "dRetangulo"),
+        draw("triangulo", "Triângulo", "dTriangulo"),
+        draw("poligonal", "Poligonal", "dPoligonal"),
+      ],
+    },
+    {
+      label: "Anotação",
+      buttons: [
+        draw("texto", "Texto", "dTexto"),
+        draw("cota-ortogonal", "Cota ortogonal", "dCotaOrto"),
+        draw("cota-inclinada", "Cota inclinada", "dCotaInclinada"),
+        draw("cota-angular", "Cota angular", "dCotaAngular"),
+      ],
+    },
+  ],
+  modificar: [
+    {
+      label: "Área de transferência",
+      buttons: [draw("copiar", "Copiar", "mCopiar"), draw("recortar", "Recortar", "mRecortar"), draw("colar", "Colar", "mColar")],
+    },
+    {
+      label: "Modificar",
+      buttons: [draw("mover", "Mover", "mMover"), draw("apagar", "Apagar", "mApagar"), draw("estender", "Estender", "mEstender"), draw("conectar", "Conectar", "mConectar")],
+    },
+  ],
+  geral: [
+    {
+      label: "Coordenadas",
+      buttons: [
+        { key: "g-coordenadas", label: "Coordenadas do projeto", icon: "coordenadas", tool: { kind: "coordenadas" }, needsModel: true },
+        draw("coordenada", "Indicar coordenada", "gIndicar"),
+      ],
+    },
+    {
+      label: "Corte",
+      buttons: [
+        draw("corte-selecao", "Corte pela seleção", "corte"),
+        draw("corte-linha", "Corte por linha", "gCorteLinha"),
+        { key: "remover-cortes", label: "Remover cortes", icon: "gSemCorte", action: "removerCortes", needsModel: true },
+      ],
+    },
+    {
+      label: "Vista 3D",
+      buttons: [draw("vista-3d", "Vista 3D no local", "gVista3d")],
     },
   ],
   modelo: [
@@ -298,5 +365,6 @@ export function sameTool(a: ToolSpec, b: ToolSpec | undefined): boolean {
   if (a.kind === "tracado" && b.kind === "tracado") return a.typeId === b.typeId;
   if (a.kind === "calc" && b.kind === "calc") return a.which === b.which;
   if (a.kind === "programa" && b.kind === "programa") return a.section === b.section;
+  if (a.kind === "desenho" && b.kind === "desenho") return a.cmd === b.cmd;
   return true;
 }

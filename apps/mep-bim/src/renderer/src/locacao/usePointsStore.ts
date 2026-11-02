@@ -5,6 +5,8 @@ import type { Circuit } from "../../../core/circuits";
 import { EMPTY_PROGRAM, type ProgramState } from "../../../core/program";
 import type { LinkMeta } from "../../../ifc/federate";
 import type { GeorefSettings } from "../../../core/georef";
+import type { DraftEntity } from "../../../core/draft";
+import type { SavedView } from "../../../core/project";
 
 interface ProjectState {
   points: PlacedPoint[];
@@ -13,6 +15,8 @@ interface ProjectState {
   program: ProgramState;
   links: LinkMeta[];
   georef: GeorefSettings | null;
+  drafts: DraftEntity[];
+  views: SavedView[];
 }
 
 interface History {
@@ -25,7 +29,7 @@ interface History {
 }
 
 const LIMIT = 200;
-const EMPTY: ProjectState = { points: [], runs: [], circuits: [], program: EMPTY_PROGRAM, links: [], georef: null };
+const EMPTY: ProjectState = { points: [], runs: [], circuits: [], program: EMPTY_PROGRAM, links: [], georef: null, drafts: [], views: [] };
 
 type Patch<T> = (item: T) => Partial<T>;
 
@@ -50,7 +54,7 @@ export function usePointsStore() {
   const commit = useCallback((fn: (cur: ProjectState) => ProjectState, key: string | null = null) => {
     setH((s) => {
       const next = fn(s.present);
-      if (next.points === s.present.points && next.runs === s.present.runs && next.circuits === s.present.circuits && next.program === s.present.program && next.links === s.present.links && next.georef === s.present.georef) return s;
+      if (next.points === s.present.points && next.runs === s.present.runs && next.circuits === s.present.circuits && next.program === s.present.program && next.links === s.present.links && next.georef === s.present.georef && next.drafts === s.present.drafts && next.views === s.present.views) return s;
       if (key && key === s.lastKey) return { ...s, present: next, future: [] };
       return { ...s, past: [...s.past.slice(-LIMIT + 1), s.present], present: next, future: [], lastKey: key };
     });
@@ -131,10 +135,23 @@ export function usePointsStore() {
   /** Coordenadas do projeto. */
   const setGeoref = useCallback((g: GeorefSettings | null) => commit((cur) => ({ ...cur, georef: g }), "georef"), [commit]);
 
+  /** Desenho 2D e vistas 3D. */
+  const setDrafts = useCallback((fn: (d: DraftEntity[]) => DraftEntity[], key: string | null = null) => commit((cur) => ({ ...cur, drafts: fn(cur.drafts) }), key && `d:${key}`), [commit]);
+  const setViews = useCallback((fn: (v: SavedView[]) => SavedView[]) => commit((cur) => ({ ...cur, views: fn(cur.views) })), [commit]);
+
   /** Substitui todo o projeto e zera o histórico (abrir arquivo ou novo modelo). */
   const reset = useCallback(
-    (points: PlacedPoint[], runs: Run[] = [], circuits: Circuit[] = [], program: ProgramState = EMPTY_PROGRAM, links: LinkMeta[] = [], georef: GeorefSettings | null = null) => {
-    const state = { points, runs, circuits, program, links, georef };
+    (
+      points: PlacedPoint[],
+      runs: Run[] = [],
+      circuits: Circuit[] = [],
+      program: ProgramState = EMPTY_PROGRAM,
+      links: LinkMeta[] = [],
+      georef: GeorefSettings | null = null,
+      drafts: DraftEntity[] = [],
+      views: SavedView[] = [],
+    ) => {
+    const state = { points, runs, circuits, program, links, georef, drafts, views };
     setH({ past: [], present: state, future: [], saved: state, lastKey: null });
   },
     [],
@@ -168,10 +185,13 @@ export function usePointsStore() {
       program: h.present.program,
       links: h.present.links,
       georef: h.present.georef,
+      drafts: h.present.drafts,
+      views: h.present.views,
       canUndo: h.past.length > 0,
       canRedo: h.future.length > 0,
       dirty: h.present !== h.saved,
-      isEmpty: !h.present.points.length && !h.present.runs.length && !h.present.circuits.length && !Object.keys(h.present.program.rooms).length,
+      isEmpty:
+        !h.present.points.length && !h.present.runs.length && !h.present.circuits.length && !Object.keys(h.present.program.rooms).length && !h.present.drafts.length,
       add,
       update,
       remove,
@@ -186,12 +206,14 @@ export function usePointsStore() {
       setProgram,
       setLinks,
       setGeoref,
+      setDrafts,
+      setViews,
       reset,
       markSaved,
       undo,
       redo,
     }),
-    [h, add, update, remove, addRuns, updateRuns, removeRuns, addCircuits, updateCircuits, removeCircuits, assignPoints, mutate, setProgram, setLinks, setGeoref, reset, markSaved, undo, redo],
+    [h, add, update, remove, addRuns, updateRuns, removeRuns, addCircuits, updateCircuits, removeCircuits, assignPoints, mutate, setProgram, setLinks, setGeoref, setDrafts, setViews, reset, markSaved, undo, redo],
   );
 }
 

@@ -328,6 +328,140 @@ const P: Record<string, ReactNode> = {
       <path d="M15 4 V20" />
     </>
   ),
+  // ---- Criar ----
+  dLinha: (
+    <>
+      <path d="M4 19 L20 5" />
+      <circle cx="4" cy="19" r="1.6" />
+      <circle cx="20" cy="5" r="1.6" />
+    </>
+  ),
+  dArco: (
+    <>
+      <path d="M4 18 A9 9 0 0 1 20 18" />
+      <circle cx="4" cy="18" r="1.6" />
+      <circle cx="20" cy="18" r="1.6" />
+    </>
+  ),
+  dCirculo: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 12 L18 7" />
+    </>
+  ),
+  dElipse: <ellipse cx="12" cy="12" rx="9" ry="5.5" />,
+  dQuadrado: <rect x="5" y="5" width="14" height="14" />,
+  dRetangulo: <rect x="3" y="7" width="18" height="10" />,
+  dTriangulo: <path d="M12 4 L21 19 H3 Z" />,
+  dPoligonal: (
+    <>
+      <path d="M3 17 L8 7 L14 14 L21 5" />
+      <circle cx="3" cy="17" r="1.4" />
+      <circle cx="21" cy="5" r="1.4" />
+    </>
+  ),
+  dTexto: (
+    <>
+      <path d="M5 5 H19 M12 5 V19 M9 19 H15" />
+    </>
+  ),
+  dCotaOrto: (
+    <>
+      <path d="M4 8 V20 M20 8 V20 M4 12 H20" />
+      <path d="M2.5 13.5 L5.5 10.5 M18.5 13.5 L21.5 10.5" />
+      <path d="M9 9 H15" />
+    </>
+  ),
+  dCotaInclinada: (
+    <>
+      <path d="M4 18 L18 4" />
+      <path d="M7 21 L21 7" />
+      <path d="M5 20 L8 17 M17 8 L20 5" />
+    </>
+  ),
+  dCotaAngular: (
+    <>
+      <path d="M4 20 H21 M4 20 L16 5" />
+      <path d="M13 20 A9 9 0 0 0 10 13" />
+    </>
+  ),
+  // ---- Modificar ----
+  mCopiar: (
+    <>
+      <rect x="8" y="8" width="12" height="12" rx="1" />
+      <path d="M16 8 V5 A1 1 0 0 0 15 4 H5 A1 1 0 0 0 4 5 V15 A1 1 0 0 0 5 16 H8" />
+    </>
+  ),
+  mRecortar: (
+    <>
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="18" r="3" />
+      <path d="M8 16 L18 4 M16 16 L6 4" />
+    </>
+  ),
+  mColar: (
+    <>
+      <rect x="5" y="5" width="14" height="16" rx="1" />
+      <rect x="9" y="3" width="6" height="4" rx="1" />
+      <path d="M9 12 H15 M9 16 H13" />
+    </>
+  ),
+  mMover: (
+    <>
+      <path d="M12 3 V21 M3 12 H21" />
+      <path d="M9 6 L12 3 L15 6 M9 18 L12 21 L15 18 M6 9 L3 12 L6 15 M18 9 L21 12 L18 15" />
+    </>
+  ),
+  mApagar: (
+    <>
+      <path d="M4 7 H20 M9 7 V4 H15 V7" />
+      <path d="M6 7 L7 20 H17 L18 7" />
+      <path d="M10 11 V16 M14 11 V16" />
+    </>
+  ),
+  mEstender: (
+    <>
+      <path d="M20 3 V21" />
+      <path d="M3 12 H10" />
+      <path d="M10 12 H19" strokeDasharray="2 2" />
+      <path d="M16 9 L19 12 L16 15" />
+    </>
+  ),
+  mConectar: (
+    <>
+      <path d="M4 18 H12 V6" />
+      <circle cx="12" cy="18" r="2" />
+      <path d="M17 6 H21 M4 6 H8" strokeDasharray="2 2" />
+    </>
+  ),
+  // ---- Geral ----
+  gIndicar: (
+    <>
+      <circle cx="7" cy="17" r="2.5" />
+      <path d="M8.8 15.2 L14 10 H21" />
+      <path d="M14 6.5 H20" />
+    </>
+  ),
+  gCorteLinha: (
+    <>
+      <path d="M4 20 L20 4" />
+      <path d="M3 9 L9 3 M15 21 L21 15" />
+      <path d="M6 6 L3 9 M18 18 L21 15" />
+    </>
+  ),
+  gSemCorte: (
+    <>
+      <path d="M12 3 L20 7.5 V16.5 L12 21 L4 16.5 V7.5 Z" />
+      <path d="M4 4 L20 20" />
+    </>
+  ),
+  gVista3d: (
+    <>
+      <circle cx="6" cy="16" r="2.5" />
+      <path d="M8 14.5 L20 6 M8 17 L21 13" />
+      <path d="M20 6 L21 13" />
+    </>
+  ),
 };
 
 export type IconName = keyof typeof P;

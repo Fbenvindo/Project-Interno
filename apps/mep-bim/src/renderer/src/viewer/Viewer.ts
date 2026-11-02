@@ -89,6 +89,8 @@ export class Viewer {
   private previewBad = new THREE.MeshLambertMaterial({ color: 0xef5350, emissive: 0x3a0c0c, transparent: true, opacity: 0.6 });
   private colorMode: ColorMode = "disciplina";
   private selected = new Set<number>();
+  private sectionPlanes: THREE.Plane[] = [];
+  private extraPlanes: THREE.Plane[] = [];
   private highlighted = new Set<number>();
   private ghosted = false;
   private visible: Set<number> | null = null;
@@ -295,8 +297,29 @@ export class Viewer {
     if (section.horizontal != null) planes.push(new THREE.Plane(new THREE.Vector3(0, -1, 0), section.horizontal));
     if (section.x) planes.push(section.x.invert ? new THREE.Plane(new THREE.Vector3(1, 0, 0), -section.x.pos) : new THREE.Plane(new THREE.Vector3(-1, 0, 0), section.x.pos));
     if (section.z) planes.push(section.z.invert ? new THREE.Plane(new THREE.Vector3(0, 0, 1), -section.z.pos) : new THREE.Plane(new THREE.Vector3(0, 0, -1), section.z.pos));
-    this.clipPlanes = planes;
-    this.renderer.clippingPlanes = planes;
+    this.sectionPlanes = planes;
+    this.applyClip();
+  }
+
+  /**
+   * Cortes extras (corte por seleção ou por linha): mantém o lado para onde aponta a normal
+   * de cada plano. null remove.
+   */
+  setExtraClip(planes: { normal: Vec3; point: Vec3 }[] | null) {
+    this.extraPlanes = (planes ?? []).map((p) => {
+      const n = new THREE.Vector3(...p.normal).normalize();
+      return new THREE.Plane(n, -n.dot(new THREE.Vector3(...p.point)));
+    });
+    this.applyClip();
+  }
+
+  hasExtraClip() {
+    return this.extraPlanes.length > 0;
+  }
+
+  private applyClip() {
+    this.clipPlanes = [...this.sectionPlanes, ...this.extraPlanes];
+    this.renderer.clippingPlanes = this.clipPlanes;
     this.requestRender();
     this.hoverDirty = true;
   }
@@ -408,6 +431,16 @@ export class Viewer {
     this.setVisible(this.visible);
   }
 
+  /** Caixa (cena) dos elementos indicados, ou null. */
+  getBounds(ids: number[]): { min: Vec3; max: Vec3 } | null {
+    const box = new THREE.Box3();
+    for (const id of ids) {
+      const e = this.entries.get(id);
+      if (e) box.expandByObject(e.mesh);
+    }
+    return box.isEmpty() ? null : { min: box.min.toArray() as Vec3, max: box.max.toArray() as Vec3 };
+  }
+
   /** Enquadra os elementos; `direction` é de onde a câmera olha (padrão: diagonal superior). */
   fitTo(ids?: number[], direction?: Vec3) {
     const box = new THREE.Box3();
@@ -417,6 +450,15 @@ export class Viewer {
       if (e) box.expandByObject(e.mesh);
     }
     if (box.isEmpty()) return;
+    this.fitBox(box, direction);
+  }
+
+  /** Enquadra uma caixa (cena). */
+  fitBounds(min: Vec3, max: Vec3, direction?: Vec3) {
+    this.fitBox(new THREE.Box3(new THREE.Vector3(...min), new THREE.Vector3(...max)), direction);
+  }
+
+  private fitBox(box: THREE.Box3, direction?: Vec3) {
     const center = box.getCenter(new THREE.Vector3());
     const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.5);
     // Usa o menor entre os campos de visão vertical e horizontal.

@@ -9,6 +9,15 @@ import type { Vec3 } from "./types";
 import { EMPTY_PROGRAM, type ProgramState } from "./program";
 import type { LinkMeta } from "../ifc/federate";
 import type { GeorefSettings } from "./georef";
+import { syncDraftIds, type DraftEntity } from "./draft";
+
+/** Vista 3D criada pelo usuário (coordenadas do projeto, m). */
+export interface SavedView {
+  id: string;
+  name: string;
+  eye: Vec3;
+  target: Vec3;
+}
 
 export interface ProjectData {
   points: PlacedPoint[];
@@ -20,6 +29,10 @@ export interface ProjectData {
   links?: LinkMeta[];
   /** Coordenadas do projeto (do IFC ou informadas). */
   georef?: GeorefSettings | null;
+  /** Desenho 2D (anotações) na planta. */
+  drafts?: DraftEntity[];
+  /** Vistas 3D criadas. */
+  views?: SavedView[];
 }
 
 interface StoredCircuit {
@@ -55,6 +68,8 @@ export interface ProjectFile extends LocacaoFile {
   circuitos?: StoredCircuit[];
   programa?: ProgramState;
   georreferenciamento?: GeorefSettings;
+  desenhos?: DraftEntity[];
+  vistas?: SavedView[];
   vinculos?: { id: string; nome: string; caminho: string | null; disciplina: LinkMeta["discipline"]; visivel: boolean; transparente: boolean }[];
 }
 
@@ -91,6 +106,8 @@ export function serializeProject(data: ProjectData, cs: CoordinateSystem, modelN
     })),
     ...(data.program && Object.keys(data.program.rooms).length ? { programa: data.program } : {}),
     ...(data.georef ? { georreferenciamento: data.georef } : {}),
+    ...(data.drafts?.length ? { desenhos: data.drafts } : {}),
+    ...(data.views?.length ? { vistas: data.views } : {}),
     ...(data.links?.length
       ? { vinculos: data.links.map((l) => ({ id: l.id, nome: l.name, caminho: l.path, disciplina: l.discipline, visivel: l.visible, transparente: l.translucent })) }
       : {}),
@@ -137,5 +154,7 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
     visible: v.visivel !== false,
     translucent: !!v.transparente,
   }));
-  return { points, runs, circuits, program, links, georef: file.georreferenciamento ?? null };
+  const drafts = Array.isArray(file.desenhos) ? file.desenhos : [];
+  syncDraftIds(drafts);
+  return { points, runs, circuits, program, links, georef: file.georreferenciamento ?? null, drafts, views: Array.isArray(file.vistas) ? file.vistas : [] };
 }

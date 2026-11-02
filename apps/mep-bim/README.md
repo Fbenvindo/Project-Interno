@@ -7,7 +7,7 @@ Trabalha sobre modelos **IFC** de qualquer software (Revit, Archicad, Tekla, etc
 
 ## Interface
 
-- **Menu superior por disciplina**: Arquivo, Modelo, Elétrica, Hidráulica, Incêndio, Climatização e Pranchas.
+- **Menu superior**: Arquivo, **Criar**, **Modificar**, **Geral**, Modelo, Programa, Elétrica, Hidráulica, Incêndio, Climatização e Pranchas.
 - **Faixa de ferramentas** logo abaixo, com as funções da disciplina escolhida, em grupos (ex.: Elétrica → Pontos: Tomada, Interruptor, Luminária, Quadro · Telecom · Infraestrutura: Eletroduto, Eletrocalha · Circuitos). Escolher um ponto ou um trecho já abre o editor em planta com o componente pronto para locar.
 - **Navegador** à esquerda (pavimentos, disciplinas, sistemas, quadros e circuitos) e **painel da ferramenta** à direita; os dois se ocultam e reaparecem pelos botões nas pontas da barra de vistas.
 - **Vistas** no centro: *Planta · pavimento* (edição 2D), *3D* (modelo completo ou pavimento isolado, com cortes) e *Prancha*.
@@ -122,6 +122,24 @@ Na aba **Planta 2D**, escolha o pavimento, a altura de corte (padrão 1,20 m aci
 
 A simbologia é um ponto de partida: confira com o padrão gráfico do escritório antes de emitir pranchas.
 
+### Menus Criar, Modificar e Geral
+
+Comandos de desenho e edição na planta do pavimento, no estilo dos programas de CAD. A barra sobre a planta mostra o que o comando espera, e o painel da direita traz as opções.
+
+- **Criar:** Linha (encadeada), Arco (3 pontos), Círculo (centro e raio), Elipse (centro, eixo e segundo eixo), Quadrado (pelo lado), Retângulo (cantos opostos), Triângulo, Poligonal (Enter termina; clicar no primeiro ponto fecha), Texto (texto, altura em mm de papel e rotação no painel), **Cotas** ortogonal (horizontal ou vertical conforme a posição da linha de cota), inclinada (alinhada aos dois pontos) e angular.
+- **Encaixe:** extremidades, meios, centros e vértices do desenho, cantos das paredes cortadas e pontos locados (quadrado laranja). **Shift** trava na horizontal/vertical a partir do último ponto. Enter, duplo clique ou botão direito terminam; Esc cancela.
+- **Modificar:** Copiar (vários destinos), Mover, Recortar, Colar (também em outro pavimento: a cota acompanha o piso), Apagar, Estender (até outra linha/forma ou até a face de uma parede) e Conectar (duas linhas viram um canto; linhas e poligonais que se tocam viram uma poligonal só). Valem para desenhos, pontos locados e trechos. Cópias recebem ids, GUIDs e etiquetas novos e saem sem circuito.
+- **Seleção dos comandos de modificar:** clique em vários elementos ou arraste uma janela (da esquerda para a direita pega o que está inteiro dentro; da direita para a esquerda, o que a janela cruza). Shift/Ctrl+clique tira da seleção, e a lista do painel tem um ✕ por item. A seleção que já existia entra como ponto de partida. Ao concluir a seleção (Enter ou botão), o app **pergunta se você deseja remover algum elemento**: *Sim* abre o modo de remoção (clique, janela ou ✕) e *Não* segue para o comando.
+- **Geral:**
+  - **Coordenadas do projeto** abre o painel de ponto base, survey point e norte.
+  - **Indicar coordenada** marca um ponto com X/Y do projeto e E/N do mapa (UTM).
+  - **Corte pela seleção** recorta o 3D por uma caixa em volta dos elementos selecionados, na planta ou no 3D. Num único pavimento, a caixa para abaixo da laje de cima.
+  - **Corte por linha** pede dois pontos e o lado que deve ficar visível.
+  - **Remover cortes** desfaz esses recortes.
+  - **Vista 3D no local**: clique no observador e na direção para onde ele olha. A altura dos olhos fica no painel (padrão 1,60 m). A vista é salva no projeto com nome editável e pode ser reaberta.
+
+Os desenhos ficam no pavimento em que foram feitos e são salvos no arquivo do projeto. Também entram na prancha, no PDF/SVG e no DXF (camadas `ANOT-DESENHO`, `ANOT-COTAS` e `ANOT-TEXTOS`). Ctrl+Z desfaz.
+
 ### Traçado de tubulações e eletrodutos
 
 Na aba **Traçado**, escolha o tipo (eletroduto, eletrocalha, água fria…), a bitola, o sistema, o circuito e a **elevação de trabalho** (altura acima do piso em que os trechos horizontais correm, por exemplo logo abaixo da laje ou do forro).
@@ -196,7 +214,9 @@ apps/mep-bim/
 │   │   ├── clash.ts         # Detecção de interferências (sweep and prune + verificação exata)
 │   │   ├── obb.ts           # Caixa orientada × triângulos (eixos separadores)
 │   │   ├── runs.ts          # Traçado: tipos, bitolas, geometria, curvas, tês, rota automática
-│   │   ├── project.ts       # Arquivo de projeto (pontos + trechos)
+│   │   ├── project.ts       # Arquivo de projeto (pontos, trechos, desenhos, vistas…)
+│   │   ├── draft.ts         # Desenho 2D: entidades, cotas, encaixe, estender e conectar
+│   │   ├── editOps.ts       # Copiar, mover, recortar, colar e apagar (desenhos, pontos e trechos)
 │   │   ├── plan/            # Planta 2D: corte (section), símbolos, montagem (build), prancha (sheet), DXF
 │   │   ├── library.ts       # Biblioteca de componentes para locação
 │   │   ├── placement.ts     # Encaixe em parede/teto/piso e distribuição em grade

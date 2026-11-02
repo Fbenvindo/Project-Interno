@@ -38,12 +38,17 @@ import { CoordenadasPanel } from "./coords/CoordenadasPanel";
 import { useCursor } from "./coords/cursor";
 import { EMPTY_GEOREF, effectiveGeoref, fmtCoord, toMap, type Georef } from "../../core/georef";
 import { loadFamilyLibrary } from "./library/familyLibrary";
+import { useDraftTool, CMD_LABEL, type ClipRequest } from "./desenho/useDraftTool";
+import { DesenhoPanel } from "./desenho/DesenhoPanel";
+import type { SavedView } from "../../core/project";
+import { CoordinateSystem } from "../../core/math";
 import { getLibraryVersion, onLibraryChange } from "../../core/library";
 import { makeCeilingResolver, makeSlabProbe } from "./locacao/ceiling";
 import { Icon, LogoMark } from "./shell/icons";
 import { DISCIPLINE_TABS, TOP_TABS, type ActionId, type DisciplineTab, type Tool, type ToolSpec, type TopTab } from "./shell/ribbonConfig";
 
 type View = "planta" | "3d" | "prancha";
+const IDENTITY_CS = new CoordinateSystem();
 type Theme = "claro" | "escuro";
 
 const THEME_KEY = "smarteasybim.tema";
@@ -82,6 +87,7 @@ const TOOL_HINT: Record<ToolSpec["kind"], string> = {
   programa: "Defina as instalações por tipo de equipamento e por ambiente e gere os pontos no modelo",
   vinculos: "Modelos de outras disciplinas sobrepostos ao principal, pelas coordenadas do projeto",
   coordenadas: "Ponto base, survey point, sistema de referência e norte do projeto",
+  desenho: "Siga as instruções sobre a planta · Enter conclui · Esc cancela",
 };
 
 export function App() {
@@ -173,6 +179,7 @@ export function App() {
       setToolDisc(disc);
       if (spec.kind === "pranchas") setView("prancha");
       else if (spec.kind === "locacao" || spec.kind === "tracado") setView("planta");
+      else if (spec.kind === "desenho" && spec.cmd !== "corte-selecao") setView("planta");
       setRightOpen(true);
     },
     [],
@@ -247,8 +254,9 @@ export function App() {
       labels: sheetSettings.labels,
       spaces: model.spaces,
       boxes,
+      drafts: store.drafts,
     });
-  }, [view, model, meshById, sheetSettings, store.points, store.runs, boxes]);
+  }, [view, model, meshById, sheetSettings, store.points, store.runs, boxes, store.drafts]);
 
   const planSheet = useMemo(() => {
     if (!planDrawing || !sheetSettings) return null;
@@ -690,6 +698,10 @@ export function App() {
           setView("3d");
           setSectionOpen((o) => !(o && view === "3d"));
           return;
+        case "removerCortes":
+          viewerRef.current?.setExtraClip(null);
+          setExtraClip(false);
+          return;
         case "propriedades":
           // Mostra/oculta a paleta de propriedades (abre a coluna esquerda se estiver fechada).
           if (!leftOpen) {
@@ -710,6 +722,7 @@ export function App() {
     vista3d: view === "3d",
     corte: view === "3d" && (sectionOpen || sectionActive),
     propriedades: leftOpen && propsOpen,
+    removerCortes: false,
   };
 
   // Mensagens dos arquivos de projeto somem sozinhas.
@@ -718,6 +731,41 @@ export function App() {
     const t = setTimeout(() => files.setMessage(null), 6000);
     return () => clearTimeout(t);
   }, [files.message, files.setMessage]);
+
+  // ---- Menus Criar / Modificar / Geral -------------------------------------------------
+  const [extraClip, setExtraClip] = useState(false);
+  const storeyLevel = model?.storeyLevels.find((s) => s.name === storey)?.level ?? 0;
+  const storeyHeight = useMemo(() => {
+    const above = (model?.storeyLevels ?? []).map((s) => s.level).filter((l) => l > storeyLevel + 0.5).sort((a, b) => a - b)[0];
+    return above != null ? above - storeyLevel : 3;
+  }, [model, storeyLevel]);
+  const applyClip = useCallback((req: ClipRequest) => {
+    viewerRef.current?.setExtraClip(req.planes);
+    setExtraClip(true);
+    setView("3d");
+    if (req.frame) setTimeout(() => viewerRef.current?.fitBounds(req.frame!.min, req.frame!.max), 60);
+  }, []);
+  const openView = useCallback((v: SavedView) => {
+    setView("3d");
+    setTimeout(() => viewerRef.current?.setView(v.eye, v.target), 60);
+  }, []);
+  const draft = useDraftTool({
+    cmd: tool.kind === "desenho" ? tool.cmd : "linha",
+    n: tool.n,
+    store,
+    storey,
+    level: storeyLevel,
+    storeyHeight,
+    cs: (model ?? hostModel)?.coordinates ?? IDENTITY_CS,
+    georef,
+    selection,
+    setSelection,
+    boundsOf: (ids) => viewerRef.current?.getBounds(ids) ?? null,
+    onClip: applyClip,
+    ceilingAt: (p) => viewerRef.current?.castRay(p, [0, 1, 0], 20, (n, id) => n[1] < -0.7 && ["IFCSLAB", "IFCROOF", "IFCCOVERING"].includes(elementById.get(id)?.ifcType ?? ""), true)?.point[1] ?? null,
+    onView: openView,
+  });
+  const planTool = tool.kind === "desenho" ? draft.tool : null;
 
   const disc = toolDisc ? DISCIPLINE_TABS[toolDisc] : null;
   const selectedOne = selection.length === 1 ? (elementById.get(selection[0]) ?? null) : null;
@@ -803,6 +851,23 @@ export function App() {
             ignorePair={connected}
             onFocus={focusClash}
             onClear={clearHighlight}
+          />
+        );
+      case "desenho":
+        return (
+          <DesenhoPanel
+            cmd={tool.cmd}
+            ctl={draft}
+            store={store}
+            selection={selection}
+            setSelection={setSelection}
+            hasClip={extraClip}
+            onClearClip={() => onAction("removerCortes")}
+            onOpenView={openView}
+            elementLabel={(id) => {
+              const e = elementById.get(id);
+              return e ? `${e.name || e.ifcType}` : `Elemento ${id}`;
+            }}
           />
         );
       case "coordenadas":
@@ -997,6 +1062,7 @@ export function App() {
                 onPick={pick}
                 dark={theme === "escuro"}
                 fitSignal={fitSignal}
+                planTool={planTool}
               />
             )}
             {view === "3d" && model && (
@@ -1067,7 +1133,7 @@ export function App() {
               {fileName} · {model.schema} · {model.elements.length} elementos
             </span>
             <span className="sep" />
-            <span>{TOOL_HINT[tool.kind]}</span>
+            <span>{tool.kind === "desenho" ? `${CMD_LABEL[tool.cmd]} · ${TOOL_HINT.desenho}` : TOOL_HINT[tool.kind]}</span>
           </>
         )}
         {model && <CursorReadout georef={georef} />}

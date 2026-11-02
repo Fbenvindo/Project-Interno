@@ -12,6 +12,7 @@ import { chainSegments, cutMesh, type P2 } from "./section";
 import { centroid, pointInPolygon, type Space } from "../spaces";
 import { assemblySymbol, LEGEND_LINE, RISER_DOWN, RISER_UP, symbolFor, TEE_MARK } from "./symbols";
 import { assemblyKey } from "../devices";
+import { draftPrims, type DraftEntity } from "../draft";
 import { pointSize } from "../points";
 import { BOX_LABEL, INSTALL_LABEL, type BoxKind, type PullBox } from "../conduits";
 
@@ -41,6 +42,8 @@ export interface PlanInput {
   spaces?: Space[];
   /** Caixas de passagem dos eletrodutos. */
   boxes?: PullBox[];
+  /** Desenho 2D (anotações) do pavimento. */
+  drafts?: DraftEntity[];
 }
 
 /** Símbolos das caixas de passagem (mm de papel). */
@@ -298,6 +301,9 @@ export function buildPlan(input: PlanInput): PlanDrawing {
       if (!legend.has(key)) legend.set(key, { key, label: BOX_LABEL[b.spec.kind], color, prims: BOX_SYMBOL[b.spec.kind] });
     }
   }
+
+  // ---- Desenho 2D (linhas, textos, cotas…) ------------------------------------------------------
+  for (const d of input.drafts ?? []) if (d.storey === storey) prims.push(...draftPrims(d, scale));
 
   // ---- Ambientes: número/nome e área (posição livre de instalações, se possível) -------------
   if (input.disciplines.has("arquitetura")) {

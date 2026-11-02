@@ -16,6 +16,8 @@ import type { ElementInfo, Vec3 } from "../../../core/types";
 import type { LoadedModel } from "../../../ifc/loadIfc";
 import type { PointsStore } from "../locacao/usePointsStore";
 import type { PointerContext, PreviewItem, Viewer } from "../viewer/Viewer";
+import { draftDistance, draftSnapPoints } from "../../../core/draft";
+import type { PlanTool } from "./planTool";
 
 interface Props {
   viewer: Viewer;
@@ -30,6 +32,8 @@ interface Props {
   dark?: boolean;
   /** Muda a cada pedido de enquadramento vindo de fora (faixa de ferramentas). */
   fitSignal?: number;
+  /** Ferramenta de desenho/modificação/vista ativa (substitui a seleção comum). */
+  planTool?: PlanTool | null;
 }
 
 type ViewBox = { x: number; y: number; w: number; h: number };
@@ -62,7 +66,7 @@ function primsToSvg(prims: Prim[]): string {
     .join("");
 }
 
-export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick, dark, fitSignal }: Props) {
+export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick, dark, fitSignal, planTool }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const cs = model.coordinates;
   const level = model.storeyLevels.find((s) => s.name === storey)?.level ?? 0;
@@ -90,8 +94,9 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
         labels: LABELS,
         spaces: model.spaces,
         boxes: pullBoxes(store.runs, store.points),
+        drafts: store.drafts,
       }),
-    [cs, model, storey, cutHeight, store.points, store.runs],
+    [cs, model, storey, cutHeight, store.points, store.runs, store.drafts],
   );
   const edges = useMemo(() => wallEdges(base.prims), [base]);
   const baseSvg = useMemo(() => primsToSvg(base.prims), [base]);
@@ -233,11 +238,134 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   }, [handler, store.points, store.runs]);
   useEffect(() => viewer.onPlacementChange(() => requestAnimationFrame(updateHover)), [viewer, updateHover]);
 
+  // ---- Ferramentas de desenho: encaixe, seleção e pré-visualização ---------------------------------
+  const toolRef = useRef(planTool);
+  toolRef.current = planTool;
+  const storeRef = useRef(store);
+  storeRef.current = store;
+  const storeyDrafts = useMemo(() => store.drafts.filter((d) => d.storey === storey), [store.drafts, storey]);
+  /** Pontos de encaixe: vértices do desenho, das paredes cortadas e dos pontos locados. */
+  const snapPts = useMemo(() => {
+    const out: P2[] = [];
+    for (const d of storeyDrafts) out.push(...draftSnapPoints(d));
+    for (const p of base.prims) {
+      if (p.t === "line") out.push(p.a, p.b);
+      else if (p.t === "poly" && p.pts.length <= 64) out.push(...p.pts);
+      else if (p.t === "circle") out.push(p.c);
+    }
+    for (const pt of store.points) if (pt.storey === storey) out.push(toPlan(pt.position));
+    return out;
+  }, [storeyDrafts, base, store.points, storey, toPlan]);
+  /** Extensão em planta de cada elemento (para a seleção por janela). */
+  const idBounds = useMemo(() => {
+    const m = new Map<number, [number, number, number, number]>();
+    const grow = (id: number, x: number, y: number) => {
+      const b = m.get(id);
+      if (!b) m.set(id, [x, y, x, y]);
+      else {
+        b[0] = Math.min(b[0], x);
+        b[1] = Math.min(b[1], y);
+        b[2] = Math.max(b[2], x);
+        b[3] = Math.max(b[3], y);
+      }
+    };
+    for (const p of [...base.prims, ...mep.prims]) {
+      if (p.id == null) continue;
+      if (p.t === "line") (grow(p.id, ...p.a), grow(p.id, ...p.b));
+      else if (p.t === "poly") p.pts.forEach((q) => grow(p.id!, ...q));
+      else if (p.t === "circle") (grow(p.id, p.c[0] - p.r, p.c[1] - p.r), grow(p.id, p.c[0] + p.r, p.c[1] + p.r));
+      else (grow(p.id, p.p[0] - p.height, p.p[1] - p.height / 2), grow(p.id, p.p[0] + p.height, p.p[1] + p.height / 2));
+    }
+    return m;
+  }, [base, mep]);
+
+  const [toolCursor, setToolCursor] = useState<{ p: P2; snapped: boolean } | null>(null);
+  const [boxRect, setBoxRect] = useState<{ a: P2; b: P2 } | null>(null);
+
+  const resolvePoint = (clientX: number, clientY: number, shift: boolean): { p: P2; snapped: boolean } => {
+    const p = toModel(clientX, clientY);
+    const t = toolRef.current;
+    if (!t?.snap) return { p, snapped: false };
+    if (shift && t.anchor) {
+      const a = t.anchor;
+      return Math.abs(p[0] - a[0]) >= Math.abs(p[1] - a[1]) ? { p: [p[0], a[1]], snapped: false } : { p: [a[0], p[1]], snapped: false };
+    }
+    const tol = SNAP_PX * 0.6 * metersPerPx();
+    let best: P2 | null = null;
+    let bd = tol;
+    for (const q of snapPts) {
+      const d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      if (d < bd) ((bd = d), (best = q));
+    }
+    return best ? { p: best, snapped: true } : { p, snapped: false };
+  };
+
+  const hitAt = (clientX: number, clientY: number, p: P2): number | null => {
+    const el = document.elementFromPoint(clientX, clientY)?.closest("[data-id]");
+    const raw = el ? Number(el.getAttribute("data-id")) : NaN;
+    if (Number.isFinite(raw)) return raw;
+    const tol = SNAP_PX * 0.4 * metersPerPx();
+    let best: { id: number; d: number } | null = null;
+    for (const d of storeyDrafts) {
+      const k = draftDistance(d, p, SCALE);
+      if (k <= tol && (!best || k < best.d)) best = { id: d.id, d: k };
+    }
+    for (const pt of store.points) {
+      if (pt.storey !== storey) continue;
+      const q = toPlan(pt.position);
+      const k = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      if (k <= tol * 1.5 && (!best || k < best.d)) best = { id: pt.id, d: k };
+    }
+    return best?.id ?? null;
+  };
+
+  const edgeAt = (p: P2): [P2, P2] | null => {
+    const tol = SNAP_PX * 0.5 * metersPerPx();
+    let best: { e: [P2, P2]; d: number } | null = null;
+    for (const e of edges) {
+      const { t } = closestOnSegment([p[0], p[1], 0], [e.a[0], e.a[1], 0], [e.b[0], e.b[1], 0]);
+      const q: P2 = [e.a[0] + (e.b[0] - e.a[0]) * t, e.a[1] + (e.b[1] - e.a[1]) * t];
+      const d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      if (d <= tol && (!best || d < best.d)) best = { e: [e.a, e.b], d };
+    }
+    return best?.e ?? null;
+  };
+
+  const idsInBox = (a: P2, b: P2, crossing: boolean): number[] => {
+    const [x0, x1] = [Math.min(a[0], b[0]), Math.max(a[0], b[0])];
+    const [y0, y1] = [Math.min(a[1], b[1]), Math.max(a[1], b[1])];
+    const out: number[] = [];
+    for (const [id, bb] of idBounds) {
+      const inside = bb[0] >= x0 && bb[2] <= x1 && bb[1] >= y0 && bb[3] <= y1;
+      const touches = bb[0] <= x1 && bb[2] >= x0 && bb[1] <= y1 && bb[3] >= y0;
+      if (crossing ? touches : inside) out.push(id);
+    }
+    return out;
+  };
+
+  // Enter conclui, Esc cancela (fora de campos de texto).
+  useEffect(() => {
+    if (!planTool) return;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "z") return (e.preventDefault(), e.shiftKey ? storeRef.current.redo() : storeRef.current.undo());
+      if (mod && e.key.toLowerCase() === "y") return (e.preventDefault(), storeRef.current.redo());
+      if (e.key === "Enter") (e.preventDefault(), toolRef.current?.finish());
+      else if (e.key === "Escape") toolRef.current?.cancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [!!planTool]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => () => cancelAnimationFrame(raf.current), []);
+
   // ---- Ponteiro ---------------------------------------------------------------------------------
-  const drag = useRef<{ x: number; y: number; vb: ViewBox; moved: boolean } | null>(null);
+  const drag = useRef<{ x: number; y: number; vb: ViewBox; moved: boolean; box: boolean; start: P2 } | null>(null);
   const raf = useRef(0);
   const onPointerDown = (e: PointerEvent) => {
-    drag.current = { x: e.clientX, y: e.clientY, vb, moved: false };
+    drag.current = { x: e.clientX, y: e.clientY, vb, moved: false, box: !!planTool?.selecting && e.button === 0, start: toModel(e.clientX, e.clientY) };
   };
   const onPointerMove = (e: PointerEvent) => {
     // Coordenadas do projeto do cursor (para a barra de status), na cota do piso do pavimento.
@@ -249,7 +377,14 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       const dx = e.clientX - d.x;
       const dy = e.clientY - d.y;
       if (Math.hypot(dx, dy) > 4) d.moved = true;
-      if (d.moved) setVb({ ...d.vb, x: d.vb.x - (dx / r.width) * d.vb.w, y: d.vb.y - (dy / r.height) * d.vb.h });
+      if (d.moved && d.box && e.buttons & 1) setBoxRect({ a: d.start, b: pm });
+      else if (d.moved) setVb({ ...d.vb, x: d.vb.x - (dx / r.width) * d.vb.w, y: d.vb.y - (dy / r.height) * d.vb.h });
+      return;
+    }
+    if (planTool) {
+      const { clientX, clientY, shiftKey } = e;
+      cancelAnimationFrame(raf.current);
+      raf.current = requestAnimationFrame(() => host.current && setToolCursor(resolvePoint(clientX, clientY, shiftKey)));
       return;
     }
     lastPointer.current = { x: e.clientX, y: e.clientY, shift: e.shiftKey };
@@ -259,6 +394,21 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   const onPointerUp = (e: PointerEvent) => {
     const d = drag.current;
     drag.current = null;
+    if (planTool) {
+      if (d?.box && d.moved) {
+        const b = toModel(e.clientX, e.clientY);
+        setBoxRect(null);
+        planTool.box?.(idsInBox(d.start, b, b[0] < d.start[0]), { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
+        return;
+      }
+      if (!d || d.moved) return;
+      if (e.button === 2) return planTool.finish();
+      if (e.button !== 0) return;
+      const r = resolvePoint(e.clientX, e.clientY, e.shiftKey);
+      const raw = toModel(e.clientX, e.clientY);
+      planTool.click(r.p, { id: hitAt(e.clientX, e.clientY, raw), edge: edgeAt(raw), shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
+      return;
+    }
     if (!d || d.moved || e.button !== 0) return;
     const h = viewer.getPlacementHandler();
     if (h) {
@@ -329,16 +479,42 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       `${selection.map((id) => `#editor-planta text[data-id="${id}"]`).join(",")}{fill:#00a3c4 !important;stroke:none !important}`
     : "";
 
+  const toolSvg = planTool
+    ? (() => {
+        const px = metersPerPx();
+        let out = primsToSvg(planTool.preview(toolCursor?.p ?? null));
+        if (toolCursor?.snapped) {
+          const [x, y] = toolCursor.p;
+          const k = 6 * px;
+          out += `<rect x="${f3(x - k)}" y="${f3(-y - k)}" width="${f3(2 * k)}" height="${f3(2 * k)}" fill="none" stroke="#f59e0b" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+        }
+        if (toolCursor && planTool.snap) {
+          const [x, y] = toolCursor.p;
+          const k = 14 * px;
+          out += `<line x1="${f3(x - k)}" y1="${f3(-y)}" x2="${f3(x + k)}" y2="${f3(-y)}" stroke="#0ea5e9" stroke-width="1" vector-effect="non-scaling-stroke"/><line x1="${f3(x)}" y1="${f3(-y - k)}" x2="${f3(x)}" y2="${f3(-y + k)}" stroke="#0ea5e9" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+        }
+        if (boxRect) {
+          const crossing = boxRect.b[0] < boxRect.a[0];
+          const x = Math.min(boxRect.a[0], boxRect.b[0]);
+          const y = -Math.max(boxRect.a[1], boxRect.b[1]);
+          const color = crossing ? "#16a34a" : "#2563eb";
+          out += `<rect x="${f3(x)}" y="${f3(y)}" width="${f3(Math.abs(boxRect.b[0] - boxRect.a[0]))}" height="${f3(Math.abs(boxRect.b[1] - boxRect.a[1]))}" fill="${color}" fill-opacity="0.08" stroke="${color}" stroke-width="1.2" ${crossing ? 'stroke-dasharray="6 4"' : ""} vector-effect="non-scaling-stroke"/>`;
+        }
+        return out;
+      })()
+    : "";
+
   return (
     <div
       ref={host}
-      className={`plan-editor ${handler ? "editing" : ""} ${dark ? "dark" : ""}`}
+      className={`plan-editor ${handler || planTool ? "editing" : ""} ${planTool?.selecting ? "selecting" : ""} ${dark ? "dark" : ""}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerLeave={() => ((lastPointer.current = null), setHover(null), setCursor(null))}
+      onPointerLeave={() => ((lastPointer.current = null), setHover(null), setCursor(null), setToolCursor(null))}
       onWheel={onWheel}
-      onDoubleClick={() => (handler ? handler.doubleClick?.() : fit())}
+      onContextMenu={(e) => planTool && e.preventDefault()}
+      onDoubleClick={() => (planTool ? planTool.finish() : handler ? handler.doubleClick?.() : fit())}
     >
       <style>{highlight}</style>
       <svg id="editor-planta" viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} width="100%" height="100%">
@@ -347,7 +523,25 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
         <g dangerouslySetInnerHTML={{ __html: outlines }} />
         <g dangerouslySetInnerHTML={{ __html: mepSvg }} />
         <g pointerEvents="none" dangerouslySetInnerHTML={{ __html: previewSvg(viewer.getStaticPreview()) + previewSvg(hover?.previews ?? []) + snapMarker }} />
+        <g pointerEvents="none" dangerouslySetInnerHTML={{ __html: toolSvg }} />
       </svg>
+      {planTool && (
+        <div className="plan-prompt" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
+          <span>{planTool.prompt}</span>
+        </div>
+      )}
+      {planTool?.question && (
+        <div className="plan-question" role="dialog" aria-label="Confirmação" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+          <p>{planTool.question.text}</p>
+          <div className="btn-row">
+            {planTool.question.options.map((o) => (
+              <button key={o.label} className={`btn ${o.primary ? "primary" : ""}`} onClick={o.run}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <button className="btn plan-fit" onClick={fit} onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
         Enquadrar
       </button>
