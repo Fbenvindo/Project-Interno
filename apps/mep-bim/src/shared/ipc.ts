@@ -10,6 +10,8 @@ export interface SaveRequest {
   defaultName: string;
   content: string;
   filters: { name: string; extensions: string[] }[];
+  /** Grava direto neste arquivo do projeto (.seb/.json), sem diálogo ("Salvar"). */
+  path?: string;
 }
 
 export interface OpenedTextFile {

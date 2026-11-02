@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from "electron";
 import { readFile, rm, writeFile } from "node:fs/promises";
-import { basename, join, normalize, sep } from "node:path";
+import { basename, extname, join, normalize, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { FileFilter, OpenedFile, OpenedTextFile, PdfRequest, SaveRequest } from "../shared/ipc";
 
@@ -21,7 +21,25 @@ let mainWindow: BrowserWindow | null = null;
 /** Arquivo passado na linha de comando (ex.: duplo clique em um .ifc). */
 let pendingFile: string | null = process.argv.slice(1).find((a) => a.toLowerCase().endsWith(".ifc")) ?? null;
 
+// IFCs abertos são de terceiros (arquitetura, estrutura, outras disciplinas): o app só lê.
+// Nenhum salvamento pode cair em cima de um deles.
+const readOnlyFiles = new Set<string>();
+const keyOf = (p: string) => (process.platform === "win32" ? resolve(p).toLowerCase() : resolve(p));
+const isReadOnly = (p: string) => readOnlyFiles.has(keyOf(p));
+
+async function refuseReadOnly(p: string): Promise<boolean> {
+  if (!isReadOnly(p)) return false;
+  await dialog.showMessageBox(mainWindow!, {
+    type: "warning",
+    title: "Arquivo protegido",
+    message: "Este IFC é um modelo de referência (de terceiros) e não pode ser alterado.",
+    detail: `${basename(p)}\n\nEscolha outro nome ou outra pasta. O SmartEasyBIM só grava os seus próprios arquivos (projeto .seb e exportações).`,
+  });
+  return true;
+}
+
 async function readIfc(filePath: string): Promise<OpenedFile> {
+  readOnlyFiles.add(keyOf(filePath));
   const data = await readFile(filePath);
   return { name: basename(filePath), path: filePath, data: new Uint8Array(data.buffer, data.byteOffset, data.byteLength) };
 }
@@ -133,6 +151,7 @@ ipcMain.handle("file:savePdf", async (_e, req: PdfRequest): Promise<string | nul
     filters: [{ name: "PDF", extensions: ["pdf"] }],
   });
   if (res.canceled || !res.filePath) return null;
+  if (await refuseReadOnly(res.filePath)) return null;
   const html =
     `<!doctype html><html><head><meta charset="utf-8"><style>@page{size:${req.widthMm}mm ${req.heightMm}mm;margin:0}` +
     `html,body{margin:0;padding:0}svg{display:block;width:${req.widthMm}mm;height:${req.heightMm}mm}</style></head><body>${req.svg}</body></html>`;
@@ -155,12 +174,21 @@ ipcMain.handle("file:savePdf", async (_e, req: PdfRequest): Promise<string | nul
 });
 
 ipcMain.handle("file:save", async (_e, req: SaveRequest): Promise<string | null> => {
+  // "Salvar" do projeto: grava direto no arquivo do próprio projeto (.seb ou .json), sem perguntar.
+  if (req.path) {
+    const ext = extname(req.path).toLowerCase();
+    if ((ext === ".seb" || ext === ".json") && !isReadOnly(req.path)) {
+      await writeFile(req.path, req.content, "utf8");
+      return req.path;
+    }
+  }
   const res = await dialog.showSaveDialog(mainWindow!, {
     title: "Salvar arquivo",
     defaultPath: req.defaultName,
     filters: req.filters,
   });
   if (res.canceled || !res.filePath) return null;
+  if (await refuseReadOnly(res.filePath)) return null;
   await writeFile(res.filePath, req.content, "utf8");
   return res.filePath;
 });

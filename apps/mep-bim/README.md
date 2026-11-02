@@ -122,6 +122,24 @@ Na aba **Planta 2D**, escolha o pavimento, a altura de corte (padrão 1,20 m aci
 
 A simbologia é um ponto de partida: confira com o padrão gráfico do escritório antes de emitir pranchas.
 
+### Projeto (.seb) e IFCs de terceiros
+
+O **projeto** é o arquivo do usuário, com extensão **`.seb`** (SmartEasyBIM; por dentro é JSON). Ele guarda:
+- pontos, trechos, circuitos, desenhos, vistas, folhas, programa, coordenadas e escolhas de marcas;
+- o nome e o caminho do **IFC base** e dos **vínculos**.
+
+Os IFCs (arquitetura, estrutura, outras disciplinas) são **de terceiros**: o app só os lê e **nunca grava neles**. Se uma exportação ou um "Salvar como" apontar para um IFC aberto, o app recusa e pede outro nome.
+
+Comandos em **Arquivo › Projeto**:
+- **Novo projeto:** escolhe o IFC base e começa um projeto vazio.
+- **Abrir projeto:** abre o `.seb` e reabre sozinho o IFC base e os vínculos pelos caminhos salvos. Se um arquivo mudou de lugar, pede para localizá-lo.
+- **Salvar:** grava no mesmo `.seb`.
+- **Salvar como:** grava com outro nome.
+
+Os projetos antigos em `.json` continuam abrindo.
+
+**Abas:** Planta, 3D e Prancha podem ser fechadas pelo **×**. O botão **+** ao lado das abas reabre uma aba fechada; abrir uma vista ou folha pelo navegador também reabre a aba correspondente.
+
 ### Importar elementos em IFC (biblioteca)
 
 Em **Arquivo › Importar elementos em IFC**. Neste app, *elemento* = família.
@@ -268,6 +286,8 @@ Outros comandos:
 | `npm run build` | Build de produção em `out/` |
 | `npm run dist:win` / `dist:mac` / `dist:linux` | Gera o instalador em `release/` (rode no sistema operacional correspondente) |
 | `npm run sample` | Regenera `samples/exemplo-mep.ifc` |
+
+Projetos do app são salvos como `.seb` (Arquivo › Salvar).
 
 O modelo `samples/exemplo-mep.ifc` (botão **Abrir modelo de exemplo**) tem água fria, sprinklers, duto com difusores, eletrocalha, luminárias, tomadas, ponto de dados, quadro e **interferências propositais** para demonstração.
 

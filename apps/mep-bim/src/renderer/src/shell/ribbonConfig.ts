@@ -43,6 +43,7 @@ export type ActionId =
   | "vincularIfc"
   | "abrirProjeto"
   | "salvarProjeto"
+  | "salvarProjetoComo"
   | "exportarIfc"
   | "temaClaro"
   | "temaEscuro"
@@ -121,19 +122,25 @@ const run = (key: string, label: string, icon: string, typeId: string): RibbonBu
 export const RIBBON: Record<TopTab, RibbonGroup[]> = {
   arquivo: [
     {
-      label: "Modelo IFC",
+      label: "Projeto",
       buttons: [
-        { key: "abrir-ifc", label: "Abrir IFC", icon: "importar", action: "abrirIfc" },
-        { key: "exemplo", label: "Exemplo", icon: "exemplo", action: "exemplo" },
-        { key: "exemplo-apto", label: "Exemplo apartamento", icon: "planta", action: "exemploApartamento" },
-        { key: "vincular", label: "Vincular IFC", icon: "vinculo", action: "vincularIfc", needsModel: true },
+        { key: "novo-projeto", label: "Novo projeto", icon: "importar", action: "abrirIfc" },
+        { key: "abrir-projeto", label: "Abrir projeto", icon: "abrir", action: "abrirProjeto" },
+        { key: "salvar-projeto", label: "Salvar", icon: "salvar", action: "salvarProjeto", needsModel: true },
+        { key: "salvar-como", label: "Salvar como", icon: "salvar", action: "salvarProjetoComo", needsModel: true },
       ],
     },
     {
-      label: "Projeto",
+      label: "Referências (IFC de terceiros)",
       buttons: [
-        { key: "abrir-projeto", label: "Abrir projeto", icon: "abrir", action: "abrirProjeto", needsModel: true },
-        { key: "salvar-projeto", label: "Salvar projeto", icon: "salvar", action: "salvarProjeto", needsModel: true },
+        { key: "vincular", label: "Vincular IFC", icon: "vinculo", action: "vincularIfc", needsModel: true },
+        { key: "exemplo", label: "Exemplo", icon: "exemplo", action: "exemplo" },
+        { key: "exemplo-apto", label: "Exemplo apartamento", icon: "planta", action: "exemploApartamento" },
+      ],
+    },
+    {
+      label: "Exportar",
+      buttons: [
         { key: "exportar-ifc", label: "Exportar IFC", icon: "exportar", action: "exportarIfc", needsModel: true },
         { key: "exportar-ifc-disc", label: "IFC por disciplina", icon: "exportar", action: "exportarIfcDisciplinas", needsModel: true },
       ],

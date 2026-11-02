@@ -32,7 +32,7 @@ import { alignKey, DEFAULT_ALIGN, federate, prepareLink, type LinkData, type Lin
 import { openIfcMany, readIfcPath } from "./platform";
 import { boxElements, boxIndexOf, boxProperties, pullBoxes } from "../../core/conduits";
 import { defaultTitleBlockId, titleBlockById, useTitleBlocks } from "./planta/titleBlocks";
-import { useProjectFiles } from "./locacao/useProjectFiles";
+import { setHostLoader, setProjectFile, useProjectFile, useProjectFiles } from "./locacao/useProjectFiles";
 import { EMPTY_FILTERS, Navigator, NO_STOREY, type Filters } from "./shell/Navigator";
 import { Ribbon } from "./shell/Ribbon";
 import { ParamsPanel } from "./shell/ParamsPanel";
@@ -52,7 +52,10 @@ import { makeCeilingResolver, makeSlabProbe } from "./locacao/ceiling";
 import { Icon, LogoMark } from "./shell/icons";
 import { DISCIPLINE_TABS, TOP_TABS, type ActionId, type DisciplineTab, type Tool, type ToolSpec, type TopTab } from "./shell/ribbonConfig";
 
-type View = "planta" | "3d" | "prancha";
+type View = "planta" | "3d" | "prancha" | "vazio";
+type TabView = Exclude<View, "vazio">;
+const TABS: TabView[] = ["planta", "3d", "prancha"];
+const TAB_LABEL: Record<TabView, string> = { planta: "Planta", "3d": "Vista 3D", prancha: "Prancha" };
 const IDENTITY_CS = new CoordinateSystem();
 type Theme = "claro" | "escuro";
 
@@ -118,6 +121,11 @@ export function App() {
   /** Disciplina em que a ferramenta foi escolhida (filtra biblioteca e tipos de trecho). */
   const [toolDisc, setToolDisc] = useState<DisciplineTab | null>(null);
   const [view, setView] = useState<View>("3d");
+  /** Abas fechadas pelo usuário (reabrem ao abrir uma vista desse tipo, ou pelo "+"). */
+  const [closedTabs, setClosedTabs] = useState<TabView[]>([]);
+  useEffect(() => {
+    if (view !== "vazio") setClosedTabs((c) => (c.includes(view) ? c.filter((x) => x !== view) : c));
+  }, [view]);
   const [leftOpen, setLeftOpen] = useState(true);
   /** Coluna esquerda: Propriedades (em cima) e Navegador (embaixo), cada um recolhível. */
   const [propsOpen, setPropsOpen] = useState(true);
@@ -182,7 +190,8 @@ export function App() {
     }
     if (changed) setLinkData(next);
   }, [hostModel, store.links, linkData, georef]);
-  const files = useProjectFiles(store, model, fileName, () => setSelection([]));
+  const [hostPath, setHostPath] = useState<string | null>(null);
+  const files = useProjectFiles(store, model, fileName, () => setSelection([]), hostPath);
   const pointElements = useMemo(() => store.points.map(pointToElement), [store.points]);
   const runElementList = useMemo(() => (model ? runElements(store.runs, model.storeyLevels) : []), [store.runs, model]);
   const boxes = useMemo(() => pullBoxes(store.runs, store.points), [store.runs, store.points]);
@@ -404,8 +413,9 @@ export function App() {
   dirtyRef.current = store.dirty && !store.isEmpty;
 
   // ---- Abertura de arquivos ------------------------------------------------
-  const openFile = useCallback(async (file: OpenedFile) => {
-    if (dirtyRef.current && !window.confirm("Há pontos e trechos não salvos neste modelo. Abrir outro modelo e descartá-los?")) return;
+  /** Abre um IFC como modelo base (somente leitura). Devolve o modelo carregado. */
+  const openFile = useCallback(async (file: OpenedFile, opts: { skipConfirm?: boolean } = {}): Promise<LoadedModel | null> => {
+    if (!opts.skipConfirm && dirtyRef.current && !window.confirm("Há alterações não salvas neste projeto. Continuar e descartá-las?")) return null;
     setError(null);
     setProgress("Inicializando leitor IFC…");
     // Deixa a interface pintar a mensagem antes do processamento pesado.
@@ -441,14 +451,33 @@ export function App() {
       setSection(NO_SECTION);
       setView("3d");
       setTop((t) => (t === "arquivo" ? "modelo" : t));
-      document.title = `${file.name} — SmartEasyBIM`;
+      setHostPath(file.path);
+      return loaded;
     } catch (e) {
       console.error(e);
       setError(e instanceof Error ? e.message : String(e));
+      return null;
     } finally {
       setProgress(null);
     }
   }, []);
+
+  // Abrir projeto: carrega o IFC base indicado no arquivo (pelo caminho salvo ou pedindo para localizar).
+  useEffect(() => {
+    setHostLoader(async (name, path) => {
+      let f = await readIfcPath(path);
+      if (!f) {
+        if (!window.confirm(`Este projeto usa o modelo IFC "${name ?? "?"}"${path ? ` (${path})` : ""}, que não foi encontrado. Localizar o arquivo?`)) return null;
+        f = await openIfc();
+      }
+      return f ? openFile(f, { skipConfirm: true }) : null;
+    });
+    return () => setHostLoader(null);
+  }, [openFile]);
+  const projectFile = useProjectFile();
+  useEffect(() => {
+    document.title = fileName ? `${projectFile.name ?? "Projeto sem nome"}${store.dirty && !store.isEmpty ? " •" : ""} — ${fileName} — SmartEasyBIM` : "SmartEasyBIM";
+  }, [fileName, projectFile.name, store.dirty, store.isEmpty]);
 
   // ---- Vínculos IFC ----------------------------------------------------------------
   /** Lê um IFC como vínculo do modelo principal. */
@@ -561,15 +590,23 @@ export function App() {
     if (!hostModel) linkInScene.current.clear();
   }, [hostModel]);
 
+  /** Novo projeto: escolhe o modelo IFC base (de terceiros, só leitura) e começa um projeto vazio. */
   const handleOpen = useCallback(async () => {
+    if (dirtyRef.current && !window.confirm("Há alterações não salvas neste projeto. Começar um novo e descartá-las?")) return;
     const file = await openIfc();
-    if (file) await openFile(file);
-  }, [openFile]);
+    if (!file) return;
+    const m = await openFile(file, { skipConfirm: true });
+    if (m) {
+      setProjectFile({ path: null, name: null });
+      files.setMessage(`Novo projeto sobre ${file.name}. O IFC é só referência (não é alterado); salve o projeto como arquivo .seb.`);
+    }
+  }, [openFile, files]);
 
   const handleSample = useCallback(
     async (name = "exemplo-mep.ifc") => {
       const res = await fetch(new URL(`samples/${name}`, document.baseURI));
-      await openFile({ name, path: null, data: new Uint8Array(await res.arrayBuffer()) });
+      const m = await openFile({ name, path: null, data: new Uint8Array(await res.arrayBuffer()) });
+      if (m) setProjectFile({ path: null, name: null });
     },
     [openFile],
   );
@@ -716,6 +753,8 @@ export function App() {
           return void files.open();
         case "salvarProjeto":
           return void files.save();
+        case "salvarProjetoComo":
+          return void files.saveAs();
         case "exportarIfc":
           return void files.exportIfc(false);
         case "temaClaro":
@@ -927,6 +966,25 @@ export function App() {
     store.setSheets((l) => [...l, ...created]);
     openSheet(created[0].id);
     files.setMessage(`${created.length} folha(s) criada(s), uma por pavimento.`);
+  };
+
+  /** Fecha uma aba: o conteúdo dela volta ao padrão (planta de trabalho, modelo completo sem recortes, sem folha). */
+  const closeTab = (t: TabView) => {
+    if (t === "planta") setPlanKey("trab");
+    if (t === "3d") {
+      setView3dId(null);
+      viewerRef.current?.setExtraClip(null);
+      setExtraClip(false);
+    }
+    if (t === "prancha" && tool.kind === "pranchas") chooseTool({ kind: "propriedades" });
+    const left = TABS.filter((x) => x !== t && !closedTabs.includes(x));
+    setClosedTabs((c) => [...new Set([...c, t])]);
+    if (view === t) setView(left[0] ?? "vazio");
+  };
+  const openTab = (t: TabView) => {
+    if (t === "prancha") chooseTool({ kind: "pranchas" });
+    else setView(t);
+    if (t === "3d") setTimeout(() => viewerRef.current?.fitTo(), 60);
   };
 
   const draftView = activeViewDef && view === "planta" && !(activeViewDef.kind === "planta" && activeViewDef.section === "trabalho") ? activeViewDef.id : null;
@@ -1324,55 +1382,46 @@ export function App() {
             </button>
             {model && (
               <>
-                <span className={`view-tab-wrap ${view === "planta" ? "active" : ""}`}>
-                  <button className={`view-tab ${view === "planta" ? "active" : ""}`} onClick={() => setView("planta")}>
-                    {activeViewDef && planKey.startsWith("view:") ? activeViewDef.name : `Planta · ${storey}`}
-                  </button>
-                  {planKey.startsWith("view:") && (
-                    <button className="tab-close" title="Fechar esta vista (volta à planta do pavimento)" aria-label="Fechar vista" onClick={() => (setPlanKey("trab"), setView("planta"))}>
+                {!closedTabs.includes("planta") && (
+                  <span className={`view-tab-wrap ${view === "planta" ? "active" : ""}`}>
+                    <button className={`view-tab ${view === "planta" ? "active" : ""}`} onClick={() => setView("planta")}>
+                      {activeViewDef && planKey.startsWith("view:") ? activeViewDef.name : `Planta · ${storey}`}
+                    </button>
+                    <button className="tab-close" title="Fechar esta aba" aria-label="Fechar planta" onClick={() => closeTab("planta")}>
                       ×
                     </button>
-                  )}
-                </span>
-                <span className={`view-tab-wrap ${view === "3d" ? "active" : ""}`}>
-                  <button className={`view-tab ${view === "3d" ? "active" : ""}`} onClick={() => setView("3d")}>
-                    3D · {view3dDef ? view3dDef.name : (storeyView ?? "Modelo completo")}
-                  </button>
-                  {(view3dDef || extraClip) && (
-                    <button
-                      className="tab-close"
-                      title="Fechar esta vista 3D (volta ao modelo completo, sem recortes)"
-                      aria-label="Fechar vista 3D"
-                      onClick={() => {
-                        setView3dId(null);
-                        viewerRef.current?.setExtraClip(null);
-                        setExtraClip(false);
-                        setView("3d");
-                        setTimeout(() => viewerRef.current?.fitTo(), 60);
-                      }}
-                    >
+                  </span>
+                )}
+                {!closedTabs.includes("3d") && (
+                  <span className={`view-tab-wrap ${view === "3d" ? "active" : ""}`}>
+                    <button className={`view-tab ${view === "3d" ? "active" : ""}`} onClick={() => setView("3d")}>
+                      3D · {view3dDef ? view3dDef.name : (storeyView ?? "Modelo completo")}
+                    </button>
+                    <button className="tab-close" title="Fechar esta aba" aria-label="Fechar vista 3D" onClick={() => closeTab("3d")}>
                       ×
                     </button>
-                  )}
-                </span>
-                <span className={`view-tab-wrap ${view === "prancha" ? "active" : ""}`}>
-                  <button className={`view-tab ${view === "prancha" ? "active" : ""}`} onClick={() => chooseTool({ kind: "pranchas" })}>
-                    Prancha{activeSheet && view === "prancha" ? ` · ${activeSheet.name}` : ""}
-                  </button>
-                  {view === "prancha" && (
-                    <button
-                      className="tab-close"
-                      title="Fechar a folha (volta à planta)"
-                      aria-label="Fechar folha"
-                      onClick={() => {
-                        setView("planta");
-                        if (tool.kind === "pranchas") chooseTool({ kind: "propriedades" });
-                      }}
-                    >
+                  </span>
+                )}
+                {!closedTabs.includes("prancha") && (
+                  <span className={`view-tab-wrap ${view === "prancha" ? "active" : ""}`}>
+                    <button className={`view-tab ${view === "prancha" ? "active" : ""}`} onClick={() => chooseTool({ kind: "pranchas" })}>
+                      Prancha{activeSheet && view === "prancha" ? ` · ${activeSheet.name}` : ""}
+                    </button>
+                    <button className="tab-close" title="Fechar esta aba" aria-label="Fechar prancha" onClick={() => closeTab("prancha")}>
                       ×
                     </button>
-                  )}
-                </span>
+                  </span>
+                )}
+                {closedTabs.length > 0 && (
+                  <select className="tab-reopen" value="" title="Abrir uma aba fechada" onChange={(e) => e.target.value && openTab(e.target.value as TabView)}>
+                    <option value="">+</option>
+                    {closedTabs.map((t) => (
+                      <option key={t} value={t}>
+                        {TAB_LABEL[t]}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </>
             )}
             <div className="spacer" />
@@ -1410,6 +1459,19 @@ export function App() {
 
           <div className="viewport">
             <div ref={viewerHost} className="viewer-host" />
+            {view === "vazio" && model && (
+              <div className="empty-view">
+                <p>Nenhuma aba aberta.</p>
+                <div className="btn-row">
+                  {TABS.map((t) => (
+                    <button key={t} className="btn" onClick={() => openTab(t)}>
+                      Abrir {TAB_LABEL[t].toLowerCase()}
+                    </button>
+                  ))}
+                </div>
+                <p className="muted small">Ou escolha uma vista ou folha no navegador “Vistas e folhas”, à esquerda.</p>
+              </div>
+            )}
             {view === "planta" && model && viewer && storey && (
               <PlanEditor
                 viewer={viewer}
@@ -1466,10 +1528,16 @@ export function App() {
                 <h1>
                   Smart<span>Easy</span>BIM
                 </h1>
-                <p>Projetos de instalações MEP sobre modelos IFC. Abra um modelo (Revit, Archicad etc.) ou arraste o arquivo para esta janela.</p>
+                <p>
+                  Projetos de instalações MEP sobre modelos IFC. Comece um <b>novo projeto</b> escolhendo o modelo IFC de referência (Revit, Archicad etc.) ou
+                  abra um projeto salvo (.seb). Os IFCs de terceiros só são lidos, nunca alterados.
+                </p>
                 <div className="welcome-actions">
                   <button className="btn primary" onClick={handleOpen}>
-                    Abrir IFC…
+                    Novo projeto…
+                  </button>
+                  <button className="btn" onClick={() => void files.open()}>
+                    Abrir projeto…
                   </button>
                   <button className="btn" onClick={() => handleSample()}>
                     Abrir modelo de exemplo
