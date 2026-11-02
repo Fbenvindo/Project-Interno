@@ -47,8 +47,13 @@ export interface ComponentDef {
   mesh?: ComponentMesh;
   /** Componente cujo símbolo de planta é reaproveitado. */
   symbolOf?: string;
-  /** Origem externa (famílias do Revit importadas). */
-  source?: { kind: "revit"; packageId: string; familyUid: string; family: string; type: string };
+  /** Origem externa: famílias do Revit (.sebfam) ou elementos lidos de um IFC. */
+  source?: { kind: "revit" | "ifc"; packageId: string; familyUid: string; family: string; type: string; file?: string };
+  /** Função/equivalência: elementos com a mesma função são alternativas entre si (ex.: marcas). */
+  funcao?: string;
+  /** Fabricante e modelo. */
+  brand?: string;
+  model?: string;
 }
 
 const P = {

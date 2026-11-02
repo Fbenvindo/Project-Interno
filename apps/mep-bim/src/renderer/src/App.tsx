@@ -88,7 +88,7 @@ const TOOL_HINT: Record<ToolSpec["kind"], string> = {
   quantitativos: "Clique em uma linha para localizar os elementos",
   interferencias: "Clique em uma interferência para enquadrá-la",
   pranchas: "Folhas com as vistas de Documentação · roda do mouse: zoom · arrastar: mover · duplo clique: abrir a vista",
-  biblioteca: "Importe famílias exportadas do Revit e loque-as como qualquer item da biblioteca",
+  biblioteca: "Importe elementos de IFC (ou famílias do Revit), confira a configuração e loque-os como qualquer item da biblioteca",
   programa: "Defina as instalações por tipo de equipamento e por ambiente e gere os pontos no modelo",
   vinculos: "Modelos de outras disciplinas sobrepostos ao principal, pelas coordenadas do projeto",
   coordenadas: "Ponto base, survey point, sistema de referência e norte do projeto",
@@ -989,6 +989,8 @@ export function App() {
       return (
         <BibliotecaPanel
           points={store.points}
+          choices={store.choices}
+          onChoices={store.setChoices}
           onPlace={(componentId) => {
             if (!model) {
               window.alert("Abra um modelo IFC para locar a família.");

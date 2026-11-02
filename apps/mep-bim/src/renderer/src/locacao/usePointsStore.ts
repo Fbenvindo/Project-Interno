@@ -9,6 +9,7 @@ import type { DraftEntity } from "../../../core/draft";
 import type { ViewDef } from "../../../core/views";
 import type { SheetDef } from "../../../core/viewDrawing";
 import type { Discipline } from "../../../core/types";
+import { EMPTY_CHOICES, type ProjectChoices } from "../../../core/alternatives";
 
 interface ProjectState {
   points: PlacedPoint[];
@@ -22,6 +23,8 @@ interface ProjectState {
   sheets: SheetDef[];
   /** Disciplinas do projeto: as que o IFC deste projeto entrega (vazio = todas as de instalações). */
   disciplines: Discipline[];
+  /** Marca de referência por grupo e elemento escolhido entre alternativas equivalentes. */
+  choices: ProjectChoices;
 }
 
 export type ProjectSnapshot = ProjectState;
@@ -36,7 +39,7 @@ interface History {
 }
 
 const LIMIT = 200;
-const EMPTY: ProjectState = { points: [], runs: [], circuits: [], program: EMPTY_PROGRAM, links: [], georef: null, drafts: [], views: [], sheets: [], disciplines: [] };
+const EMPTY: ProjectState = { points: [], runs: [], circuits: [], program: EMPTY_PROGRAM, links: [], georef: null, drafts: [], views: [], sheets: [], disciplines: [], choices: EMPTY_CHOICES };
 
 type Patch<T> = (item: T) => Partial<T>;
 
@@ -61,7 +64,7 @@ export function usePointsStore() {
   const commit = useCallback((fn: (cur: ProjectState) => ProjectState, key: string | null = null) => {
     setH((s) => {
       const next = fn(s.present);
-      if (next.points === s.present.points && next.runs === s.present.runs && next.circuits === s.present.circuits && next.program === s.present.program && next.links === s.present.links && next.georef === s.present.georef && next.drafts === s.present.drafts && next.views === s.present.views && next.sheets === s.present.sheets && next.disciplines === s.present.disciplines) return s;
+      if (next.points === s.present.points && next.runs === s.present.runs && next.circuits === s.present.circuits && next.program === s.present.program && next.links === s.present.links && next.georef === s.present.georef && next.drafts === s.present.drafts && next.views === s.present.views && next.sheets === s.present.sheets && next.disciplines === s.present.disciplines && next.choices === s.present.choices) return s;
       if (key && key === s.lastKey) return { ...s, present: next, future: [] };
       return { ...s, past: [...s.past.slice(-LIMIT + 1), s.present], present: next, future: [], lastKey: key };
     });
@@ -148,6 +151,7 @@ export function usePointsStore() {
   /** Folhas (pranchas) e disciplinas do projeto. */
   const setSheets = useCallback((fn: (v: SheetDef[]) => SheetDef[], key: string | null = null) => commit((cur) => ({ ...cur, sheets: fn(cur.sheets) }), key && `f:${key}`), [commit]);
   const setDisciplines = useCallback((d: Discipline[]) => commit((cur) => ({ ...cur, disciplines: d })), [commit]);
+  const setChoices = useCallback((fn: (c: ProjectChoices) => ProjectChoices) => commit((cur) => ({ ...cur, choices: fn(cur.choices) })), [commit]);
 
   /** Substitui todo o projeto e zera o histórico (abrir arquivo ou novo modelo). */
   const reset = useCallback((data: Partial<ProjectState> = {}) => {
@@ -188,6 +192,7 @@ export function usePointsStore() {
       views: h.present.views,
       sheets: h.present.sheets,
       disciplines: h.present.disciplines,
+      choices: h.present.choices,
       canUndo: h.past.length > 0,
       canRedo: h.future.length > 0,
       dirty: h.present !== h.saved,
@@ -211,12 +216,13 @@ export function usePointsStore() {
       setViews,
       setSheets,
       setDisciplines,
+      setChoices,
       reset,
       markSaved,
       undo,
       redo,
     }),
-    [h, add, update, remove, addRuns, updateRuns, removeRuns, addCircuits, updateCircuits, removeCircuits, assignPoints, mutate, setProgram, setLinks, setGeoref, setDrafts, setViews, setSheets, setDisciplines, reset, markSaved, undo, redo],
+    [h, add, update, remove, addRuns, updateRuns, removeRuns, addCircuits, updateCircuits, removeCircuits, assignPoints, mutate, setProgram, setLinks, setGeoref, setDrafts, setViews, setSheets, setDisciplines, setChoices, reset, markSaved, undo, redo],
   );
 }
 

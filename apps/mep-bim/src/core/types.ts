@@ -48,6 +48,8 @@ export interface ElementInfo {
   name: string;
   objectType: string | null;
   predefinedType: string | null;
+  /** Nome do tipo IFC (IfcTypeObject), ex.: "Evaporadora Hi-Wall:12000 BTU". */
+  typeObjectName?: string | null;
   storey: string | null;
   systems: string[];
   discipline: Discipline;

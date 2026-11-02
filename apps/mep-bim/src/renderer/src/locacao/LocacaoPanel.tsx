@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DISCIPLINE_BY_ID } from "../../../core/disciplines";
 import { formatNumber } from "../../../core/format";
 import { COMPONENTS, COMPONENT_BY_ID, COMPONENT_GROUPS, MOUNTING_LABEL, type ComponentDef } from "../../../core/library";
+import { alternativeLabel, funcaoKey, paletteItems } from "../../../core/alternatives";
 import {
   CEILING_REF_LABEL,
   computePlacement,
@@ -333,7 +334,11 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
   }, [points]);
 
   const q = search.trim().toLowerCase();
-  const filteredComponents = COMPONENTS.filter((c) => (!groups || groups.includes(c.group)) && (!q || `${c.label} ${c.group}`.toLowerCase().includes(q)));
+  // Um item por função: entre elementos equivalentes (ex.: marcas), o escolhido para o projeto.
+  const palette = paletteItems(COMPONENTS, store.choices).filter(
+    ({ def: c, alternatives }) =>
+      (!groups || groups.includes(c.group)) && (!q || [c, ...alternatives].some((x) => `${x.label} ${x.group} ${x.brand ?? ""}`.toLowerCase().includes(q))),
+  );
 
   return (
     <div className="panel-body locacao">
@@ -370,19 +375,42 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
         <div className="section-title">Biblioteca</div>
         <input className="search" type="search" placeholder="Buscar componente…" value={search} onChange={(e) => setSearch(e.target.value)} />
         {COMPONENT_GROUPS.map((g) => {
-          const items = filteredComponents.filter((c) => c.group === g);
+          const items = palette.filter((i) => i.def.group === g);
           if (!items.length) return null;
           return (
             <div key={g} className="lib-group">
               <div className="lib-group-title">{g}</div>
               <div className="lib-grid">
-                {items.map((c) => (
-                  <button key={c.id} className={`lib-item ${componentId === c.id ? "on" : ""}`} onClick={() => selectComponent(componentId === c.id ? null : c.id)} title={`${c.label} · ${MOUNTING_LABEL[c.mounting]}`}>
-                    <span className="swatch" style={{ background: DISCIPLINE_BY_ID[c.discipline].color }} />
-                    <span className="grow">{c.label}</span>
-                    {c.source && <span className="tag-revit">Revit</span>}
-                    <span className="muted small">{c.mounting === "parede" ? `${c.defaultHeight}` : MOUNTING_LABEL[c.mounting].split(" ")[0]}</span>
-                  </button>
+                {items.map(({ def: c, alternatives }) => (
+                  <div key={c.id} className="lib-item-wrap">
+                    <button className={`lib-item ${componentId === c.id ? "on" : ""}`} onClick={() => selectComponent(componentId === c.id ? null : c.id)} title={`${c.label} · ${MOUNTING_LABEL[c.mounting]}${c.brand ? ` · ${c.brand}` : ""}`}>
+                      <span className="swatch" style={{ background: DISCIPLINE_BY_ID[c.discipline].color }} />
+                      <span className="grow">
+                        {c.label}
+                        {c.brand && <span className="muted small"> · {c.brand}</span>}
+                      </span>
+                      {c.source && <span className="tag-revit">{c.source.kind === "ifc" ? "IFC" : "Revit"}</span>}
+                      <span className="muted small">{c.mounting === "parede" ? `${c.defaultHeight}` : MOUNTING_LABEL[c.mounting].split(" ")[0]}</span>
+                    </button>
+                    {alternatives.length > 1 && (
+                      <select
+                        className="lib-alt"
+                        title="Elementos equivalentes: qual usar neste projeto"
+                        value={c.id}
+                        onChange={(e) => {
+                          const k = funcaoKey(c);
+                          if (k) store.setChoices((ch) => ({ ...ch, variants: { ...ch.variants, [k]: e.target.value } }));
+                          if (componentId === c.id) selectComponent(e.target.value);
+                        }}
+                      >
+                        {alternatives.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {alternativeLabel(a, alternatives)}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>

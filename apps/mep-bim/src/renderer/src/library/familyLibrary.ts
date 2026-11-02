@@ -1,16 +1,28 @@
-// Biblioteca de famílias do Revit importadas, guardada neste computador (IndexedDB:
-// aguenta as malhas 3D, que passam do limite do localStorage).
+// Biblioteca de elementos importados, guardada neste computador (IndexedDB: aguenta as
+// malhas 3D, que passam do limite do localStorage). Duas origens:
+// - pacotes .sebfam do plugin do Revit (famílias e tipos);
+// - arquivos IFC, cujos elementos são agrupados por tipo e analisados pelo uso no modelo.
 import { useSyncExternalStore } from "react";
 import { packageComponents, parseFamilyPackage, type FamilyOverride, type FamilyPackage } from "../../../core/families";
-import { registerComponents } from "../../../core/library";
+import { ifcComponentId, ifcElementComponent, type IfcElementDef, type IfcElementOverride } from "../../../core/ifcElements";
+import { COMPONENT_BY_ID, registerComponents } from "../../../core/library";
 
 export interface LibraryEntry {
   id: string;
-  /** Nome do arquivo .sebfam importado. */
+  /** Nome do arquivo importado (.sebfam ou .ifc). */
   name: string;
   importedAt: string;
-  pkg: FamilyPackage;
+  kind?: "sebfam" | "ifc";
+  /** .sebfam */
+  pkg?: FamilyPackage;
   overrides: Record<string, FamilyOverride>;
+  /** IFC: elementos analisados e ajustes por elemento. */
+  elements?: IfcElementDef[];
+  ifcOverrides?: Record<string, IfcElementOverride>;
+  /** IFC: elemento (uid) que substituiu um existente e herdou o id dele (pontos locados passam a usá-lo). */
+  replaces?: Record<string, string>;
+  /** Componentes desta entrada substituídos por outro elemento (não aparecem mais). */
+  hidden?: string[];
 }
 
 const DB = "smarteasybim";
@@ -43,8 +55,18 @@ let loaded = false;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 
+/** Componentes de uma entrada (sem os substituídos). */
+export function entryComponents(e: LibraryEntry) {
+  const hidden = new Set(e.hidden ?? []);
+  if (e.kind === "ifc")
+    return (e.elements ?? [])
+      .map((el) => ifcElementComponent(e.id, el, e.ifcOverrides?.[el.uid], e.replaces?.[el.uid] ?? ifcComponentId(e.id, el.uid), e.name))
+      .filter((c) => !hidden.has(c.id));
+  return e.pkg ? packageComponents(e.id, e.pkg, e.overrides).filter((c) => !hidden.has(c.id)) : [];
+}
+
 function register(e: LibraryEntry) {
-  registerComponents(e.id, packageComponents(e.id, e.pkg, e.overrides));
+  registerComponents(e.id, entryComponents(e));
 }
 
 /** Carrega a biblioteca salva e registra os componentes (uma vez, na abertura do app). */
@@ -54,7 +76,7 @@ export async function loadFamilyLibrary(): Promise<void> {
   try {
     entries = (await tx<LibraryEntry[]>("readonly", (s) => s.getAll() as IDBRequest<LibraryEntry[]>)) ?? [];
   } catch (e) {
-    console.warn("Biblioteca de famílias indisponível:", e);
+    console.warn("Biblioteca de elementos indisponível:", e);
     entries = [];
   }
   entries.sort((a, b) => a.importedAt.localeCompare(b.importedAt));
@@ -78,33 +100,89 @@ async function persist(e: LibraryEntry) {
   }
 }
 
+function update(next: LibraryEntry) {
+  entries = entries.some((x) => x.id === next.id) ? entries.map((x) => (x.id === next.id ? next : x)) : [...entries, next];
+  register(next);
+  emit();
+  void persist(next);
+}
+
+const newId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
 /** Importa um .sebfam; um pacote com o mesmo arquivo de origem substitui o anterior. */
 export async function importFamilyPackage(fileName: string, text: string): Promise<LibraryEntry> {
   const pkg = parseFamilyPackage(text);
-  const previous = entries.find((e) => e.name === fileName);
+  const previous = entries.find((e) => e.name === fileName && e.kind !== "ifc");
   const entry: LibraryEntry = {
-    id: previous?.id ?? `pkg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    id: previous?.id ?? newId("pkg"),
     name: fileName,
     importedAt: new Date().toISOString(),
+    kind: "sebfam",
     pkg,
     overrides: previous?.overrides ?? {},
+    hidden: previous?.hidden,
   };
-  entries = [...entries.filter((e) => e.id !== entry.id), entry];
-  register(entry);
-  emit();
-  await persist(entry);
+  update(entry);
   return entry;
 }
 
-/** Ajusta fixação, orientação ou grupo de uma família e atualiza os componentes. */
+/** O que fazer com cada elemento lido do IFC. */
+export interface ImportDecision {
+  include: boolean;
+  /** Já existe na biblioteca: manter o existente (não importa), substituir, ou manter os dois. */
+  action?: "novo" | "manter" | "substituir" | "ambos";
+  existingId?: string;
+}
+
+/** Grava os elementos escolhidos de um IFC na biblioteca, aplicando as decisões sobre os já existentes. */
+export async function importIfcElements(fileName: string, elements: IfcElementDef[], decisions: Record<string, ImportDecision>): Promise<LibraryEntry> {
+  const previous = entries.find((e) => e.name === fileName && e.kind === "ifc");
+  const id = previous?.id ?? newId("ifc");
+  const chosen = elements.filter((el) => {
+    const d = decisions[el.uid];
+    return d?.include && d.action !== "manter";
+  });
+  const ifcOverrides: Record<string, IfcElementOverride> = { ...(previous?.ifcOverrides ?? {}) };
+  const replaces: Record<string, string> = {};
+  for (const el of chosen) {
+    const d = decisions[el.uid];
+    const existing = d.existingId ? COMPONENT_BY_ID[d.existingId] : undefined;
+    if (!existing) continue;
+    if (d.action === "substituir") {
+      // O novo herda o id (os pontos já locados passam a usá-lo) e a função do existente.
+      replaces[el.uid] = existing.id;
+      ifcOverrides[el.uid] = { ...ifcOverrides[el.uid], funcao: existing.funcao ?? existing.label };
+      const owner = entries.find((x) => x.id === existing.source?.packageId);
+      if (owner && owner.id !== id) update({ ...owner, hidden: [...new Set([...(owner.hidden ?? []), existing.id])] });
+    } else if (d.action === "ambos") {
+      // Os dois ficam, como alternativas da mesma função: o projeto escolhe qual usar.
+      ifcOverrides[el.uid] = { ...ifcOverrides[el.uid], funcao: existing.funcao ?? existing.label };
+    }
+  }
+  const entry: LibraryEntry = { id, name: fileName, importedAt: new Date().toISOString(), kind: "ifc", overrides: {}, elements: chosen, ifcOverrides, replaces };
+  update(entry);
+  return entry;
+}
+
+/** Ajusta fixação, orientação ou grupo de uma família (.sebfam). */
 export async function setFamilyOverride(entryId: string, familyUid: string, patch: FamilyOverride): Promise<void> {
   const e = entries.find((x) => x.id === entryId);
   if (!e) return;
-  const next: LibraryEntry = { ...e, overrides: { ...e.overrides, [familyUid]: { ...e.overrides[familyUid], ...patch } } };
-  entries = entries.map((x) => (x.id === entryId ? next : x));
-  register(next);
-  emit();
-  await persist(next);
+  update({ ...e, overrides: { ...e.overrides, [familyUid]: { ...e.overrides[familyUid], ...patch } } });
+}
+
+/** Ajusta um elemento importado de IFC (painel de configuração). */
+export async function setIfcOverride(entryId: string, uid: string, patch: IfcElementOverride): Promise<void> {
+  const e = entries.find((x) => x.id === entryId);
+  if (!e) return;
+  update({ ...e, ifcOverrides: { ...e.ifcOverrides, [uid]: { ...e.ifcOverrides?.[uid], ...patch } } });
+}
+
+/** Volta a mostrar um elemento que tinha sido substituído. */
+export async function unhideComponent(entryId: string, componentId: string): Promise<void> {
+  const e = entries.find((x) => x.id === entryId);
+  if (!e) return;
+  update({ ...e, hidden: (e.hidden ?? []).filter((x) => x !== componentId) });
 }
 
 export async function removeFamilyPackage(entryId: string): Promise<void> {

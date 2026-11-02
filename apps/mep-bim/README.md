@@ -122,6 +122,28 @@ Na aba **Planta 2D**, escolha o pavimento, a altura de corte (padrão 1,20 m aci
 
 A simbologia é um ponto de partida: confira com o padrão gráfico do escritório antes de emitir pranchas.
 
+### Importar elementos em IFC (biblioteca)
+
+Em **Arquivo › Importar elementos em IFC**. Neste app, *elemento* = família.
+
+- **Importar elementos de IFC…:** lê qualquer IFC e agrupa as ocorrências por tipo (Família:Tipo do Revit / IfcTypeObject). Para cada elemento, analisa como ele foi usado no modelo:
+  - quantas vezes e em quais pavimentos;
+  - se fica na **parede** (encostado numa parede), no **teto/forro** ou no **piso**;
+  - a **altura** (mediana das ocorrências);
+  - o **lado voltado para o ambiente**.
+
+  Também traz a geometria 3D, a classe IFC, os parâmetros reconhecidos (potência, tensão, fluxo, vazão, capacidade) e o **fabricante/modelo** (Pset_ManufacturerTypeInformation ou parâmetros Fabricante/Modelo).
+- **Precisa de configuração:** quando o uso não é claro (formas diferentes no modelo, peça solta no ambiente, parede não encontrada, classe genérica), o elemento vai para **A configurar**. Lá o painel do elemento tem nome, grupo, fixação, altura padrão, girar 180°, função/equivalência, fabricante, modelo e classe IFC.
+- **Elemento que já existe** (mesmo nome, ou mesmo fabricante + modelo): na revisão da importação o app pergunta o que fazer. Sem resposta para todos, não importa.
+  - **Manter o existente:** o novo não entra.
+  - **Substituir pelo novo:** o novo assume o lugar do existente, e os pontos já locados passam a usá-lo.
+  - **Manter os dois:** ficam como alternativas da mesma função.
+- **Marcas e equivalentes:** elementos com a mesma **função** (ex.: a mesma evaporadora da Daikin e da LG) ficam todos na biblioteca, cada um com sua configuração.
+  - Em cada projeto define-se a **marca de referência por grupo** (vale para o projeto todo) e, onde ainda houver mais de uma opção, qual usar.
+  - A locação mostra um item por função, com um seletor para trocar entre os equivalentes.
+  - As escolhas ficam salvas no arquivo do projeto.
+- **Famílias do Revit (.sebfam):** continua disponível, pelo plugin do Revit.
+
 ### Representação dos modelos de arquitetura e estrutura
 
 - **Pilares e alvenarias:** pilares cortados têm hachura mais escura que as alvenarias, nas plantas e nos cortes. No 3D, os pilares também ficam mais escuros.
@@ -262,6 +284,8 @@ apps/mep-bim/
 │   │   ├── runs.ts          # Traçado: tipos, bitolas, geometria, curvas, tês, rota automática
 │   │   ├── project.ts       # Arquivo de projeto (pontos, trechos, desenhos, vistas…)
 │   │   ├── draft.ts         # Desenho 2D: entidades, cotas, encaixe, estender e conectar
+│   │   ├── ifcElements.ts   # Elementos lidos de IFC: agrupamento por tipo e análise do uso no modelo
+│   │   ├── alternatives.ts  # Equivalentes (mesma função), marca de referência e escolha por projeto
 │   │   ├── views.ts         # Vistas de Trabalho/Documentação, filtros, meio-tom, ampliações e marcas
 │   │   ├── viewDrawing.ts   # Desenho de cada vista para as folhas; definição das folhas
 │   │   ├── editOps.ts       # Copiar, mover, recortar, colar e apagar (desenhos, pontos e trechos)

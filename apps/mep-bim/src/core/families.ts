@@ -111,6 +111,27 @@ const GENERIC: CategoryProfile = { discipline: "mep", group: "Revit (outros)", i
 
 export const categoryProfile = (bic: string | null): CategoryProfile => (bic && PROFILES[bic]) || GENERIC;
 
+const DISCIPLINE_PROFILE: Partial<Record<Discipline, CategoryProfile>> = {
+  eletrica: PROFILES.OST_ElectricalFixtures,
+  telecom: PROFILES.OST_DataDevices,
+  hidraulica: PROFILES.OST_PlumbingFixtures,
+  hvac: PROFILES.OST_MechanicalEquipment,
+  incendio: PROFILES.OST_FireAlarmDevices,
+};
+
+/** Perfil (grupo, peça de referência para símbolo e etiqueta) a partir da classe IFC de um elemento. */
+export function profileForIfc(ifcType: string, predefinedType: string | null, discipline: Discipline): CategoryProfile {
+  // Mobiliário e eletrodomésticos: layout (a tomada que os atende é locada à parte).
+  if (["IFCFURNITURE", "IFCFURNISHINGELEMENT", "IFCSYSTEMFURNITUREELEMENT", "IFCELECTRICAPPLIANCE"].includes(ifcType))
+    return { discipline, group: "Mobiliário e layout", ifcType, predefinedType: predefinedType ?? "NOTDEFINED", mounting: "piso", like: "" };
+  const all = Object.values(PROFILES);
+  const exact = all.find((p) => p.ifcType === ifcType && predefinedType && p.predefinedType === predefinedType) ?? all.find((p) => p.ifcType === ifcType);
+  if (exact) return { ...exact, predefinedType: predefinedType ?? exact.predefinedType };
+  const byDisc = DISCIPLINE_PROFILE[discipline];
+  const group = byDisc?.group ?? (discipline === "arquitetura" ? "Mobiliário e layout" : "Elementos IFC");
+  return { discipline, group, ifcType, predefinedType: predefinedType ?? "NOTDEFINED", mounting: byDisc?.mounting ?? "piso", like: byDisc?.like ?? "" };
+}
+
 // ---- Orientação -------------------------------------------------------------------------------
 
 /** Eixo da família que aponta para fora da superfície onde ela é fixada (para o ambiente). */
@@ -121,6 +142,16 @@ export interface FamilyOverride {
   mounting?: Mounting;
   out?: OutAxis;
   group?: string;
+  /** Função/equivalência: elementos com a mesma função são alternativas (ex.: marcas diferentes). */
+  funcao?: string;
+  brand?: string;
+  model?: string;
+  /** Altura padrão (mm), no sentido da fixação. */
+  height?: number;
+  /** Nome exibido na biblioteca. */
+  label?: string;
+  /** Classe IFC na exportação. */
+  ifcType?: string;
 }
 
 type V3 = [number, number, number];
@@ -269,15 +300,20 @@ export function familyComponents(packageId: string, f: RevitFamily, ov: FamilyOv
   const sameMounting = like && like.mounting === mounting;
   return f.tipos.map((t) => {
     const oriented = t.malha && t.malha.indices.length ? orientMesh(t.malha.posicoes, t.malha.indices, out, mounting) : null;
+    const label = t.nome === f.nome ? f.nome : `${f.nome} : ${t.nome}`;
+    const found = brandModelOf(t.parametros.map((p) => ({ name: p.nome, value: p.texto ?? (p.valor as string | number | null) })));
     return {
       id: revitComponentId(f.uid, t.nome),
       group: ov.group ?? profile.group,
-      label: t.nome === f.nome ? f.nome : `${f.nome} : ${t.nome}`,
+      label: ov.label ?? label,
+      funcao: ov.funcao ?? label,
+      brand: ov.brand ?? found.brand ?? undefined,
+      model: ov.model ?? found.model ?? undefined,
       discipline: profile.discipline,
-      ifcType: profile.ifcType,
+      ifcType: ov.ifcType ?? profile.ifcType,
       predefinedType: profile.predefinedType,
       mounting,
-      defaultHeight: sameMounting ? like!.defaultHeight : mounting === "parede" ? 1100 : 0,
+      defaultHeight: ov.height ?? (sameMounting ? like!.defaultHeight : mounting === "parede" ? 1100 : 0),
       size: oriented?.size ?? [300, 300, 300],
       shape: oriented ? "malha" : "caixa",
       mesh: oriented?.mesh,
@@ -293,4 +329,18 @@ export function familyComponents(packageId: string, f: RevitFamily, ov: FamilyOv
 
 export function packageComponents(packageId: string, pkg: FamilyPackage, overrides: Record<string, FamilyOverride> = {}): ComponentDef[] {
   return pkg.familias.flatMap((f) => familyComponents(packageId, f, overrides[f.uid]));
+}
+
+// ---- Fabricante e modelo -----------------------------------------------------------------------
+
+const BRAND_NAMES = /^(manufacturer|fabricante|marca|brand)$/i;
+const MODEL_NAMES = /^(modelreference|model ?reference|modellabel|model|modelo)$/i;
+
+/** Fabricante e modelo a partir de parâmetros/propriedades (Revit ou Pset_ManufacturerTypeInformation). */
+export function brandModelOf(values: { name: string; value: string | number | boolean | null }[]): { brand: string | null; model: string | null } {
+  const pick = (re: RegExp) => {
+    const v = values.find((x) => re.test(x.name.trim()) && x.value != null && String(x.value).trim() !== "");
+    return v ? String(v.value).trim() : null;
+  };
+  return { brand: pick(BRAND_NAMES), model: pick(MODEL_NAMES) };
 }

@@ -242,6 +242,7 @@ export function loadIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn =
       name: val(data.Name) || `#${id}`,
       objectType: val(data.ObjectType) || null,
       predefinedType,
+      typeObjectName: typeObjectOf.has(id) ? val(line(typeObjectOf.get(id)!).Name) || null : null,
       storey: storeyOf(id),
       systems: systems.map((s) => s.name),
       discipline,

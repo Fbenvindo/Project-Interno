@@ -13,6 +13,7 @@ import { syncDraftIds, type DraftEntity } from "./draft";
 import { migrateViews, type ViewDef } from "./views";
 import type { SheetDef } from "./viewDrawing";
 import type { Discipline } from "./types";
+import type { ProjectChoices } from "./alternatives";
 
 /** Vista 3D criada pelo usuário (coordenadas do projeto, m). */
 export interface SavedView {
@@ -40,6 +41,8 @@ export interface ProjectData {
   sheets?: SheetDef[];
   /** Disciplinas que este projeto entrega (o IFC da disciplina). */
   disciplines?: Discipline[];
+  /** Marca de referência por grupo e elemento escolhido entre equivalentes. */
+  choices?: ProjectChoices;
 }
 
 interface StoredCircuit {
@@ -79,6 +82,8 @@ export interface ProjectFile extends LocacaoFile {
   vistas?: ViewDef[];
   folhas?: SheetDef[];
   disciplinas?: Discipline[];
+  marcas?: Record<string, string>;
+  variantes?: Record<string, string>;
   vinculos?: { id: string; nome: string; caminho: string | null; disciplina: LinkMeta["discipline"]; visivel: boolean; transparente: boolean; alinhamento?: LinkMeta["align"] }[];
 }
 
@@ -119,6 +124,8 @@ export function serializeProject(data: ProjectData, cs: CoordinateSystem, modelN
     ...(data.views?.length ? { vistas: data.views } : {}),
     ...(data.sheets?.length ? { folhas: data.sheets } : {}),
     ...(data.disciplines?.length ? { disciplinas: data.disciplines } : {}),
+    ...(data.choices && Object.keys(data.choices.brands).length ? { marcas: data.choices.brands } : {}),
+    ...(data.choices && Object.keys(data.choices.variants).length ? { variantes: data.choices.variants } : {}),
     ...(data.links?.length
       ? { vinculos: data.links.map((l) => ({ id: l.id, nome: l.name, caminho: l.path, disciplina: l.discipline, visivel: l.visible, transparente: l.translucent, ...(l.align ? { alinhamento: l.align } : {}) })) }
       : {}),
@@ -172,5 +179,6 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
     views: migrateViews(file.vistas),
     sheets: Array.isArray(file.folhas) ? file.folhas : [],
     disciplines: Array.isArray(file.disciplinas) ? file.disciplinas : [],
+    choices: { brands: file.marcas ?? {}, variants: file.variantes ?? {} },
   };
 }

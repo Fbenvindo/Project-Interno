@@ -17,7 +17,7 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel | null, f
 
   const save = useCallback(async () => {
     if (!model) return;
-    const json = JSON.stringify(serializeProject({ points: store.points, runs: store.runs, circuits: store.circuits, program: store.program, links: store.links, georef: store.georef, drafts: store.drafts, views: store.views, sheets: store.sheets, disciplines: store.disciplines }, model.coordinates, fileName), null, 2);
+    const json = JSON.stringify(serializeProject({ points: store.points, runs: store.runs, circuits: store.circuits, program: store.program, links: store.links, georef: store.georef, drafts: store.drafts, views: store.views, sheets: store.sheets, disciplines: store.disciplines, choices: store.choices }, model.coordinates, fileName), null, 2);
     const saved = await saveFile({
       defaultName: `${base(fileName)}.locacao.json`,
       content: json,
