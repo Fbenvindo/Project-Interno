@@ -10,6 +10,9 @@ import { EMPTY_PROGRAM, type ProgramState } from "./program";
 import type { LinkMeta } from "../ifc/federate";
 import type { GeorefSettings } from "./georef";
 import { syncDraftIds, type DraftEntity } from "./draft";
+import { migrateViews, type ViewDef } from "./views";
+import type { SheetDef } from "./viewDrawing";
+import type { Discipline } from "./types";
 
 /** Vista 3D criada pelo usuário (coordenadas do projeto, m). */
 export interface SavedView {
@@ -31,8 +34,12 @@ export interface ProjectData {
   georef?: GeorefSettings | null;
   /** Desenho 2D (anotações) na planta. */
   drafts?: DraftEntity[];
-  /** Vistas 3D criadas. */
-  views?: SavedView[];
+  /** Vistas (trabalho e documentação): plantas, ampliações, cortes e 3D. */
+  views?: ViewDef[];
+  /** Folhas com as vistas de documentação. */
+  sheets?: SheetDef[];
+  /** Disciplinas que este projeto entrega (o IFC da disciplina). */
+  disciplines?: Discipline[];
 }
 
 interface StoredCircuit {
@@ -69,8 +76,10 @@ export interface ProjectFile extends LocacaoFile {
   programa?: ProgramState;
   georreferenciamento?: GeorefSettings;
   desenhos?: DraftEntity[];
-  vistas?: SavedView[];
-  vinculos?: { id: string; nome: string; caminho: string | null; disciplina: LinkMeta["discipline"]; visivel: boolean; transparente: boolean }[];
+  vistas?: ViewDef[];
+  folhas?: SheetDef[];
+  disciplinas?: Discipline[];
+  vinculos?: { id: string; nome: string; caminho: string | null; disciplina: LinkMeta["discipline"]; visivel: boolean; transparente: boolean; alinhamento?: LinkMeta["align"] }[];
 }
 
 const round6 = (v: number) => Math.round(v * 1e6) / 1e6;
@@ -108,8 +117,10 @@ export function serializeProject(data: ProjectData, cs: CoordinateSystem, modelN
     ...(data.georef ? { georreferenciamento: data.georef } : {}),
     ...(data.drafts?.length ? { desenhos: data.drafts } : {}),
     ...(data.views?.length ? { vistas: data.views } : {}),
+    ...(data.sheets?.length ? { folhas: data.sheets } : {}),
+    ...(data.disciplines?.length ? { disciplinas: data.disciplines } : {}),
     ...(data.links?.length
-      ? { vinculos: data.links.map((l) => ({ id: l.id, nome: l.name, caminho: l.path, disciplina: l.discipline, visivel: l.visible, transparente: l.translucent })) }
+      ? { vinculos: data.links.map((l) => ({ id: l.id, nome: l.name, caminho: l.path, disciplina: l.discipline, visivel: l.visible, transparente: l.translucent, ...(l.align ? { alinhamento: l.align } : {}) })) }
       : {}),
   };
 }
@@ -153,8 +164,13 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
     discipline: v.disciplina ?? "auto",
     visible: v.visivel !== false,
     translucent: !!v.transparente,
+    ...(v.alinhamento ? { align: v.alinhamento } : {}),
   }));
   const drafts = Array.isArray(file.desenhos) ? file.desenhos : [];
   syncDraftIds(drafts);
-  return { points, runs, circuits, program, links, georef: file.georreferenciamento ?? null, drafts, views: Array.isArray(file.vistas) ? file.vistas : [] };
+  return { points, runs, circuits, program, links, georef: file.georreferenciamento ?? null, drafts,
+    views: migrateViews(file.vistas),
+    sheets: Array.isArray(file.folhas) ? file.folhas : [],
+    disciplines: Array.isArray(file.disciplinas) ? file.disciplinas : [],
+  };
 }

@@ -7,6 +7,8 @@ interface Base {
   /** Id na cena: faixa −800.000 (fora de pontos, trechos e caixas). */
   id: number;
   storey: string;
+  /** Vista dona da anotação (documentação, ampliação, corte). Ausente = planta de trabalho do pavimento. */
+  view?: string;
 }
 
 export type DraftEntity = Base &

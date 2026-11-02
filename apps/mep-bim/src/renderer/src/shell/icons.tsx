@@ -455,6 +455,13 @@ const P: Record<string, ReactNode> = {
       <path d="M4 4 L20 20" />
     </>
   ),
+  gAmpliacao: (
+    <>
+      <rect x="3" y="3" width="11" height="9" strokeDasharray="2 2" />
+      <circle cx="16" cy="16" r="4.5" />
+      <path d="M19.2 19.2 L22 22 M14 16 H18 M16 14 V18" />
+    </>
+  ),
   gVista3d: (
     <>
       <circle cx="6" cy="16" r="2.5" />

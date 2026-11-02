@@ -52,6 +52,9 @@ export type ActionId =
   | "enquadrar"
   | "corte"
   | "removerCortes"
+  | "exportarIfcDisciplinas"
+  | "novaFolha"
+  | "folhasPlantas"
   | "propriedades";
 
 export interface RibbonButton {
@@ -132,6 +135,7 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
         { key: "abrir-projeto", label: "Abrir projeto", icon: "abrir", action: "abrirProjeto", needsModel: true },
         { key: "salvar-projeto", label: "Salvar projeto", icon: "salvar", action: "salvarProjeto", needsModel: true },
         { key: "exportar-ifc", label: "Exportar IFC", icon: "exportar", action: "exportarIfc", needsModel: true },
+        { key: "exportar-ifc-disc", label: "IFC por disciplina", icon: "exportar", action: "exportarIfcDisciplinas", needsModel: true },
       ],
     },
     {
@@ -202,8 +206,8 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
       ],
     },
     {
-      label: "Vista 3D",
-      buttons: [draw("vista-3d", "Vista 3D no local", "gVista3d")],
+      label: "Vistas",
+      buttons: [draw("ampliacao", "Ampliação", "gAmpliacao"), draw("vista-3d", "Vista 3D no local", "gVista3d")],
     },
   ],
   modelo: [
@@ -350,7 +354,11 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
   pranchas: [
     {
       label: "Prancha",
-      buttons: [{ key: "prancha", label: "Planta do pavimento", icon: "prancha", tool: { kind: "pranchas" }, needsModel: true }],
+      buttons: [
+        { key: "prancha", label: "Folhas", icon: "prancha", tool: { kind: "pranchas" }, needsModel: true },
+        { key: "nova-folha", label: "Nova folha", icon: "prancha", action: "novaFolha", needsModel: true },
+        { key: "folhas-plantas", label: "Folhas das plantas", icon: "planta", action: "folhasPlantas", needsModel: true },
+      ],
     },
   ],
 };

@@ -122,6 +122,31 @@ Na aba **Planta 2D**, escolha o pavimento, a altura de corte (padrão 1,20 m aci
 
 A simbologia é um ponto de partida: confira com o padrão gráfico do escritório antes de emitir pranchas.
 
+### IFC por disciplina, vistas de Trabalho e de Documentação, folhas
+
+**Um IFC por disciplina.** Cada projeto entrega o IFC da sua disciplina (elétrica, hidráulica, climatização…). Marque as **disciplinas do projeto** no topo do navegador *Vistas e folhas*:
+- **Arquivo › Exportar IFC** grava só elas.
+- **Arquivo › IFC por disciplina** grava um arquivo para cada disciplina com algo locado ou traçado.
+- O IFC das outras disciplinas entra como **vínculo** (Arquivo › Vincular IFC), alinhado pelas coordenadas do projeto. Ele aparece no 3D, nas plantas, nos cortes e nas interferências.
+- A edição continua no arquivo de projeto (.json). O IFC é a entrega.
+
+**Vistas**, no navegador *Vistas e folhas* (coluna da esquerda):
+- **Trabalho:** tudo visível (modelo, vínculos e todas as disciplinas). Cada pavimento tem a sua planta de trabalho.
+- **Documentação:** só as disciplinas do projeto. Outras disciplinas podem entrar como informação, em meio-tom. A arquitetura/estrutura fica como fundo (em meio-tom, por padrão). É isto que vai para as folhas. Cada pavimento tem a sua planta de documentação, e um botão na barra de vistas alterna entre *Trabalho* e *Documentação*.
+- **Ampliações** (Geral › Ampliação): retângulo da planta em escala maior, 1:25 por padrão.
+- **Cortes** (Geral › Corte por linha): vista 2D com os elementos cortados hachurados, as arestas do que está além até a profundidade de vista, tubos e eletrodutos cortados e os níveis dos pavimentos.
+- **Vistas 3D**: Geral › Vista 3D no local, ou Corte pela seleção (caixa de recorte).
+- Ao criar uma ampliação, um corte ou uma vista 3D, o app **pergunta se ela é de Trabalho ou de Documentação**.
+- As plantas de documentação mostram as marcas das ampliações (retângulo tracejado) e dos cortes (linha com setas e letra) de documentação.
+- Anotações (textos, cotas, linhas) pertencem à vista em que foram feitas.
+- **Propriedades da vista:** com nada selecionado, a paleta Propriedades mostra a vista aberta. Lá ficam nome, seção, escala, altura de corte, profundidade, disciplinas de referência, fundo, textos e "colocar na folha".
+
+**Folhas** (Pranchas › Folhas, Nova folha, Folhas das plantas):
+- Cada folha recebe uma ou mais vistas de documentação (plantas, ampliações, cortes e 3D), em fileiras automáticas ou arrastadas (*Mover vistas*).
+- Com escalas diferentes, o carimbo mostra "INDICADAS".
+- A legenda reúne os itens das vistas. As vistas 3D entram como imagem.
+- PDF e SVG saem da folha inteira; o DXF sai por vista, em escala real.
+
 ### Menus Criar, Modificar e Geral
 
 Comandos de desenho e edição na planta do pavimento, no estilo dos programas de CAD. A barra sobre a planta mostra o que o comando espera, e o painel da direita traz as opções.
@@ -216,8 +241,10 @@ apps/mep-bim/
 │   │   ├── runs.ts          # Traçado: tipos, bitolas, geometria, curvas, tês, rota automática
 │   │   ├── project.ts       # Arquivo de projeto (pontos, trechos, desenhos, vistas…)
 │   │   ├── draft.ts         # Desenho 2D: entidades, cotas, encaixe, estender e conectar
+│   │   ├── views.ts         # Vistas de Trabalho/Documentação, filtros, meio-tom, ampliações e marcas
+│   │   ├── viewDrawing.ts   # Desenho de cada vista para as folhas; definição das folhas
 │   │   ├── editOps.ts       # Copiar, mover, recortar, colar e apagar (desenhos, pontos e trechos)
-│   │   ├── plan/            # Planta 2D: corte (section), símbolos, montagem (build), prancha (sheet), DXF
+│   │   ├── plan/            # Planta 2D: corte (section), símbolos, montagem (build), corte vertical (elevation), folha (sheet), DXF
 │   │   ├── library.ts       # Biblioteca de componentes para locação
 │   │   ├── placement.ts     # Encaixe em parede/teto/piso e distribuição em grade
 │   │   ├── points.ts        # Pontos locados, etiquetas e arquivo .locacao.json

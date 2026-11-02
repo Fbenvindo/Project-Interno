@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
-import type { SheetResult } from "../../../core/plan/sheet";
+import type { PlacedViewport, SheetResult } from "../../../core/plan/sheet";
 
 interface Props {
   sheet: SheetResult;
@@ -7,12 +7,21 @@ interface Props {
   onSelect: (ids: number[], additive: boolean) => void;
   /** Muda a cada pedido de enquadramento vindo da faixa de ferramentas. */
   fitSignal?: number;
+  /** Arrastar as vistas na folha (em vez de deslocar a folha). */
+  moveMode?: boolean;
+  viewports?: PlacedViewport[];
+  onMoveViewport?: (viewId: string, center: [number, number]) => void;
+  /** Duplo clique numa vista da folha: abrir a vista. */
+  onOpenViewport?: (viewId: string) => void;
 }
 
 type ViewBox = { x: number; y: number; w: number; h: number };
 
 /** Prancha interativa: roda do mouse = zoom, arrastar = deslocar, clique = selecionar. */
-export function PlanView({ sheet, selection, onSelect, fitSignal }: Props) {
+export function PlanView({ sheet, selection, onSelect, fitSignal, moveMode, viewports = [], onMoveViewport, onOpenViewport }: Props) {
+  /** Vista sendo arrastada e deslocamento atual (mm da folha). */
+  const [dragVp, setDragVp] = useState<{ id: string; dx: number; dy: number } | null>(null);
+  const vpDrag = useRef<{ id: string; x: number; y: number } | null>(null);
   const host = useRef<HTMLDivElement>(null);
   const [vb, setVb] = useState<ViewBox>({ x: 0, y: 0, w: sheet.width, h: sheet.height });
   const drag = useRef<{ x: number; y: number; vb: ViewBox; moved: boolean } | null>(null);
@@ -49,11 +58,31 @@ export function PlanView({ sheet, selection, onSelect, fitSignal }: Props) {
     setVb({ x: p.x - (p.x - vb.x) * k, y: p.y - (p.y - vb.y) * k, w, h: vb.h * k });
   };
 
+  const vpAt = (clientX: number, clientY: number): string | null => {
+    const p = toSheet(clientX, clientY);
+    const hit = viewports.find((v) => p.x >= v.x - 2 && p.x <= v.x + v.w + 2 && p.y >= v.y - 2 && p.y <= v.y + v.h + 12);
+    return hit?.id ?? null;
+  };
   const onPointerDown = (e: PointerEvent) => {
+    if (moveMode && e.button === 0) {
+      const id = vpAt(e.clientX, e.clientY);
+      if (id) {
+        const p = toSheet(e.clientX, e.clientY);
+        vpDrag.current = { id, x: p.x, y: p.y };
+        setDragVp({ id, dx: 0, dy: 0 });
+        (e.target as Element).setPointerCapture?.(e.pointerId);
+        return;
+      }
+    }
     drag.current = { x: e.clientX, y: e.clientY, vb, moved: false };
     (e.target as Element).setPointerCapture?.(e.pointerId);
   };
   const onPointerMove = (e: PointerEvent) => {
+    if (vpDrag.current) {
+      const p = toSheet(e.clientX, e.clientY);
+      setDragVp({ id: vpDrag.current.id, dx: p.x - vpDrag.current.x, dy: p.y - vpDrag.current.y });
+      return;
+    }
     const d = drag.current;
     if (!d) return;
     const r = host.current!.getBoundingClientRect();
@@ -63,6 +92,16 @@ export function PlanView({ sheet, selection, onSelect, fitSignal }: Props) {
     if (d.moved) setVb({ ...d.vb, x: d.vb.x - (dx / r.width) * d.vb.w, y: d.vb.y - (dy / r.height) * d.vb.h });
   };
   const onPointerUp = (e: PointerEvent) => {
+    if (vpDrag.current) {
+      const v = viewports.find((x) => x.id === vpDrag.current!.id);
+      const p = toSheet(e.clientX, e.clientY);
+      const dx = p.x - vpDrag.current.x;
+      const dy = p.y - vpDrag.current.y;
+      vpDrag.current = null;
+      setDragVp(null);
+      if (v && Math.hypot(dx, dy) > 0.5) onMoveViewport?.(v.id, [Math.round(v.x + v.w / 2 + dx), Math.round(v.y + v.h / 2 + dy)]);
+      return;
+    }
     const d = drag.current;
     drag.current = null;
     if (!d || d.moved) return;
@@ -89,11 +128,23 @@ export function PlanView({ sheet, selection, onSelect, fitSignal }: Props) {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onDoubleClick={fit}
+      onDoubleClick={(e) => {
+        const id = !moveMode && onOpenViewport && viewports.length > 1 ? vpAt(e.clientX, e.clientY) : null;
+        if (id) onOpenViewport!(id);
+        else fit();
+      }}
     >
-      <style>{highlight}</style>
+      <style>
+        {highlight}
+        {dragVp ? `#prancha [data-vp="${dragVp.id.replace(/"/g, "")}"]{transform:translate(${dragVp.dx}px,${dragVp.dy}px);opacity:.75}` : ""}
+        {moveMode ? `#prancha [data-vp]{cursor:move}` : ""}
+      </style>
       <svg id="prancha" viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} width="100%" height="100%" dangerouslySetInnerHTML={{ __html: sheet.inner }} />
-      <div className="plan-hint">Roda do mouse: zoom · arrastar: mover · duplo clique: enquadrar a folha · clique: selecionar</div>
+      <div className="plan-hint">
+        {moveMode
+          ? "Arraste uma vista para reposicioná-la na folha"
+          : `Roda do mouse: zoom · arrastar: mover · duplo clique: ${viewports.length > 1 ? "abrir a vista / " : ""}enquadrar a folha · clique: selecionar`}
+      </div>
     </div>
   );
 }

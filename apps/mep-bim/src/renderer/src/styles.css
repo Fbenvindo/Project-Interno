@@ -1820,3 +1820,145 @@ h3 {
 .form-grid .span2 {
   grid-column: 1 / -1;
 }
+
+/* ---- Vistas: Trabalho / Documentação, folhas -------------------------------- */
+.vistas-browser {
+  font-size: 12.5px;
+}
+.vb-disc {
+  padding: 6px 10px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.chip.small {
+  padding: 2px 8px;
+  font-size: 11.5px;
+}
+.vb-tree,
+.vb-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.vb-tree ul {
+  padding-left: 12px;
+}
+.vb-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.vb-head.sub {
+  font-weight: 500;
+}
+.vb-head:hover,
+.vb-item:hover {
+  background: var(--hover-bg);
+}
+.vb-tag {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--accent);
+}
+.vb-item {
+  display: flex;
+  align-items: center;
+  padding-left: 18px;
+}
+.vb-item.on {
+  background: var(--sel-bg);
+}
+.vb-item.on .vb-open {
+  color: var(--accent);
+  font-weight: 600;
+}
+.vb-open {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 4px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vb-del {
+  padding: 0 6px;
+  visibility: hidden;
+}
+.vb-item:hover .vb-del {
+  visibility: visible;
+}
+.vb-rename {
+  flex: 1;
+  margin: 1px 4px;
+}
+.vb-empty {
+  padding: 2px 0 4px 30px;
+}
+.vb-new {
+  padding: 4px 0 6px 18px;
+}
+.vista-panel {
+  padding: 8px 10px 12px;
+  font-size: 12.5px;
+}
+.vista-panel .props input,
+.vista-panel .props select {
+  width: 100%;
+}
+.vp-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.vp-sec {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-right: 4px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.vp-sec.trabalho {
+  background: #e2e8f0;
+  color: #334155;
+}
+.vp-sec.documentacao {
+  background: #d1fae5;
+  color: #065f46;
+}
+.view-badge {
+  position: absolute;
+  right: 12px;
+  top: 10px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--overlay-strong);
+  border: 1px solid var(--border);
+  color: var(--text);
+  pointer-events: none;
+}
+.view-badge.documentacao {
+  border-color: #10b981;
+}
+.segmented.small button {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+.folha input.narrow {
+  width: 64px;
+}

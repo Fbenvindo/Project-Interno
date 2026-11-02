@@ -745,7 +745,7 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
         <button className="btn" onClick={files.open}>
           Abrir projeto…
         </button>
-        <button className="btn" onClick={files.exportIfc} disabled={store.isEmpty}>
+        <button className="btn" onClick={() => void files.exportIfc()} disabled={store.isEmpty}>
           Exportar IFC
         </button>
       </div>

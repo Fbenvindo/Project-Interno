@@ -493,6 +493,49 @@ export class Viewer {
     return { x: rect.left + ((v.x + 1) / 2) * rect.width, y: rect.top + ((1 - v.y) / 2) * rect.height };
   }
 
+  /** Câmera atual (para gravar numa vista 3D). */
+  getCamera(): { eye: Vec3; target: Vec3 } {
+    return { eye: this.camera.position.toArray() as Vec3, target: this.controls.target.toArray() as Vec3 };
+  }
+
+  /**
+   * Imagem de uma vista 3D (câmera, recortes e elementos visíveis), sem mudar a vista atual.
+   * Devolve o PNG e a proporção largura/altura.
+   */
+  snapshotView(v: { eye?: Vec3; target?: Vec3; frame?: { min: Vec3; max: Vec3 }; clip?: { normal: Vec3; point: Vec3 }[]; visible?: Set<number> | null }): { href: string; aspect: number } {
+    const pos = this.camera.position.clone();
+    const tgt = this.controls.target.clone();
+    const near = this.camera.near;
+    const far = this.camera.far;
+    const extra = this.extraPlanes;
+    const vis = this.visible;
+    if (v.visible !== undefined) this.setVisible(v.visible);
+    this.extraPlanes = (v.clip ?? []).map((p) => {
+      const n = new THREE.Vector3(...p.normal).normalize();
+      return new THREE.Plane(n, -n.dot(new THREE.Vector3(...p.point)));
+    });
+    this.clipPlanes = [...this.sectionPlanes, ...this.extraPlanes];
+    this.renderer.clippingPlanes = this.clipPlanes;
+    if (v.eye && v.target) this.setView(v.eye, v.target);
+    else if (v.frame) this.fitBounds(v.frame.min, v.frame.max);
+    this.controls.update();
+    this.renderer.render(this.scene, this.camera);
+    const href = this.renderer.domElement.toDataURL("image/png");
+    const aspect = this.renderer.domElement.width / Math.max(1, this.renderer.domElement.height);
+    // Restaura a vista.
+    this.camera.position.copy(pos);
+    this.controls.target.copy(tgt);
+    this.camera.near = near;
+    this.camera.far = far;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+    this.extraPlanes = extra;
+    this.applyClip();
+    if (v.visible !== undefined) this.setVisible(vis);
+    this.requestRender();
+    return { href, aspect };
+  }
+
   screenshot(): string {
     this.renderer.render(this.scene, this.camera);
     return this.renderer.domElement.toDataURL("image/png");

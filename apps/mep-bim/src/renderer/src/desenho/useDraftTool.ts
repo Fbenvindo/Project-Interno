@@ -35,7 +35,7 @@ import {
 import { fmtCoord, toMap, type Georef } from "../../../core/georef";
 import type { Prim } from "../../../core/plan/drawing";
 import type { P2 } from "../../../core/plan/section";
-import type { SavedView } from "../../../core/project";
+import { newViewId, nextViewName, SECTION_LABEL, type ViewDef, type ViewSection } from "../../../core/views";
 import type { Vec3 } from "../../../core/types";
 import type { CoordinateSystem } from "../../../core/math";
 import type { PointsStore } from "../locacao/usePointsStore";
@@ -64,6 +64,7 @@ export type DraftCmd =
   | "conectar"
   | "corte-selecao"
   | "corte-linha"
+  | "ampliacao"
   | "vista-3d";
 
 export const CMD_LABEL: Record<DraftCmd, string> = {
@@ -89,12 +90,13 @@ export const CMD_LABEL: Record<DraftCmd, string> = {
   conectar: "Conectar",
   "corte-selecao": "Corte pela seleção",
   "corte-linha": "Corte por linha",
+  ampliacao: "Ampliação",
   "vista-3d": "Vista 3D no local",
 };
 
 /** Comandos que começam por uma seleção. */
 export const NEEDS_SELECTION = new Set<DraftCmd>(["copiar", "mover", "recortar", "apagar", "estender", "conectar", "corte-selecao"]);
-export const isCreateCmd = (c: DraftCmd) => !NEEDS_SELECTION.has(c) && c !== "colar" && c !== "corte-linha" && c !== "vista-3d";
+export const isCreateCmd = (c: DraftCmd) => !NEEDS_SELECTION.has(c) && c !== "colar" && c !== "corte-linha" && c !== "vista-3d" && c !== "ampliacao";
 
 /** Fases de um comando com seleção. */
 export type Phase = "selecionar" | "confirmar" | "remover" | "executar";
@@ -125,10 +127,14 @@ interface Args {
   setSelection: (ids: number[]) => void;
   /** Caixa (cena) dos elementos do modelo selecionados, ou null. */
   boundsOf: (ids: number[]) => { min: Vec3; max: Vec3 } | null;
-  onClip: (req: ClipRequest) => void;
   /** Y (cena) da face inferior da laje/forro acima do ponto, ou null. */
   ceilingAt: (p: Vec3) => number | null;
-  onView: (v: SavedView) => void;
+  /** Vista criada (já com a seção escolhida pelo usuário): abrir. */
+  onCreateView: (v: ViewDef) => void;
+  /** Vista ativa dona das anotações (null = planta de trabalho). */
+  draftView: string | null;
+  /** Altura de corte da planta ativa (ampliações herdam). */
+  cutHeight: number;
 }
 
 export interface DraftOptions {
@@ -156,6 +162,8 @@ export function useDraftTool(a: Args) {
   const [message, setMessage] = useState<string | null>(null);
   const [opts, setOpts] = useState<DraftOptions>({ text: "Texto", textSize: 2.5, textRot: 0, closed: false, eyeHeight: 1.6, repeat: true });
   const [clipVersion, setClipVersion] = useState(0);
+  /** Vista aguardando a escolha da seção (Trabalho ou Documentação). */
+  const [pending, setPending] = useState<ViewDef | null>(null);
   const argsRef = useRef(a);
   argsRef.current = a;
 
@@ -175,6 +183,7 @@ export function useDraftTool(a: Args) {
     setPts([]);
     setMessage(null);
     setPhase("selecionar");
+    setPending(null);
     if (NEEDS_SELECTION.has(cmd)) argsRef.current.setSelection(editable(argsRef.current.selection));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmd, n]);
@@ -195,7 +204,7 @@ export function useDraftTool(a: Args) {
   }, [cs]);
 
   const addDraft = useCallback((e: DraftEntity | DraftEntity[]) => store.setDrafts((d) => [...d, ...(Array.isArray(e) ? e : [e])]), [store]);
-  const base = { storey };
+  const base = a.draftView ? { storey, view: a.draftView } : { storey };
 
   const coordLabel = useCallback(
     (p: P2): string => {
@@ -282,6 +291,7 @@ export function useDraftTool(a: Args) {
     coordenada: 2,
     "corte-linha": 3,
     "vista-3d": 2,
+    ampliacao: 2,
   };
 
   const state = () => editState(argsRef.current.store);
@@ -351,8 +361,14 @@ export function useDraftTool(a: Args) {
         const ceil = a.ceilingAt([(min[0] + max[0]) / 2, level + 1, (min[2] + max[2]) / 2]);
         const top = Math.min(level + a.storeyHeight - 0.05, ceil != null ? ceil - 0.01 : Infinity);
         if (min[1] >= level - 0.15 && hi[1] > top) hi[1] = top;
-        a.onClip({
-          planes: [
+        askSection({
+          id: newViewId("3d"),
+          name: nextViewName(store.views, "3d", storey).replace("Vista 3D", "Corte 3D"),
+          kind: "3d",
+          section: "trabalho",
+          storey,
+          scale: 50,
+          clip: [
             { normal: [1, 0, 0], point: lo },
             { normal: [0, 1, 0], point: lo },
             { normal: [0, 0, 1], point: lo },
@@ -362,7 +378,9 @@ export function useDraftTool(a: Args) {
           ],
           frame: { min: lo, max: hi },
         });
-        return done("Corte aplicado à vista 3D pela caixa da seleção. Use “Remover cortes” para voltar.");
+        setPts([]);
+        setPhase("selecionar");
+        return;
       }
       default:
         setPhase("executar");
@@ -376,8 +394,30 @@ export function useDraftTool(a: Args) {
     setPhase("confirmar");
   };
 
-  const question: ToolQuestion | null =
-    NEEDS_SELECTION.has(cmd) && phase === "confirmar"
+  /** Pergunta a seção da vista criada e, escolhida, salva e abre. */
+  const askSection = (v: ViewDef) => {
+    setMessage(null);
+    setPending(v);
+  };
+  const createIn = (section: ViewSection) => {
+    if (!pending) return;
+    const v: ViewDef = { ...pending, section, ...(section === "documentacao" ? { refDisciplines: [], background: true, halftoneBackground: true } : {}) };
+    store.setViews((l) => [...l, v]);
+    setPending(null);
+    setMessage(`“${v.name}” criada em ${SECTION_LABEL[section]}.`);
+    a.onCreateView(v);
+  };
+
+  const question: ToolQuestion | null = pending
+    ? {
+        text: `“${pending.name}”: esta vista é para Trabalho ou para Documentação (vai para as folhas)?`,
+        options: [
+          { label: "Trabalho", run: () => createIn("trabalho") },
+          { label: "Documentação", primary: true, run: () => createIn("documentacao") },
+          { label: "Cancelar", run: () => (setPending(null), setMessage("Criação cancelada.")) },
+        ],
+      }
+    : NEEDS_SELECTION.has(cmd) && phase === "confirmar"
       ? {
           text: `${count} elemento(s) selecionado(s). Deseja remover algum elemento da seleção?`,
           options: [
@@ -423,7 +463,7 @@ export function useDraftTool(a: Args) {
     if (cmd === "colar") {
       const c = clipboard;
       if (!c) return setMessage("A área de transferência está vazia: use Copiar ou Recortar.");
-      const r = insertCopies(st, c, { d: [p[0] - c.base[0], p[1] - c.base[1]], storey, dy: level - c.level }, planDelta);
+      const r = insertCopies(st, c, { d: [p[0] - c.base[0], p[1] - c.base[1]], storey, dy: level - c.level, view: a.draftView }, planDelta);
       commitEdit(r.state);
       a.setSelection(r.ids);
       return setMessage(`${r.ids.length} elemento(s) colado(s)${c.storey !== storey ? ` de ${c.storey} em ${storey}` : ""}. Clique para colar novamente ou Esc.`);
@@ -454,7 +494,7 @@ export function useDraftTool(a: Args) {
       }
       clipboard = toClipboard(st, picked, pts[0], storey, level);
       setClipVersion((v) => v + 1);
-      const r = insertCopies(st, clipboard, { d, storey, dy: 0 }, planDelta);
+      const r = insertCopies(st, clipboard, { d, storey, dy: 0, view: a.draftView }, planDelta);
       commitEdit(r.state);
       if (!opts.repeat) {
         a.setSelection(r.ids);
@@ -462,32 +502,63 @@ export function useDraftTool(a: Args) {
       }
       return setMessage(`${r.ids.length} elemento(s) copiado(s). Clique em outro destino ou Esc para terminar.`);
     }
+    if (pending) return;
     if (cmd === "corte-linha") {
       const next = [...pts, p];
       if (next.length < 3) return setPts(next);
       const [p0, p1, side] = next;
       const dir: P2 = [p1[0] - p0[0], p1[1] - p0[1]];
-      let nrm: P2 = [-dir[1], dir[0]];
-      if ((side[0] - p0[0]) * nrm[0] + (side[1] - p0[1]) * nrm[1] < 0) nrm = [-nrm[0], -nrm[1]];
-      a.onClip({ planes: [{ normal: planDelta(nrm), point: planToWorld(p0, level) }] });
-      return done("Corte vertical aplicado à vista 3D (fica o lado indicado).");
+      const left = -dir[1] * (side[0] - p0[0]) + dir[0] * (side[1] - p0[1]) >= 0;
+      setPts([]);
+      return askSection({
+        id: newViewId("corte"),
+        name: nextViewName(store.views, "corte"),
+        kind: "corte",
+        section: "trabalho",
+        storey,
+        scale: 50,
+        cut: { a: p0, b: p1, side: left ? 1 : -1, depth: Math.round(Math.max(2, Math.min(15, Math.hypot(side[0] - p0[0], side[1] - p0[1]) * 2 + 3)) * 2) / 2 },
+      });
+    }
+    if (cmd === "ampliacao") {
+      const next = [...pts, p];
+      if (next.length < 2) return setPts(next);
+      const [q0, q1] = next;
+      setPts([]);
+      if (Math.abs(q1[0] - q0[0]) < 0.2 || Math.abs(q1[1] - q0[1]) < 0.2) return setMessage("Retângulo muito pequeno.");
+      return askSection({
+        id: newViewId("ampliacao"),
+        name: nextViewName(store.views, "ampliacao", storey),
+        kind: "ampliacao",
+        section: "trabalho",
+        storey,
+        scale: 25,
+        cutHeight: a.cutHeight,
+        region: { min: [Math.min(q0[0], q1[0]), Math.min(q0[1], q1[1])], max: [Math.max(q0[0], q1[0]), Math.max(q0[1], q1[1])] },
+      });
     }
     if (cmd === "vista-3d") {
       const next = [...pts, p];
       if (next.length < 2) return setPts(next);
       const y = level + opts.eyeHeight;
-      const views = argsRef.current.store.views;
-      const v: SavedView = { id: `v${Date.now().toString(36)}`, name: `Vista 3D ${views.length + 1} — ${storey}`, eye: planToWorld(next[0], y), target: planToWorld(next[1], y) };
-      store.setViews((l) => [...l, v]);
-      a.onView(v);
-      return done(`“${v.name}” criada e salva no projeto.`);
+      setPts([]);
+      return askSection({
+        id: newViewId("3d"),
+        name: nextViewName(store.views, "3d", storey),
+        kind: "3d",
+        section: "trabalho",
+        storey,
+        scale: 50,
+        eye: planToWorld(next[0], y),
+        target: planToWorld(next[1], y),
+      });
     }
   };
 
   const tool: PlanTool = {
     prompt: promptFor(cmd, phase, pts.length, count),
     question,
-    selecting: NEEDS_SELECTION.has(cmd) && phase !== "executar" && phase !== "confirmar",
+    selecting: !pending && NEEDS_SELECTION.has(cmd) && phase !== "executar" && phase !== "confirmar",
     snap: !(NEEDS_SELECTION.has(cmd) && phase !== "executar") && !(cmd === "estender"),
     anchor: pts[pts.length - 1] ?? null,
     preview(cursor) {
@@ -522,6 +593,11 @@ export function useDraftTool(a: Args) {
         }
         return out;
       }
+      if (cmd === "ampliacao" && cursor && pts.length === 1) {
+        const [q0] = pts;
+        out.push({ t: "poly", pts: [q0, [cursor[0], q0[1]], cursor, [q0[0], cursor[1]]], closed: true, weight: 0.25, color: PREVIEW, layer: "PREVIEW", dashed: true });
+        return out;
+      }
       if ((cmd === "corte-linha" || cmd === "vista-3d") && cursor && pts.length) {
         out.push(line(pts[0], pts[1] ?? cursor, false));
         if (cmd === "vista-3d") {
@@ -539,6 +615,7 @@ export function useDraftTool(a: Args) {
       return out;
     },
     click(p, info) {
+      if (pending) return;
       setMessage(null);
       if (isCreateCmd(cmd)) return onCreateClick(p);
       if (NEEDS_SELECTION.has(cmd) && (phase === "selecionar" || phase === "remover")) {
@@ -655,6 +732,7 @@ function promptFor(cmd: DraftCmd, phase: Phase, k: number, count: number): strin
     estender: ["clique no limite (linha, forma ou face de parede)"],
     "corte-linha": ["primeiro ponto da linha de corte", "segundo ponto", "clique do lado que deve ficar visível"],
     "vista-3d": ["posição do observador", "direção para onde olhar"],
+    ampliacao: ["primeiro canto da área a ampliar", "canto oposto"],
   };
   const s = steps[cmd] ?? [];
   return `${CMD_LABEL[cmd]}: ${s[Math.min(k, s.length - 1)] ?? ""} · Esc cancela`;

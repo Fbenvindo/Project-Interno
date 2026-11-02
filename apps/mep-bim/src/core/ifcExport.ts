@@ -9,7 +9,7 @@ import { derivedGuid, runFittings, runSegments, RUN_TYPE_BY_ID, segmentBasis, st
 import { boxSizeLabel, INSTALL_LABEL, pullBoxes } from "./conduits";
 import { boxLabel, modulesText } from "./devices";
 import { degreesToCompound, type Georef } from "./georef";
-import type { Vec3 } from "./types";
+import type { Discipline, Vec3 } from "./types";
 
 class StepWriter {
   private lines: string[] = [];
@@ -73,9 +73,39 @@ export interface ExportOptions {
   circuits?: Circuit[];
   /** Georreferenciamento do projeto: gravado igual ao do modelo de origem (survey point, sistema, norte, lat/long). */
   georef?: Georef;
+  /** Disciplina(s) do arquivo, no nome do projeto IFC (ex.: "Elétrica"). */
+  title?: string;
 }
 
-export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs, runs = [], circuits = [], georef }: ExportOptions): string {
+/** Só o que pertence às disciplinas pedidas (um IFC por disciplina). Circuitos seguem os pontos e trechos. */
+export function filterByDisciplines(points: PlacedPoint[], runs: Run[], circuits: Circuit[], disciplines: Set<Discipline>) {
+  const p = points.filter((x) => {
+    const d = COMPONENT_BY_ID[x.componentId]?.discipline;
+    return !!d && disciplines.has(d);
+  });
+  const r = runs.filter((x) => {
+    const d = RUN_TYPE_BY_ID[x.typeId]?.discipline;
+    return !!d && disciplines.has(d);
+  });
+  const used = new Set([...p.map((x) => x.circuit), ...r.map((x) => x.circuit)].filter(Boolean));
+  return { points: p, runs: r, circuits: circuits.filter((c) => used.has(c.uid)) };
+}
+
+/** Disciplinas com algo locado/traçado. */
+export function disciplinesInUse(points: PlacedPoint[], runs: Run[]): Discipline[] {
+  const set = new Set<Discipline>();
+  for (const x of points) {
+    const d = COMPONENT_BY_ID[x.componentId]?.discipline;
+    if (d) set.add(d);
+  }
+  for (const x of runs) {
+    const d = RUN_TYPE_BY_ID[x.typeId]?.discipline;
+    if (d) set.add(d);
+  }
+  return [...set];
+}
+
+export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs, runs = [], circuits = [], georef, title }: ExportOptions): string {
   const w = new StepWriter();
   const MM = 1000;
   const pt = ([x, y, z]: Vec3) => w.add(`IFCCARTESIANPOINT((${num(x)},${num(y)},${num(z)}))`);
@@ -100,7 +130,7 @@ export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs,
     );
     w.add(`IFCMAPCONVERSION(${ref(context)},${ref(crs)},${numP(m.eastings)},${numP(m.northings)},${numP(m.orthogonalHeight)},${numP(m.xAxisAbscissa)},${numP(m.xAxisOrdinate)},${numP(m.scale)})`);
   }
-  const projectName = `Locação MEP${modelName ? ` - ${modelName.replace(/\.ifc$/i, "")}` : ""}`;
+  const projectName = `${title ? `Projeto ${title}` : "Locação MEP"}${modelName ? ` - ${modelName.replace(/\.ifc$/i, "")}` : ""}`;
   const project = w.add(`IFCPROJECT('${newGuid()}',$,${str(projectName)},$,$,$,$,${list([context])},${ref(units)})`);
   const sitePlacement = placement([0, 0, 0]);
   const ll = (deg: number | null | undefined) => (deg == null ? "$" : `(${degreesToCompound(deg).join(",")})`);

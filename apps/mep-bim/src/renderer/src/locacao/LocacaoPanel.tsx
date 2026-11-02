@@ -585,7 +585,7 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
         <button className="btn" onClick={files.open}>
           Abrir projeto…
         </button>
-        <button className="btn" onClick={files.exportIfc} disabled={store.isEmpty}>
+        <button className="btn" onClick={() => void files.exportIfc()} disabled={store.isEmpty}>
           Exportar IFC
         </button>
       </div>

@@ -43,7 +43,56 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 const f2 = (v: number) => (Math.round(v * 100) / 100).toString();
 const FONT = "font-family=\"Arial, Helvetica, sans-serif\"";
 
+/** Vista posicionada na folha. */
+export interface SheetViewport {
+  id: string;
+  /** Título (ex.: "PLANTA — Pavimento tipo") e subtítulo (escala, corte…). */
+  title: string;
+  subtitle?: string;
+  /** Desenho vetorial (planta, ampliação, corte). */
+  drawing?: PlanDrawing;
+  /** Imagem (vista 3D): data URL, proporção largura/altura e largura na folha (mm). */
+  image?: { href: string; aspect: number; widthMm: number };
+  /** Centro da vista na folha (mm); ausente = posição automática. */
+  pos?: [number, number];
+}
+
+export interface PlacedViewport {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Folha com uma planta só (compatível com as versões anteriores). */
 export function renderSheet(drawing: PlanDrawing, format: SheetFormat, info: SheetInfo, titleBlock: TitleBlock | null = null, northDeg: number | null = null): SheetResult {
+  return renderSheetViews(
+    [
+      {
+        id: "planta",
+        title: `PLANTA — ${drawing.storey}`,
+        subtitle: `ESCALA 1:${drawing.scale} · corte a ${drawing.cutHeight.toFixed(2).replace(".", ",")} m do piso`,
+        drawing,
+      },
+    ],
+    format,
+    info,
+    titleBlock,
+    northDeg,
+  );
+}
+
+const CAPTION = 11; // espaço do título abaixo de cada vista (mm)
+const GAP = 10;
+
+export function renderSheetViews(
+  viewports: SheetViewport[],
+  format: SheetFormat,
+  info: SheetInfo,
+  titleBlock: TitleBlock | null = null,
+  northDeg: number | null = null,
+): SheetResult & { viewports: PlacedViewport[] } {
   const sheet = SHEETS[format];
   const { w, h, margin } = sheet;
   const frame = { x: LEFT_MARGIN, y: margin, w: w - LEFT_MARGIN - margin, h: h - 2 * margin };
@@ -68,7 +117,6 @@ export function renderSheet(drawing: PlanDrawing, format: SheetFormat, info: She
     ? { x: frame.x + 8, y: frame.y + 8, w: legendBox.x - frame.x - 16, h: frame.h - 24 }
     : { x: frame.x + 8, y: frame.y + 8, w: frame.w - 16, h: legendBox.y - frame.y - 24 };
   const captionY = column ? frame.y + frame.h : legendBox.y;
-  const k = 1000 / drawing.scale; // mm de papel por metro
 
   const out: string[] = [];
   out.push(`<rect x="0" y="0" width="${w}" height="${h}" fill="#ffffff"/>`);
@@ -79,24 +127,73 @@ export function renderSheet(drawing: PlanDrawing, format: SheetFormat, info: She
       : `<line x1="${frame.x}" y1="${f2(legendBox.y)}" x2="${frame.x + frame.w}" y2="${f2(legendBox.y)}" stroke="#000" stroke-width="0.35"/>`,
   );
 
-  // ---- Planta -----------------------------------------------------------------------
+  // ---- Vistas ---------------------------------------------------------------------------
+  // Tamanho de cada vista no papel (desenho em escala ou imagem) e posição: a escolhida pelo
+  // usuário ou, sem ela, em fileiras da esquerda para a direita, de cima para baixo.
+  const sized = viewports.map((vp) => {
+    if (vp.drawing?.bounds) {
+      const k = 1000 / vp.drawing.scale;
+      const { min, max } = vp.drawing.bounds;
+      return { vp, w: (max[0] - min[0]) * k, h: (max[1] - min[1]) * k };
+    }
+    if (vp.image) return { vp, w: vp.image.widthMm, h: vp.image.widthMm / vp.image.aspect };
+    return { vp, w: 40, h: 20 };
+  });
+  const placed: PlacedViewport[] = [];
   let fits = true;
-  if (drawing.bounds) {
-    const { min, max } = drawing.bounds;
-    const dw = (max[0] - min[0]) * k;
-    const dh = (max[1] - min[1]) * k;
-    fits = dw <= area.w && dh <= area.h;
-    const cx = (min[0] + max[0]) / 2;
-    const cy = (min[1] + max[1]) / 2;
-    const ox = area.x + area.w / 2;
-    const oy = area.y + area.h / 2;
-    const T = ([x, y]: P2): P2 => [ox + (x - cx) * k, oy - (y - cy) * k];
-    out.push(`<g id="planta">${drawing.prims.map((p) => primSvg(p, T, k, drawing.scale)).join("")}</g>`);
-    out.push(
-      `<text x="${f2(area.x + area.w / 2)}" y="${f2(captionY - 7)}" font-size="4" font-weight="bold" text-anchor="middle" ${FONT}>${esc(`PLANTA — ${drawing.storey}`)}</text>`,
-      `<text x="${f2(area.x + area.w / 2)}" y="${f2(captionY - 2.5)}" font-size="2.5" text-anchor="middle" ${FONT}>${esc(`ESCALA 1:${drawing.scale} · corte a ${drawing.cutHeight.toFixed(2).replace(".", ",")} m do piso`)}</text>`,
-    );
+  if (sized.length === 1 && !sized[0].vp.pos) {
+    const s0 = sized[0];
+    placed.push({ id: s0.vp.id, x: area.x + area.w / 2 - s0.w / 2, y: area.y + area.h / 2 - s0.h / 2, w: s0.w, h: s0.h });
+    fits = s0.w <= area.w && s0.h <= area.h;
+  } else {
+    let cx = area.x;
+    let cy = area.y;
+    let rowH = 0;
+    for (const s1 of sized) {
+      if (s1.vp.pos) {
+        placed.push({ id: s1.vp.id, x: s1.vp.pos[0] - s1.w / 2, y: s1.vp.pos[1] - s1.h / 2, w: s1.w, h: s1.h });
+        continue;
+      }
+      if (cx > area.x && cx + s1.w > area.x + area.w) {
+        cx = area.x;
+        cy += rowH + CAPTION + GAP;
+        rowH = 0;
+      }
+      placed.push({ id: s1.vp.id, x: cx, y: cy, w: s1.w, h: s1.h });
+      cx += s1.w + GAP;
+      rowH = Math.max(rowH, s1.h);
+    }
+    fits = placed.every((p) => p.x >= area.x - 0.5 && p.y >= area.y - 0.5 && p.x + p.w <= area.x + area.w + 0.5 && p.y + p.h + CAPTION <= area.y + area.h + CAPTION + 0.5);
   }
+  sized.forEach(({ vp }, i) => {
+    const r = placed[i];
+    const parts: string[] = [];
+    if (vp.drawing?.bounds) {
+      const d = vp.drawing;
+      const k = 1000 / d.scale;
+      const { min, max } = d.bounds!;
+      const T = ([x, y]: P2): P2 => [r.x + (x - min[0]) * k, r.y + (max[1] - y) * k];
+      parts.push(d.prims.map((p) => primSvg(p, T, k, d.scale)).join(""));
+    } else if (vp.image) {
+      parts.push(`<image x="${f2(r.x)}" y="${f2(r.y)}" width="${f2(r.w)}" height="${f2(r.h)}" href="${esc(vp.image.href)}" preserveAspectRatio="xMidYMid meet"/>`);
+      parts.push(`<rect x="${f2(r.x)}" y="${f2(r.y)}" width="${f2(r.w)}" height="${f2(r.h)}" fill="none" stroke="#000" stroke-width="0.18"/>`);
+    }
+    // Uma vista só: título no rodapé da área (como antes); várias: abaixo de cada uma.
+    const single = viewports.length === 1 && !vp.pos;
+    const tx = single ? area.x + area.w / 2 : r.x + r.w / 2;
+    const ty = single ? captionY - 7 : r.y + r.h + 5;
+    parts.push(
+      `<text x="${f2(tx)}" y="${f2(ty)}" font-size="4" font-weight="bold" text-anchor="middle" ${FONT}>${esc(vp.title)}</text>`,
+      vp.subtitle ? `<text x="${f2(tx)}" y="${f2(ty + 4.5)}" font-size="2.5" text-anchor="middle" ${FONT}>${esc(vp.subtitle)}</text>` : "",
+    );
+    if (!single) parts.push(`<line x1="${f2(tx - 25)}" y1="${f2(ty + 1)}" x2="${f2(tx + 25)}" y2="${f2(ty + 1)}" stroke="#000" stroke-width="0.35"/>`);
+    out.push(`<g id="${i === 0 ? "planta" : `vista-${i}`}" data-vp="${esc(vp.id)}">${parts.join("")}</g>`);
+  });
+  const drawings = viewports.map((v) => v.drawing).filter((d): d is PlanDrawing => !!d);
+  const scales = [...new Set(drawings.map((d) => d.scale))];
+  const legendItems = [...new Map(drawings.flatMap((d) => d.legend).map((l) => [l.key, l])).values()];
+  const drawing = { legend: legendItems, scale: scales.length === 1 ? scales[0] : 0, storey: drawings[0]?.storey ?? "", bounds: placed.length ? { min: [0, 0] as P2, max: [1, 1] as P2 } : null };
+  const scaleText = drawing.scale ? `1:${drawing.scale}` : "INDICADAS";
 
   // ---- Norte verdadeiro (ângulo a partir do +Y do projeto, anti-horário) -------------------
   if (northDeg != null && drawing.bounds) {
@@ -132,7 +229,7 @@ export function renderSheet(drawing: PlanDrawing, format: SheetFormat, info: She
     out.push(legendRow(item, cx + 12, cy, cx + 24));
   });
   if (!drawing.legend.length) {
-    out.push(`<text x="${legendBox.x + 5}" y="${f2(rowsTop + 4)}" font-size="2.4" fill="#666" ${FONT}>Sem instalações locadas neste pavimento.</text>`);
+    out.push(`<text x="${legendBox.x + 5}" y="${f2(rowsTop + 4)}" font-size="2.4" fill="#666" ${FONT}>Sem instalações nas vistas desta folha.</text>`);
   }
   if (drawing.legend.length > capacity) {
     out.push(`<text x="${legendBox.x + legendBox.w - 3}" y="${f2(legendBox.y + legendBox.h - 2)}" font-size="2.2" text-anchor="end" ${FONT}>… ${drawing.legend.length - capacity} item(ns) não couberam</text>`);
@@ -140,7 +237,7 @@ export function renderSheet(drawing: PlanDrawing, format: SheetFormat, info: She
 
   // ---- Carimbo -------------------------------------------------------------------------
   if (titleBlock) {
-    out.push(customTitleBlock(titleBlock, tb, { ...info, format, scale: drawing.scale, storey: drawing.storey }));
+    out.push(customTitleBlock(titleBlock, tb, { ...info, format, scale: scaleText, storey: drawing.storey }));
   } else {
     const rows: [string, string][] = [
       ["PROJETO", info.projeto],
@@ -157,7 +254,7 @@ export function renderSheet(drawing: PlanDrawing, format: SheetFormat, info: She
       );
     });
     const cells: [string, string][] = [
-      ["ESCALA", `1:${drawing.scale}`],
+      ["ESCALA", scaleText],
       ["DATA", info.data],
       ["REVISÃO", info.revisao],
       ["FOLHA", info.folha],
@@ -177,11 +274,11 @@ export function renderSheet(drawing: PlanDrawing, format: SheetFormat, info: She
 
   const inner = out.join("");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}mm" height="${h}mm" viewBox="0 0 ${w} ${h}">${inner}</svg>`;
-  return { svg, inner, width: w, height: h, fits };
+  return { svg, inner, width: w, height: h, fits, viewports: placed };
 }
 
 /** Carimbo do usuário: SVG com campos preenchidos, ou imagem, no retângulo do carimbo. */
-function customTitleBlock(tbDef: TitleBlock, box: { x: number; y: number; w: number; h: number }, info: SheetInfo & { format: string; scale: number; storey: string }): string {
+function customTitleBlock(tbDef: TitleBlock, box: { x: number; y: number; w: number; h: number }, info: SheetInfo & { format: string; scale: string; storey: string }): string {
   const values: Record<string, string> = {
     ...(info.extras ?? {}),
     projeto: info.projeto,
@@ -190,7 +287,7 @@ function customTitleBlock(tbDef: TitleBlock, box: { x: number; y: number; w: num
     data: info.data,
     revisao: info.revisao,
     folha: info.folha,
-    escala: `1:${info.scale}`,
+    escala: info.scale,
     formato: info.format,
     pavimento: info.storey,
   };

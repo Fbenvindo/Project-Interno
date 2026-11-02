@@ -96,6 +96,8 @@ export interface PasteTarget {
   /** Pavimento de destino e diferença de cota (cena) em relação à origem. */
   storey: string;
   dy: number;
+  /** Vista dona das anotações coladas (null/ausente = planta de trabalho). */
+  view?: string | null;
 }
 
 /**
@@ -141,6 +143,8 @@ export function insertCopies(st: EditState, src: Pick<Clipboard, "points" | "run
   }
   for (const e of src.drafts) {
     const c = { ...translateDraft(e, t.d), id: newDraftId(), storey: t.storey } as DraftEntity;
+    if (t.view) c.view = t.view;
+    else delete c.view;
     drafts.push(c);
     ids.push(c.id);
   }

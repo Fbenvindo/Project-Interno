@@ -18,6 +18,10 @@ import type { PointsStore } from "../locacao/usePointsStore";
 import type { PointerContext, PreviewItem, Viewer } from "../viewer/Viewer";
 import { draftDistance, draftSnapPoints } from "../../../core/draft";
 import type { PlanTool } from "./planTool";
+import { applyHalftone, viewFilter, viewMarkers, type ViewDef } from "../../../core/views";
+import { buildSection } from "../../../core/plan/elevation";
+import { draftPrims } from "../../../core/draft";
+import type { Discipline } from "../../../core/types";
 
 interface Props {
   viewer: Viewer;
@@ -34,11 +38,14 @@ interface Props {
   fitSignal?: number;
   /** Ferramenta de desenho/modificação/vista ativa (substitui a seleção comum). */
   planTool?: PlanTool | null;
+  /** Vista aberta (null = planta de trabalho do pavimento). */
+  viewDef?: ViewDef | null;
+  /** Disciplinas do projeto (filtro das vistas de documentação). */
+  projectDisciplines?: Discipline[];
 }
 
 type ViewBox = { x: number; y: number; w: number; h: number };
 
-const SCALE = 50; // símbolos dimensionados como em 1:50
 const ALL = new Set(DISCIPLINES.map((d) => d.id));
 const LABELS = { tags: true, circuits: true, power: true, sizes: true };
 const CEILING_TYPES = new Set(["IFCSLAB", "IFCCOVERING", "IFCROOF", "IFCBEAM", "IFCPLATE"]);
@@ -66,21 +73,45 @@ function primsToSvg(prims: Prim[]): string {
     .join("");
 }
 
-export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick, dark, fitSignal, planTool }: Props) {
+export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick, dark, fitSignal, planTool, viewDef = null, projectDisciplines = [] }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const cs = model.coordinates;
   const level = model.storeyLevels.find((s) => s.name === storey)?.level ?? 0;
   const meshes = useMemo(() => new Map(model.meshes.map((m) => [m.expressID, m])), [model]);
 
+  // Vista: trabalho (tudo) ou documentação (disciplinas do projeto + referências em meio-tom).
+  const filter = useMemo(() => viewFilter(viewDef, projectDisciplines), [viewDef, projectDisciplines]);
+  const isSection = viewDef?.kind === "corte" && !!viewDef.cut;
+  const SCALE = viewDef?.scale ?? 50;
+  const draftView = viewDef && !(viewDef.kind === "planta" && viewDef.section === "trabalho") ? viewDef.id : null;
+  const labels = viewDef?.labels ?? LABELS;
+  const disciplines = viewDef ? filter.show : ALL;
+
   // Base (modelo cortado) e instalações, em camadas separadas para não recortar o IFC a cada ponto.
-  const base = useMemo(
-    () =>
-      buildPlan({ elements: model.elements, meshes, cs, storeyLevels: model.storeyLevels, storey, cutHeight, points: [], runs: [], scale: SCALE, disciplines: ALL, labels: LABELS }),
-    [model, meshes, cs, storey, cutHeight],
-  );
-  const mep = useMemo(
-    () =>
-      buildPlan({
+  const base = useMemo(() => {
+    if (isSection)
+      return buildSection({
+        elements: model.elements,
+        meshes,
+        cs,
+        storeyLevels: model.storeyLevels,
+        points: store.points,
+        runs: store.runs,
+        disciplines,
+        cut: viewDef!.cut!,
+        scale: SCALE,
+        name: viewDef!.name,
+        labels,
+      });
+    return buildPlan({ elements: model.elements, meshes, cs, storeyLevels: model.storeyLevels, storey, cutHeight, points: [], runs: [], scale: SCALE, disciplines, labels });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, meshes, cs, storey, cutHeight, isSection, isSection ? store.points : null, isSection ? store.runs : null, viewDef?.cut, SCALE, disciplines]);
+  const mep = useMemo(() => {
+    if (isSection) {
+      const prims = store.drafts.filter((d) => d.view === viewDef!.id).flatMap((d) => draftPrims(d, SCALE));
+      return { prims, bounds: null, legend: [], scale: SCALE, storey, cutHeight };
+    }
+    const d = buildPlan({
         elements: [],
         meshes: new Map(),
         cs,
@@ -90,23 +121,32 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
         points: store.points,
         runs: store.runs,
         scale: SCALE,
-        disciplines: ALL,
-        labels: LABELS,
+        disciplines,
+        labels,
         spaces: model.spaces,
         boxes: pullBoxes(store.runs, store.points),
         drafts: store.drafts,
-      }),
-    [cs, model, storey, cutHeight, store.points, store.runs, store.drafts],
-  );
+        draftView,
+      });
+    let prims = d.prims;
+    if (viewDef?.section === "documentacao" && viewDef.kind === "planta") prims = [...prims, ...viewMarkers(store.views, storey, SCALE)];
+    if (viewDef?.section === "documentacao" && viewDef.workNotes)
+      prims = [...prims, ...store.drafts.filter((x) => !x.view && x.storey === storey).flatMap((x) => draftPrims(x, SCALE).map((q) => ({ ...q, id: undefined })))];
+    return { ...d, prims };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cs, model, storey, cutHeight, store.points, store.runs, store.drafts, store.views, isSection, viewDef, SCALE, disciplines, draftView]);
+  const layersRef = useRef({ base: base.prims, mep: mep.prims, ready: false });
+  layersRef.current = { base: base.prims, mep: mep.prims, ready: base.prims.length + mep.prims.length > 0 };
   const edges = useMemo(() => wallEdges(base.prims), [base]);
-  const baseSvg = useMemo(() => primsToSvg(base.prims), [base]);
-  const mepSvg = useMemo(() => primsToSvg(mep.prims), [mep]);
+  const baseSvg = useMemo(() => primsToSvg(applyHalftone(base.prims, filter)), [base, filter]);
+  const mepSvg = useMemo(() => primsToSvg(applyHalftone(mep.prims, filter)), [mep, filter]);
 
   // ---- Vista (zoom e deslocamento) -----------------------------------------------------
   const [vb, setVb] = useState<ViewBox>({ x: 0, y: -10, w: 20, h: 10 });
   const fit = useCallback(() => {
     const el = host.current;
-    const b = boundsOf([...base.prims, ...mep.prims]);
+    const L = layersRef.current;
+    const b = viewDef?.kind === "ampliacao" && viewDef.region ? { min: viewDef.region.min, max: viewDef.region.max } : boundsOf([...L.base, ...L.mep]);
     if (!el || !b) return;
     const aspect = el.clientWidth / Math.max(el.clientHeight, 1);
     let w = (b.max[0] - b.min[0]) * 1.1 + 1;
@@ -117,7 +157,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     const cy = -(b.min[1] + b.max[1]) / 2;
     setVb({ x: cx - w / 2, y: cy - h / 2, w, h });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base]);
+  }, [viewDef?.id, viewDef?.region, storey, isSection, model, cutHeight, layersRef.current.ready]);
   useEffect(fit, [fit]);
   useEffect(() => {
     if (fitSignal) fit();
@@ -243,7 +283,10 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   toolRef.current = planTool;
   const storeRef = useRef(store);
   storeRef.current = store;
-  const storeyDrafts = useMemo(() => store.drafts.filter((d) => d.storey === storey), [store.drafts, storey]);
+  const storeyDrafts = useMemo(
+    () => store.drafts.filter((d) => (d.view ?? null) === draftView && (isSection || d.storey === storey)),
+    [store.drafts, storey, draftView, isSection],
+  );
   /** Pontos de encaixe: vértices do desenho, das paredes cortadas e dos pontos locados. */
   const snapPts = useMemo(() => {
     const out: P2[] = [];
@@ -253,9 +296,9 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       else if (p.t === "poly" && p.pts.length <= 64) out.push(...p.pts);
       else if (p.t === "circle") out.push(p.c);
     }
-    for (const pt of store.points) if (pt.storey === storey) out.push(toPlan(pt.position));
+    if (!isSection) for (const pt of store.points) if (pt.storey === storey) out.push(toPlan(pt.position));
     return out;
-  }, [storeyDrafts, base, store.points, storey, toPlan]);
+  }, [storeyDrafts, base, store.points, storey, toPlan, isSection]);
   /** Extensão em planta de cada elemento (para a seleção por janela). */
   const idBounds = useMemo(() => {
     const m = new Map<number, [number, number, number, number]>();
@@ -311,7 +354,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       if (k <= tol && (!best || k < best.d)) best = { id: d.id, d: k };
     }
     for (const pt of store.points) {
-      if (pt.storey !== storey) continue;
+      if (pt.storey !== storey || isSection) continue;
       const q = toPlan(pt.position);
       const k = Math.hypot(q[0] - p[0], q[1] - p[1]);
       if (k <= tol * 1.5 && (!best || k < best.d)) best = { id: pt.id, d: k };
@@ -370,7 +413,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   const onPointerMove = (e: PointerEvent) => {
     // Coordenadas do projeto do cursor (para a barra de status), na cota do piso do pavimento.
     const pm = toModel(e.clientX, e.clientY);
-    setCursor([pm[0], pm[1], cs.worldToIfc([0, level, 0])[2]]);
+    setCursor(isSection ? null : [pm[0], pm[1], cs.worldToIfc([0, level, 0])[2]]);
     const d = drag.current;
     if (d && (e.buttons & 1 || e.buttons & 4)) {
       const r = host.current!.getBoundingClientRect();
@@ -410,7 +453,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       return;
     }
     if (!d || d.moved || e.button !== 0) return;
-    const h = viewer.getPlacementHandler();
+    const h = isSection ? null : viewer.getPlacementHandler();
     if (h) {
       const { hit, ctx } = probe(e.clientX, e.clientY, e.shiftKey);
       h.click(hit, ctx);
@@ -458,7 +501,9 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       })
       .join("");
 
-  const outlines = viewer
+  const outlines = isSection
+    ? ""
+    : viewer
     .getSpaceOutlines()
     .map(({ points, selected }) => {
       const pts = points.map((v) => toPlan(v)).map(([x, y]) => `${f3(x)},${f3(-y)}`).join(" ");
@@ -523,8 +568,22 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
         <g dangerouslySetInnerHTML={{ __html: outlines }} />
         <g dangerouslySetInnerHTML={{ __html: mepSvg }} />
         <g pointerEvents="none" dangerouslySetInnerHTML={{ __html: previewSvg(viewer.getStaticPreview()) + previewSvg(hover?.previews ?? []) + snapMarker }} />
+        {viewDef?.kind === "ampliacao" && viewDef.region && (
+          <path
+            pointerEvents="none"
+            fillRule="evenodd"
+            fill="#6b7280"
+            fillOpacity={0.28}
+            d={`M${vb.x - vb.w} ${vb.y - vb.h}h${vb.w * 3}v${vb.h * 3}h${-vb.w * 3}Z M${viewDef.region.min[0]} ${-viewDef.region.max[1]}H${viewDef.region.max[0]}V${-viewDef.region.min[1]}H${viewDef.region.min[0]}Z`}
+          />
+        )}
         <g pointerEvents="none" dangerouslySetInnerHTML={{ __html: toolSvg }} />
       </svg>
+      {viewDef && (
+        <div className={`view-badge ${viewDef.section}`}>
+          {viewDef.section === "documentacao" ? "Documentação" : "Trabalho"} · {viewDef.name} · 1:{viewDef.scale}
+        </div>
+      )}
       {planTool && (
         <div className="plan-prompt" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
           <span>{planTool.prompt}</span>

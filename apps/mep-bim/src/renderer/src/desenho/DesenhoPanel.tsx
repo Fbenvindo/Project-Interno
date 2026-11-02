@@ -1,7 +1,6 @@
 // Painel do comando ativo dos menus Criar, Modificar e Geral.
 import { DRAFT_LABEL } from "../../../core/draft";
 import { runIdOfElement } from "../../../core/runs";
-import type { SavedView } from "../../../core/project";
 import type { PointsStore } from "../locacao/usePointsStore";
 import { CMD_LABEL, isCreateCmd, NEEDS_SELECTION, type DraftCmd, type DraftController } from "./useDraftTool";
 
@@ -13,14 +12,13 @@ interface Props {
   setSelection: (ids: number[]) => void;
   hasClip: boolean;
   onClearClip: () => void;
-  onOpenView: (v: SavedView) => void;
   /** Nome de um elemento do modelo (IFC) para a lista da seleção. */
   elementLabel: (id: number) => string;
 }
 
 const STEPS = ["Selecionar", "Confirmar", "Executar"];
 
-export function DesenhoPanel({ cmd, ctl, store, selection, setSelection, hasClip, onClearClip, onOpenView, elementLabel }: Props) {
+export function DesenhoPanel({ cmd, ctl, store, selection, setSelection, hasClip, onClearClip, elementLabel }: Props) {
   const { phase, opts, setOpts, tool } = ctl;
   const withSel = NEEDS_SELECTION.has(cmd);
   const step = phase === "selecionar" ? 0 : phase === "executar" ? 2 : 1;
@@ -164,7 +162,14 @@ export function DesenhoPanel({ cmd, ctl, store, selection, setSelection, hasClip
             : "Área de transferência vazia: use Copiar ou Recortar primeiro."}
         </p>
       )}
-      {(cmd === "corte-selecao" || cmd === "corte-linha") && (
+      {(cmd === "corte-linha" || cmd === "ampliacao") && (
+        <p className="muted small">
+          {cmd === "corte-linha"
+            ? "O corte vira uma vista 2D (elementos cortados hachurados e o que está além, até a profundidade de vista), com níveis dos pavimentos. Ao terminar, escolha se é de Trabalho ou de Documentação."
+            : "A ampliação mostra a área escolhida da planta em escala maior (1:25 por padrão). Ao terminar, escolha se é de Trabalho ou de Documentação."}
+        </p>
+      )}
+      {cmd === "corte-selecao" && (
         <div className="btn-row">
           <button className="btn" disabled={!hasClip} onClick={onClearClip}>
             Remover cortes
@@ -179,26 +184,7 @@ export function DesenhoPanel({ cmd, ctl, store, selection, setSelection, hasClip
               <input type="number" step={0.1} min={0.2} value={opts.eyeHeight} onChange={(e) => setOpts({ ...opts, eyeHeight: Math.max(0.2, Number(e.target.value) || 1.6) })} />
             </label>
           </div>
-          <section className="card">
-            <h3>Vistas salvas</h3>
-            {store.views.length === 0 ? (
-              <p className="muted small">Nenhuma vista. Indique o observador e a direção na planta.</p>
-            ) : (
-              <ul className="sel-list">
-                {store.views.map((v) => (
-                  <li key={v.id}>
-                    <input className="grow" value={v.name} onChange={(e) => store.setViews((l) => l.map((x) => (x.id === v.id ? { ...x, name: e.target.value } : x)))} />
-                    <button className="link" onClick={() => onOpenView(v)}>
-                      abrir
-                    </button>
-                    <button className="link danger-link" title="Excluir vista" onClick={() => store.setViews((l) => l.filter((x) => x.id !== v.id))}>
-                      ✕
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          <p className="muted small">A vista criada fica no navegador de vistas (Trabalho ou Documentação, à sua escolha) e pode ser reaberta, renomeada ou colocada numa folha.</p>
         </>
       )}
 

@@ -18,9 +18,14 @@ import { CircuitosPanel } from "./circuitos/CircuitosPanel";
 import { PlanView } from "./planta/PlanView";
 import { PlanEditor } from "./planta/PlanEditor";
 import { NO_SECTION, SectionTools, sectionToPlanes, type SectionState } from "./viewer/SectionTools";
-import { PlantaPanel, type PlanSettings } from "./planta/PlantaPanel";
-import { buildPlan } from "../../core/plan/build";
-import { renderSheet } from "../../core/plan/sheet";
+import { FolhaPanel } from "./planta/FolhaPanel";
+import { renderSheetViews, type SheetViewport } from "../../core/plan/sheet";
+import type { PlanDrawing } from "../../core/plan/drawing";
+import { docPlanOf, viewFilter, type ViewDef } from "../../core/views";
+import { newSheetId, viewDrawing, viewSubtitle, viewTitle, type ModelContext, type SheetDef } from "../../core/viewDrawing";
+import { sectionFrame } from "../../core/plan/elevation";
+import { VistasBrowser } from "./shell/VistasBrowser";
+import { VistaPanel } from "./shell/VistaPanel";
 import { connectedPairs, runElements, runFittings, runIdOfElement, runProperties, runSegments, RUN_TYPE_BY_ID, segmentElementId, fittingElementId } from "../../core/runs";
 import { usePointsStore } from "./locacao/usePointsStore";
 import { alignKey, DEFAULT_ALIGN, federate, prepareLink, type LinkData, type LinkMeta } from "../../ifc/federate";
@@ -38,9 +43,8 @@ import { CoordenadasPanel } from "./coords/CoordenadasPanel";
 import { useCursor } from "./coords/cursor";
 import { EMPTY_GEOREF, effectiveGeoref, fmtCoord, toMap, type Georef } from "../../core/georef";
 import { loadFamilyLibrary } from "./library/familyLibrary";
-import { useDraftTool, CMD_LABEL, type ClipRequest } from "./desenho/useDraftTool";
+import { useDraftTool, CMD_LABEL } from "./desenho/useDraftTool";
 import { DesenhoPanel } from "./desenho/DesenhoPanel";
-import type { SavedView } from "../../core/project";
 import { CoordinateSystem } from "../../core/math";
 import { getLibraryVersion, onLibraryChange } from "../../core/library";
 import { makeCeilingResolver, makeSlabProbe } from "./locacao/ceiling";
@@ -82,7 +86,7 @@ const TOOL_HINT: Record<ToolSpec["kind"], string> = {
   calc: "Selecione um segmento para aproveitar comprimento e dimensão",
   quantitativos: "Clique em uma linha para localizar os elementos",
   interferencias: "Clique em uma interferência para enquadrá-la",
-  pranchas: "Roda do mouse: zoom · arrastar: mover · duplo clique: enquadrar a folha",
+  pranchas: "Folhas com as vistas de Documentação · roda do mouse: zoom · arrastar: mover · duplo clique: abrir a vista",
   biblioteca: "Importe famílias exportadas do Revit e loque-as como qualquer item da biblioteca",
   programa: "Defina as instalações por tipo de equipamento e por ambiente e gere os pontos no modelo",
   vinculos: "Modelos de outras disciplinas sobrepostos ao principal, pelas coordenadas do projeto",
@@ -105,7 +109,6 @@ export function App() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [selection, setSelection] = useState<number[]>([]);
   const [colorMode, setColorMode] = useState<ColorMode>("disciplina");
-  const [planSettings, setPlanSettings] = useState<PlanSettings | null>(null);
 
   // Casca: aba superior, ferramenta ativa, vista central, painéis e tema.
   const [top, setTop] = useState<TopTab>("arquivo");
@@ -118,6 +121,7 @@ export function App() {
   /** Coluna esquerda: Propriedades (em cima) e Navegador (embaixo), cada um recolhível. */
   const [propsOpen, setPropsOpen] = useState(true);
   const [navOpen, setNavOpen] = useState(true);
+  const [browserOpen, setBrowserOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [theme, setTheme] = useState<Theme>(readTheme);
   const [fitSignal, setFitSignal] = useState(0);
@@ -141,6 +145,21 @@ export function App() {
   const model = useMemo(() => (hostModel ? federate(hostModel, fedLinks) : null), [hostModel, fedLinks]);
   /** Coordenadas efetivas do projeto: as do IFC principal ou as informadas no projeto. */
   const georef = useMemo(() => (hostModel ? effectiveGeoref(hostModel.georef, store.georef) : EMPTY_GEOREF), [hostModel, store.georef]);
+  // ---- Vistas: Trabalho / Documentação, vistas 3D e folhas ----------------------------------
+  /** Planta aberta: "trab" ou "doc" do pavimento atual, ou "view:<id>" (ampliação, corte, planta extra). */
+  const [planKey, setPlanKey] = useState<string>("trab");
+  const [view3dId, setView3dId] = useState<string | null>(null);
+  const [sheetId, setSheetId] = useState<string | null>(null);
+  const [moveMode, setMoveMode] = useState(false);
+  const [snapshots, setSnapshots] = useState<Map<string, { href: string; aspect: number }>>(() => new Map());
+  /** Vista pelo id (as plantas de documentação existem mesmo sem terem sido alteradas). */
+  const resolveView = useCallback(
+    (id: string): ViewDef | null => store.views.find((v) => v.id === id) ?? (id.startsWith("doc-planta:") ? docPlanOf(store.views, id.slice(11)) : null),
+    [store.views],
+  );
+  const view3dDef = view3dId ? (store.views.find((v) => v.id === view3dId) ?? null) : null;
+  /** Ações de folhas da faixa (definidas mais abaixo, depois das funções de folha). */
+  const sheetActionRef = useRef<((a: "nova" | "plantas") => void) | null>(null);
   const georefRef = useRef(georef);
   georefRef.current = georef;
   const linksRef = useRef(store.links);
@@ -210,59 +229,56 @@ export function App() {
   // ---- Planta 2D e prancha ---------------------------------------------------
   const planAvailable = useMemo(() => DISCIPLINES.map((d) => d.id).filter((d) => allElements.some((e) => e.discipline === d)), [allElements]);
   useEffect(() => {
-    if (!model || planSettings) return;
+    if (!model || model.storeys.includes(storey)) return;
     // Pavimento padrão: o que tem mais pontos e trechos; senão, o que tem mais paredes.
     const score = new Map<string, number>();
     for (const p of store.points) if (p.storey) score.set(p.storey, (score.get(p.storey) ?? 0) + 10);
     for (const e of model.elements) if (e.storey && e.ifcType.startsWith("IFCWALL")) score.set(e.storey, (score.get(e.storey) ?? 0) + 1);
     const best = [...score.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? model.storeys[0] ?? "";
     setStorey(best);
-    setPlanSettings({
-      storey: best,
-      cutHeight: 1.2,
-      scale: 50,
-      format: "A1",
-      disciplines: DISCIPLINES.map((d) => d.id),
-      labels: { tags: true, circuits: true, power: true, sizes: true },
-      info: {
-        projeto: (fileName ?? "").replace(/\.ifc$/i, ""),
-        conteudo: "",
-        responsavel: "",
-        data: new Date().toLocaleDateString("pt-BR"),
-        revisao: "R00",
-        folha: "01/01",
-      },
-      titleBlockId: titleBlockById(defaultTitleBlockId())?.id ?? null,
-    });
-  }, [model, planSettings, store.points, fileName]);
+  }, [model, storey, store.points]);
 
   const titleBlocks = useTitleBlocks();
-  const sheetSettings = useMemo(() => (planSettings ? { ...planSettings, storey } : null), [planSettings, storey]);
-  const planDrawing = useMemo(() => {
-    if (view !== "prancha" || !model || !sheetSettings) return null;
-    return buildPlan({
+  const activeSheet = store.sheets.find((x) => x.id === sheetId) ?? null;
+  /** Vistas de documentação que podem ir para as folhas. */
+  const docViews = useMemo(
+    () => [...(model?.storeys ?? []).map((st) => docPlanOf(store.views, st)), ...store.views.filter((v) => v.section === "documentacao" && !v.id.startsWith("doc-planta:"))],
+    [model, store.views],
+  );
+  const sheetRender = useMemo(() => {
+    if (view !== "prancha" || !model || !activeSheet) return null;
+    const ctx: ModelContext = {
       elements: model.elements,
       meshes: meshById,
       cs: model.coordinates,
       storeyLevels: model.storeyLevels,
-      storey: sheetSettings.storey,
-      cutHeight: sheetSettings.cutHeight,
       points: store.points,
       runs: store.runs,
-      scale: sheetSettings.scale,
-      disciplines: new Set(sheetSettings.disciplines),
-      labels: sheetSettings.labels,
       spaces: model.spaces,
       boxes,
       drafts: store.drafts,
-    });
-  }, [view, model, meshById, sheetSettings, store.points, store.runs, boxes, store.drafts]);
-
-  const planSheet = useMemo(() => {
-    if (!planDrawing || !sheetSettings) return null;
-    const info = { ...sheetSettings.info, conteudo: sheetSettings.info.conteudo || `Instalações MEP — Planta ${sheetSettings.storey}` };
-    return renderSheet(planDrawing, sheetSettings.format, info, titleBlocks.find((t) => t.id === sheetSettings.titleBlockId) ?? null, georef.trueNorthDeg);
-  }, [planDrawing, sheetSettings, titleBlocks, georef.trueNorthDeg]);
+      views: store.views,
+      projectDisciplines: store.disciplines,
+    };
+    const drawings = new Map<string, PlanDrawing>();
+    const vps: SheetViewport[] = [];
+    for (const vp of activeSheet.viewports) {
+      const v = resolveView(vp.viewId);
+      if (!v || v.section !== "documentacao") continue;
+      if (v.kind === "3d") {
+        const snap = snapshots.get(v.id);
+        vps.push({ id: v.id, title: viewTitle(v), subtitle: viewSubtitle(v), image: snap ? { ...snap, widthMm: vp.widthMm ?? 150 } : undefined, pos: vp.pos });
+        continue;
+      }
+      const d = viewDrawing(v, ctx);
+      if (!d) continue;
+      drawings.set(v.id, d);
+      vps.push({ id: v.id, title: viewTitle(v), subtitle: viewSubtitle(v), drawing: d, pos: vp.pos });
+    }
+    const info = { ...activeSheet.info, conteudo: activeSheet.info.conteudo || activeSheet.name };
+    const result = renderSheetViews(vps, activeSheet.format, info, titleBlocks.find((t) => t.id === activeSheet.titleBlockId) ?? null, georef.trueNorthDeg);
+    return { result, drawings };
+  }, [view, model, activeSheet, meshById, store.points, store.runs, store.drafts, store.views, store.disciplines, boxes, resolveView, snapshots, titleBlocks, georef.trueNorthDeg]);
 
   const allSystems = useMemo(
     () =>
@@ -403,8 +419,11 @@ export function App() {
       modelRef.current = loaded;
       const disciplineOf = new Map(loaded.elements.map((e) => [e.expressID, e.discipline]));
       viewerRef.current!.load(loaded.meshes, (id) => DISCIPLINE_BY_ID[disciplineOf.get(id) ?? "outros"].color);
-      store.reset([], []);
-      setPlanSettings(null);
+      store.reset();
+      setPlanKey("trab");
+      setView3dId(null);
+      setSheetId(null);
+      setSnapshots(new Map());
       setModel(loaded);
       setFileName(file.name);
       setFilters(EMPTY_FILTERS);
@@ -576,7 +595,10 @@ export function App() {
   const visibleElements = useMemo<ElementInfo[]>(() => {
     if (!model) return [];
     const q = filters.search.trim().toLowerCase();
+    // Vista 3D de documentação: só as disciplinas do projeto, as de referência e o fundo.
+    const doc3d = view === "3d" && view3dDef?.section === "documentacao" ? viewFilter(view3dDef, store.disciplines) : null;
     return allElements.filter((e) => {
+      if (doc3d && !doc3d.show.has(e.discipline)) return false;
       if (filters.hiddenDisciplines.has(e.discipline)) return false;
       if (filters.hiddenStoreys.has(e.storey ?? NO_STOREY)) return false;
       if (filters.systems.size && !e.systems.some((s) => filters.systems.has(s))) return false;
@@ -586,7 +608,7 @@ export function App() {
       }
       return true;
     });
-  }, [model, allElements, filters]);
+  }, [model, allElements, filters, view, view3dDef, store.disciplines]);
 
   useEffect(() => {
     if (!model) return;
@@ -635,8 +657,10 @@ export function App() {
         ...f,
         hiddenStoreys: name ? new Set([...model.storeys, NO_STOREY].filter((s) => s !== name)) : new Set(),
       }));
-      if (name) setStorey(name);
-      else setView("3d");
+      if (name) {
+        setStorey(name);
+        setPlanKey((k) => (k.startsWith("view:") ? "trab" : k));
+      } else setView("3d");
       setTimeout(() => viewerRef.current?.fitTo(), 60);
     },
     [model],
@@ -679,7 +703,7 @@ export function App() {
         case "salvarProjeto":
           return void files.save();
         case "exportarIfc":
-          return void files.exportIfc();
+          return void files.exportIfc(false);
         case "temaClaro":
           return setTheme("claro");
         case "temaEscuro":
@@ -697,6 +721,14 @@ export function App() {
         case "corte":
           setView("3d");
           setSectionOpen((o) => !(o && view === "3d"));
+          return;
+        case "exportarIfcDisciplinas":
+          return void files.exportIfc(true);
+        case "novaFolha":
+          sheetActionRef.current?.("nova");
+          return;
+        case "folhasPlantas":
+          sheetActionRef.current?.("plantas");
           return;
         case "removerCortes":
           viewerRef.current?.setExtraClip(null);
@@ -739,16 +771,151 @@ export function App() {
     const above = (model?.storeyLevels ?? []).map((s) => s.level).filter((l) => l > storeyLevel + 0.5).sort((a, b) => a - b)[0];
     return above != null ? above - storeyLevel : 3;
   }, [model, storeyLevel]);
-  const applyClip = useCallback((req: ClipRequest) => {
-    viewerRef.current?.setExtraClip(req.planes);
-    setExtraClip(true);
-    setView("3d");
-    if (req.frame) setTimeout(() => viewerRef.current?.fitBounds(req.frame!.min, req.frame!.max), 60);
-  }, []);
-  const openView = useCallback((v: SavedView) => {
-    setView("3d");
-    setTimeout(() => viewerRef.current?.setView(v.eye, v.target), 60);
-  }, []);
+  // ---- Abrir vistas ----------------------------------------------------------------------
+  const activeViewDef: ViewDef | null = planKey === "trab" ? null : planKey === "doc" ? docPlanOf(store.views, storey) : resolveView(planKey.slice(5));
+  /** Grava a vista (as plantas de documentação passam a existir no projeto na primeira alteração). */
+  const updateView = useCallback(
+    (def: ViewDef) => store.setViews((l) => (l.some((x) => x.id === def.id) ? l.map((x) => (x.id === def.id ? def : x)) : [...l, def]), def.id),
+    [store],
+  );
+  const open3D = useCallback(
+    (v: ViewDef) => {
+      setView("3d");
+      setView3dId(v.id);
+      setTimeout(() => {
+        const vw = viewerRef.current;
+        if (!vw) return;
+        vw.setExtraClip(v.clip?.length ? v.clip : null);
+        setExtraClip(!!v.clip?.length);
+        if (v.eye && v.target) vw.setView(v.eye, v.target);
+        else if (v.frame) vw.fitBounds(v.frame.min, v.frame.max);
+      }, 60);
+    },
+    [],
+  );
+  const openViewDef = useCallback(
+    (v: ViewDef) => {
+      if (v.kind === "3d") return open3D(v);
+      if (v.storey && model?.storeys.includes(v.storey)) setStorey(v.storey);
+      setPlanKey(v.id.startsWith("doc-planta:") ? "doc" : `view:${v.id}`);
+      setView("planta");
+    },
+    [open3D, model],
+  );
+  const newSheet = useCallback(
+    (viewIds: string[] = []): SheetDef => {
+      const n = store.sheets.length + 1;
+      const s: SheetDef = {
+        id: newSheetId(),
+        name: `Folha ${String(n).padStart(2, "0")}`,
+        format: "A1",
+        titleBlockId: titleBlockById(defaultTitleBlockId())?.id ?? null,
+        info: { projeto: (fileName ?? "").replace(/\.ifc$/i, ""), conteudo: "", responsavel: "", data: new Date().toLocaleDateString("pt-BR"), revisao: "R00", folha: String(n).padStart(2, "0") },
+        viewports: viewIds.map((viewId) => ({ viewId })),
+      };
+      store.setSheets((l) => [...l, s]);
+      return s;
+    },
+    [store, fileName],
+  );
+  const openSheet = useCallback(
+    (id: string) => {
+      setSheetId(id);
+      chooseTool({ kind: "pranchas" });
+    },
+    [chooseTool],
+  );
+  const openKey = useCallback(
+    (key: string) => {
+      if (key.startsWith("trab:") || key.startsWith("doc:")) {
+        setStorey(key.slice(key.indexOf(":") + 1));
+        setPlanKey(key.startsWith("trab:") ? "trab" : "doc");
+        setView("planta");
+        return;
+      }
+      if (key.startsWith("sheet:")) return openSheet(key.slice(6));
+      const v = resolveView(key.slice(5));
+      if (v) openViewDef(v);
+    },
+    [resolveView, openViewDef, openSheet],
+  );
+  const addToSheet = useCallback(
+    (viewId: string, target: string | null) => {
+      if (target == null) {
+        const s = newSheet([viewId]);
+        return openSheet(s.id);
+      }
+      store.setSheets((l) => l.map((x) => (x.id === target && !x.viewports.some((vp) => vp.viewId === viewId) ? { ...x, viewports: [...x.viewports, { viewId }] } : x)));
+      openSheet(target);
+    },
+    [store, newSheet, openSheet],
+  );
+  // Folha aberta sem folha escolhida: a primeira, ou uma nova com a planta de documentação do pavimento.
+  useEffect(() => {
+    if (view !== "prancha" || !model || activeSheet) return;
+    if (store.sheets.length) setSheetId(store.sheets[0].id);
+    else if (storey) setSheetId(newSheet([docPlanOf(store.views, storey).id]).id);
+  }, [view, model, activeSheet, store.sheets, storey, store.views, newSheet]);
+  // Imagens das vistas 3D colocadas na folha.
+  useEffect(() => {
+    if (view !== "prancha" || !activeSheet || !viewerRef.current) return;
+    const missing = activeSheet.viewports.map((vp) => resolveView(vp.viewId)).filter((v): v is ViewDef => !!v && v.kind === "3d" && !snapshots.has(v.id));
+    if (!missing.length) return;
+    const t = setTimeout(() => {
+      const next = new Map(snapshots);
+      for (const v of missing) {
+        const f = viewFilter(v, store.disciplines);
+        const visible = v.section === "documentacao" ? new Set(allElements.filter((e) => f.show.has(e.discipline)).map((e) => e.expressID)) : null;
+        next.set(v.id, viewerRef.current!.snapshotView({ ...v, visible }));
+      }
+      setSnapshots(next);
+    }, 80);
+    return () => clearTimeout(t);
+  }, [view, activeSheet, resolveView, snapshots, store.disciplines, allElements]);
+  // Arrastar uma vista na folha.
+  const moveViewport = useCallback(
+    (viewId: string, center: [number, number]) => {
+      if (!activeSheet) return;
+      store.setSheets((l) => l.map((x) => (x.id === activeSheet.id ? { ...x, viewports: x.viewports.map((vp) => (vp.viewId === viewId ? { ...vp, pos: center } : vp)) } : x)));
+    },
+    [store, activeSheet],
+  );
+  const showCutIn3D = useCallback(
+    (v: ViewDef) => {
+      if (!v.cut || !model) return;
+      const f = sectionFrame(model.coordinates, v.cut);
+      viewerRef.current?.setExtraClip([{ normal: f.W, point: f.o }]);
+      setExtraClip(true);
+      setView3dId(null);
+      setView("3d");
+    },
+    [model],
+  );
+
+  sheetActionRef.current = (a) => {
+    if (!model) return;
+    if (a === "nova") return openSheet(newSheet().id);
+    // Uma folha por pavimento com a planta de documentação (pula as que já estão em alguma folha).
+    const used = new Set(store.sheets.flatMap((sh) => sh.viewports.map((vp) => vp.viewId)));
+    const todo = model.storeys.filter((st) => !used.has(docPlanOf(store.views, st).id));
+    if (!todo.length) return files.setMessage("Todas as plantas de documentação já estão em folhas.");
+    const created: SheetDef[] = todo.map((st, i) => {
+      const n = store.sheets.length + i + 1;
+      return {
+        id: newSheetId(),
+        name: `Planta ${st}`,
+        format: "A1",
+        titleBlockId: titleBlockById(defaultTitleBlockId())?.id ?? null,
+        info: { projeto: (fileName ?? "").replace(/\.ifc$/i, ""), conteudo: `Planta — ${st}`, responsavel: "", data: new Date().toLocaleDateString("pt-BR"), revisao: "R00", folha: String(n).padStart(2, "0") },
+        viewports: [{ viewId: docPlanOf(store.views, st).id }],
+      };
+    });
+    store.setSheets((l) => [...l, ...created]);
+    openSheet(created[0].id);
+    files.setMessage(`${created.length} folha(s) criada(s), uma por pavimento.`);
+  };
+
+  const draftView = activeViewDef && view === "planta" && !(activeViewDef.kind === "planta" && activeViewDef.section === "trabalho") ? activeViewDef.id : null;
   const draft = useDraftTool({
     cmd: tool.kind === "desenho" ? tool.cmd : "linha",
     n: tool.n,
@@ -761,9 +928,10 @@ export function App() {
     selection,
     setSelection,
     boundsOf: (ids) => viewerRef.current?.getBounds(ids) ?? null,
-    onClip: applyClip,
     ceilingAt: (p) => viewerRef.current?.castRay(p, [0, 1, 0], 20, (n, id) => n[1] < -0.7 && ["IFCSLAB", "IFCROOF", "IFCCOVERING"].includes(elementById.get(id)?.ifcType ?? ""), true)?.point[1] ?? null,
-    onView: openView,
+    onCreateView: openViewDef,
+    draftView,
+    cutHeight: activeViewDef?.cutHeight ?? editorCut,
   });
   const planTool = tool.kind === "desenho" ? draft.tool : null;
 
@@ -863,7 +1031,6 @@ export function App() {
             setSelection={setSelection}
             hasClip={extraClip}
             onClearClip={() => onAction("removerCortes")}
-            onOpenView={openView}
             elementLabel={(id) => {
               const e = elementById.get(id);
               return e ? `${e.name || e.ifcType}` : `Elemento ${id}`;
@@ -901,21 +1068,29 @@ export function App() {
           />
         );
       case "pranchas":
-        if (!sheetSettings || !planDrawing || !planSheet)
-          return <div className="empty-side">Abra a vista Prancha para configurar a folha.</div>;
+        if (!activeSheet || !sheetRender) return <div className="empty-side">Abra a vista Prancha para montar a folha.</div>;
         return (
-          <PlantaPanel
-            settings={sheetSettings}
-            onChange={(s) => {
-              setPlanSettings(s);
-              if (s.storey !== storey) setStorey(s.storey);
-            }}
-            storeys={model.storeys}
-            drawing={planDrawing}
-            sheet={planSheet}
+          <FolhaPanel
+            sheet={activeSheet}
+            onChange={(sh) => store.setSheets((l) => l.map((x) => (x.id === sh.id ? sh : x)), sh.id)}
+            docViews={docViews}
+            rendered={sheetRender.result}
+            drawings={sheetRender.drawings}
             fileName={fileName}
-            available={planAvailable}
             georef={georef}
+            moveMode={moveMode}
+            onMoveMode={setMoveMode}
+            onOpenView={(id) => {
+              const v = resolveView(id);
+              if (v) openViewDef(v);
+            }}
+            onRefreshImage={(id) =>
+              setSnapshots((m) => {
+                const n = new Map(m);
+                n.delete(id);
+                return n;
+              })
+            }
           />
         );
     }
@@ -970,7 +1145,33 @@ export function App() {
               <button className="dock-head" onClick={() => setPropsOpen(!propsOpen)} aria-expanded={propsOpen}>
                 <span className={`caret ${propsOpen ? "open" : ""}`}>▸</span> Propriedades
               </button>
-              {propsOpen && (
+              {propsOpen && selection.length === 0 && (view === "planta" || (view === "3d" && view3dDef)) && (
+                <div className="dock-body">
+                  <VistaPanel
+                    view={view === "3d" ? view3dDef : activeViewDef}
+                    storey={storey}
+                    projectDisciplines={store.disciplines}
+                    available={planAvailable}
+                    sheets={store.sheets}
+                    onChange={(v) => {
+                      updateView(v);
+                      if (v.kind === "3d") setSnapshots((m) => (m.has(v.id) ? new Map([...m].filter(([k]) => k !== v.id)) : m));
+                    }}
+                    onAddToSheet={(target) => {
+                      const v = view === "3d" ? view3dDef : activeViewDef;
+                      if (v) addToSheet(v.id, target);
+                    }}
+                    onShow3D={() => activeViewDef && showCutIn3D(activeViewDef)}
+                    onSaveCamera={() => {
+                      if (!view3dDef || !viewerRef.current) return;
+                      const c = viewerRef.current.getCamera();
+                      updateView({ ...view3dDef, eye: c.eye, target: c.target, frame: undefined });
+                      setSnapshots((m) => new Map([...m].filter(([k]) => k !== view3dDef.id)));
+                    }}
+                  />
+                </div>
+              )}
+              {propsOpen && !(selection.length === 0 && (view === "planta" || (view === "3d" && view3dDef))) && (
                 <div className="dock-body">
                   <ParamsPanel
                     selection={selection}
@@ -983,6 +1184,61 @@ export function App() {
                     systems={allSystems}
                     onFrame={selectAndFrame}
                     georef={georef}
+                  />
+                </div>
+              )}
+            </section>
+          )}
+          {model && (
+            <section className={`dock ${browserOpen ? "open" : ""}`}>
+              <button className="dock-head" onClick={() => setBrowserOpen(!browserOpen)} aria-expanded={browserOpen}>
+                <span className={`caret ${browserOpen ? "open" : ""}`}>▸</span> Vistas e folhas
+              </button>
+              {browserOpen && (
+                <div className="dock-body">
+                  <VistasBrowser
+                    storeys={model.storeys}
+                    views={store.views}
+                    sheets={store.sheets}
+                    active={
+                      view === "planta"
+                        ? planKey === "trab"
+                          ? `trab:${storey}`
+                          : planKey === "doc"
+                            ? `doc:${storey}`
+                            : planKey
+                        : view === "3d"
+                          ? view3dId && `view:${view3dId}`
+                          : view === "prancha" && sheetId
+                            ? `sheet:${sheetId}`
+                            : null
+                    }
+                    disciplines={store.disciplines}
+                    available={planAvailable}
+                    onDisciplines={store.setDisciplines}
+                    onOpen={openKey}
+                    onRename={(id, name) => {
+                      const v = resolveView(id);
+                      if (v) updateView({ ...v, name });
+                    }}
+                    onDelete={(key) => {
+                      if (key.startsWith("sheet:")) {
+                        const id = key.slice(6);
+                        store.setSheets((l) => l.filter((x) => x.id !== id));
+                        if (sheetId === id) setSheetId(null);
+                        return;
+                      }
+                      const id = key.slice(5);
+                      store.mutate((cur) => ({
+                        ...cur,
+                        views: cur.views.filter((v) => v.id !== id),
+                        drafts: cur.drafts.filter((d) => d.view !== id),
+                        sheets: cur.sheets.map((sh) => ({ ...sh, viewports: sh.viewports.filter((vp) => vp.viewId !== id) })),
+                      }));
+                      if (planKey === key) setPlanKey("trab");
+                      if (view3dId === id) setView3dId(null);
+                    }}
+                    onNewSheet={() => openSheet(newSheet().id)}
                   />
                 </div>
               )}
@@ -1026,10 +1282,17 @@ export function App() {
             {model && (
               <>
                 <button className={`view-tab ${view === "planta" ? "active" : ""}`} onClick={() => setView("planta")}>
-                  Planta · {storey}
+                  {activeViewDef && planKey.startsWith("view:") ? activeViewDef.name : `Planta · ${storey}`}
                 </button>
-                <button className={`view-tab ${view === "3d" ? "active" : ""}`} onClick={() => setView("3d")}>
-                  3D · {storeyView ?? "Modelo completo"}
+                <button
+                  className={`view-tab ${view === "3d" ? "active" : ""}`}
+                  onClick={() => {
+                    setView("3d");
+                    if (view === "3d") setView3dId(null);
+                  }}
+                  title={view3dDef ? "Clique de novo para voltar ao modelo completo" : undefined}
+                >
+                  3D · {view3dDef ? view3dDef.name : (storeyView ?? "Modelo completo")}
                 </button>
                 <button className={`view-tab ${view === "prancha" ? "active" : ""}`} onClick={() => chooseTool({ kind: "pranchas" })}>
                   Prancha
@@ -1037,10 +1300,31 @@ export function App() {
               </>
             )}
             <div className="spacer" />
-            {model && view === "planta" && (
+            {model && view === "planta" && (planKey === "trab" || planKey === "doc") && (
+              <div className="segmented small" role="group" aria-label="Seção da planta">
+                <button className={planKey === "trab" ? "on" : ""} onClick={() => setPlanKey("trab")} title="Tudo visível">
+                  Trabalho
+                </button>
+                <button className={planKey === "doc" ? "on" : ""} onClick={() => setPlanKey("doc")} title="Só as disciplinas do projeto (vai para as folhas)">
+                  Documentação
+                </button>
+              </div>
+            )}
+            {model && view === "planta" && activeViewDef?.kind !== "corte" && (
               <label className="cut-input" title="Altura do plano de corte acima do piso">
                 corte
-                <input type="number" step={0.1} min={0.2} value={editorCut} onChange={(e) => setEditorCut(Math.max(0.2, Number(e.target.value)))} />m
+                <input
+                  type="number"
+                  step={0.1}
+                  min={0.2}
+                  value={activeViewDef?.cutHeight ?? editorCut}
+                  onChange={(e) => {
+                    const h = Math.max(0.2, Number(e.target.value));
+                    if (activeViewDef) updateView({ ...activeViewDef, cutHeight: h });
+                    else setEditorCut(h);
+                  }}
+                />
+                m
               </label>
             )}
             <button className="icon-btn" onClick={() => setRightOpen(!rightOpen)} title={rightOpen ? "Ocultar painel direito" : "Mostrar painel direito"} aria-pressed={rightOpen}>
@@ -1055,14 +1339,16 @@ export function App() {
                 viewer={viewer}
                 model={model}
                 store={store}
-                storey={storey}
-                cutHeight={editorCut}
+                storey={activeViewDef?.storey ?? storey}
+                cutHeight={activeViewDef?.cutHeight ?? editorCut}
                 selection={selection}
                 elementById={elementById}
                 onPick={pick}
                 dark={theme === "escuro"}
                 fitSignal={fitSignal}
                 planTool={planTool}
+                viewDef={activeViewDef}
+                projectDisciplines={store.disciplines}
               />
             )}
             {view === "3d" && model && (
@@ -1076,8 +1362,20 @@ export function App() {
                 onOpen={setSectionOpen}
               />
             )}
-            {view === "prancha" && planSheet && (
-              <PlanView sheet={planSheet} selection={selection} onSelect={(ids, additive) => setSelection((cur) => (additive ? [...new Set([...cur, ...ids])] : ids))} fitSignal={fitSignal} />
+            {view === "prancha" && sheetRender && (
+              <PlanView
+                sheet={sheetRender.result}
+                selection={selection}
+                onSelect={(ids, additive) => setSelection((cur) => (additive ? [...new Set([...cur, ...ids])] : ids))}
+                fitSignal={fitSignal}
+                moveMode={moveMode}
+                viewports={sheetRender.result.viewports}
+                onMoveViewport={moveViewport}
+                onOpenViewport={(id) => {
+                  const v = resolveView(id);
+                  if (v) openViewDef(v);
+                }}
+              />
             )}
             {!model && !progress && (
               <div className="welcome">

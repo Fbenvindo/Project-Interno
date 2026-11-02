@@ -6,7 +6,9 @@ import { EMPTY_PROGRAM, type ProgramState } from "../../../core/program";
 import type { LinkMeta } from "../../../ifc/federate";
 import type { GeorefSettings } from "../../../core/georef";
 import type { DraftEntity } from "../../../core/draft";
-import type { SavedView } from "../../../core/project";
+import type { ViewDef } from "../../../core/views";
+import type { SheetDef } from "../../../core/viewDrawing";
+import type { Discipline } from "../../../core/types";
 
 interface ProjectState {
   points: PlacedPoint[];
@@ -16,8 +18,13 @@ interface ProjectState {
   links: LinkMeta[];
   georef: GeorefSettings | null;
   drafts: DraftEntity[];
-  views: SavedView[];
+  views: ViewDef[];
+  sheets: SheetDef[];
+  /** Disciplinas do projeto: as que o IFC deste projeto entrega (vazio = todas as de instalações). */
+  disciplines: Discipline[];
 }
+
+export type ProjectSnapshot = ProjectState;
 
 interface History {
   past: ProjectState[];
@@ -29,7 +36,7 @@ interface History {
 }
 
 const LIMIT = 200;
-const EMPTY: ProjectState = { points: [], runs: [], circuits: [], program: EMPTY_PROGRAM, links: [], georef: null, drafts: [], views: [] };
+const EMPTY: ProjectState = { points: [], runs: [], circuits: [], program: EMPTY_PROGRAM, links: [], georef: null, drafts: [], views: [], sheets: [], disciplines: [] };
 
 type Patch<T> = (item: T) => Partial<T>;
 
@@ -54,7 +61,7 @@ export function usePointsStore() {
   const commit = useCallback((fn: (cur: ProjectState) => ProjectState, key: string | null = null) => {
     setH((s) => {
       const next = fn(s.present);
-      if (next.points === s.present.points && next.runs === s.present.runs && next.circuits === s.present.circuits && next.program === s.present.program && next.links === s.present.links && next.georef === s.present.georef && next.drafts === s.present.drafts && next.views === s.present.views) return s;
+      if (next.points === s.present.points && next.runs === s.present.runs && next.circuits === s.present.circuits && next.program === s.present.program && next.links === s.present.links && next.georef === s.present.georef && next.drafts === s.present.drafts && next.views === s.present.views && next.sheets === s.present.sheets && next.disciplines === s.present.disciplines) return s;
       if (key && key === s.lastKey) return { ...s, present: next, future: [] };
       return { ...s, past: [...s.past.slice(-LIMIT + 1), s.present], present: next, future: [], lastKey: key };
     });
@@ -137,25 +144,17 @@ export function usePointsStore() {
 
   /** Desenho 2D e vistas 3D. */
   const setDrafts = useCallback((fn: (d: DraftEntity[]) => DraftEntity[], key: string | null = null) => commit((cur) => ({ ...cur, drafts: fn(cur.drafts) }), key && `d:${key}`), [commit]);
-  const setViews = useCallback((fn: (v: SavedView[]) => SavedView[]) => commit((cur) => ({ ...cur, views: fn(cur.views) })), [commit]);
+  const setViews = useCallback((fn: (v: ViewDef[]) => ViewDef[], key: string | null = null) => commit((cur) => ({ ...cur, views: fn(cur.views) }), key && `v:${key}`), [commit]);
+  /** Folhas (pranchas) e disciplinas do projeto. */
+  const setSheets = useCallback((fn: (v: SheetDef[]) => SheetDef[], key: string | null = null) => commit((cur) => ({ ...cur, sheets: fn(cur.sheets) }), key && `f:${key}`), [commit]);
+  const setDisciplines = useCallback((d: Discipline[]) => commit((cur) => ({ ...cur, disciplines: d })), [commit]);
 
   /** Substitui todo o projeto e zera o histórico (abrir arquivo ou novo modelo). */
-  const reset = useCallback(
-    (
-      points: PlacedPoint[],
-      runs: Run[] = [],
-      circuits: Circuit[] = [],
-      program: ProgramState = EMPTY_PROGRAM,
-      links: LinkMeta[] = [],
-      georef: GeorefSettings | null = null,
-      drafts: DraftEntity[] = [],
-      views: SavedView[] = [],
-    ) => {
-    const state = { points, runs, circuits, program, links, georef, drafts, views };
+  const reset = useCallback((data: Partial<ProjectState> = {}) => {
+    const defined = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined && v !== null)) as Partial<ProjectState>;
+    const state: ProjectState = { ...EMPTY, ...defined, georef: data.georef ?? null };
     setH({ past: [], present: state, future: [], saved: state, lastKey: null });
-  },
-    [],
-  );
+  }, []);
 
   const markSaved = useCallback(() => setH((s) => ({ ...s, saved: s.present })), []);
 
@@ -187,6 +186,8 @@ export function usePointsStore() {
       georef: h.present.georef,
       drafts: h.present.drafts,
       views: h.present.views,
+      sheets: h.present.sheets,
+      disciplines: h.present.disciplines,
       canUndo: h.past.length > 0,
       canRedo: h.future.length > 0,
       dirty: h.present !== h.saved,
@@ -208,12 +209,14 @@ export function usePointsStore() {
       setGeoref,
       setDrafts,
       setViews,
+      setSheets,
+      setDisciplines,
       reset,
       markSaved,
       undo,
       redo,
     }),
-    [h, add, update, remove, addRuns, updateRuns, removeRuns, addCircuits, updateCircuits, removeCircuits, assignPoints, mutate, setProgram, setLinks, setGeoref, setDrafts, setViews, reset, markSaved, undo, redo],
+    [h, add, update, remove, addRuns, updateRuns, removeRuns, addCircuits, updateCircuits, removeCircuits, assignPoints, mutate, setProgram, setLinks, setGeoref, setDrafts, setViews, setSheets, setDisciplines, reset, markSaved, undo, redo],
   );
 }
 
