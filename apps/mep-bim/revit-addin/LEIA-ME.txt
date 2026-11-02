@@ -18,7 +18,7 @@ Uso
 - Num projeto: marque as famílias carregadas que quer levar (as de instalações já vêm
   marcadas) e salve o arquivo .sebfam.
 - No editor de famílias: a família aberta é exportada.
-- No SmartEasyBIM: Arquivo > Famílias do Revit > Importar famílias (.sebfam).
+- No SmartEasyBIM: Arquivo > Importar elementos em IFC > Importar famílias (.sebfam).
 
 O plugin só lê as famílias: nada é alterado no projeto nem nos arquivos .rfa.
 

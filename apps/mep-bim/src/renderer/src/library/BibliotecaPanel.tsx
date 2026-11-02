@@ -44,7 +44,7 @@ export function BibliotecaPanel({ points, onPlace }: Props) {
 
   return (
     <div className="panel-body locacao biblioteca">
-      <h2>Biblioteca de famílias</h2>
+      <h2>Importar elementos em IFC</h2>
       <p className="muted small">
         Famílias exportadas do Revit pelo plugin SmartEasyBIM (aba <b>SmartEasyBIM › Exportar famílias</b>). Cada tipo vira um item da biblioteca de
         locação, com a geometria 3D, os parâmetros e a classe IFC da categoria.

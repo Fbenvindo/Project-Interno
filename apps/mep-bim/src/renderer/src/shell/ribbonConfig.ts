@@ -140,7 +140,7 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
     },
     {
       label: "Biblioteca",
-      buttons: [{ key: "familias", label: "Famílias do Revit", icon: "familia", tool: { kind: "biblioteca" } }],
+      buttons: [{ key: "familias", label: "Importar elementos em IFC", icon: "familia", tool: { kind: "biblioteca" } }],
     },
     {
       label: "Fundo",
