@@ -53,12 +53,19 @@ const areaUnit = add("IFCSIUNIT(*,.AREAUNIT.,$,.SQUARE_METRE.)");
 const volumeUnit = add("IFCSIUNIT(*,.VOLUMEUNIT.,$,.CUBIC_METRE.)");
 const units = add(`IFCUNITASSIGNMENT(${list([lengthUnit, areaUnit, volumeUnit])})`);
 const worldAxis = add(`IFCAXIS2PLACEMENT3D(${ref(pt(0, 0, 0))},$,$)`);
-const context = add(`IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,${ref(worldAxis)},$)`);
+// Norte verdadeiro a 10° do +Y do projeto (anti-horário).
+const trueNorth = add(`IFCDIRECTION((${num(-Math.sin((10 * Math.PI) / 180))},${num(Math.cos((10 * Math.PI) / 180))}))`);
+const context = add(`IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,${ref(worldAxis)},${ref(trueNorth)})`);
+// Georreferenciamento (IFC4): SIRGAS 2000 / UTM 23S, survey point em E 333.456,789 / N 7.394.123,456 / 760 m,
+// eixo X do projeto girado 12° em relação ao leste.
+const mapUnit = add("IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)");
+const crs = add(`IFCPROJECTEDCRS('EPSG:31983','SIRGAS 2000 / UTM zone 23S','SIRGAS2000',$,'UTM','23S',${ref(mapUnit)})`);
+add(`IFCMAPCONVERSION(${ref(context)},${ref(crs)},333456.789,7394123.456,760.,${num(Math.cos((12 * Math.PI) / 180))},${num(Math.sin((12 * Math.PI) / 180))},1.)`);
 const project = add(
   `IFCPROJECT('${guid()}',$,'Apartamento exemplo',$,$,$,$,${list([context])},${ref(units)})`,
 );
 const site = add(
-  `IFCSITE('${guid()}',$,'Terreno',$,$,${ref(placement(0, 0, 0))},$,$,.ELEMENT.,$,$,$,$,$)`,
+  `IFCSITE('${guid()}',$,'Terreno',$,$,${ref(placement(0, 0, 0))},$,$,.ELEMENT.,(-23,33,1,500000),(-46,38,2,0),760000.,$,$)`,
 );
 const building = add(
   `IFCBUILDING('${guid()}',$,'Residencial Exemplo',$,$,${ref(placement(0, 0, 0))},$,$,.ELEMENT.,$,$,$)`,

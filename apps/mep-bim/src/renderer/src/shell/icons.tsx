@@ -81,6 +81,13 @@ const P: Record<string, ReactNode> = {
       <path d="M8 10 H16 M8 13.5 H16 M8 17 H13" />
     </>
   ),
+  coordenadas: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2 V7 M12 17 V22 M2 12 H7 M17 12 H22" />
+      <path d="M12 2 L10 5 M12 2 L14 5" />
+    </>
+  ),
   vinculo: (
     <>
       <path d="M10 14 L14 10" />

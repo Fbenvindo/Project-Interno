@@ -4,6 +4,7 @@ import { storeyAt } from "../core/points";
 import type { Space } from "../core/spaces";
 import type { Discipline, ElementInfo, PropertyGroup, Vec3 } from "../core/types";
 import type { ElementMesh, LoadedModel } from "./loadIfc";
+import { fromMap, toMap, type MapConversion } from "../core/georef";
 
 /** Dados salvos no projeto. */
 export interface LinkMeta {
@@ -15,6 +16,45 @@ export interface LinkMeta {
   discipline: Discipline | "auto";
   visible: boolean;
   translucent: boolean;
+  /**
+   * Alinhamento: "projeto" (origem a origem: mesmas coordenadas do IFC), "compartilhadas"
+   * (pelo survey point / IfcMapConversion de cada arquivo) ou "manual" (deslocamento e rotação).
+   */
+  align?: LinkAlign;
+}
+
+export interface LinkAlign {
+  mode: "projeto" | "compartilhadas" | "manual";
+  /** Manual: deslocamento (m) e rotação (graus, anti-horário) aplicados às coordenadas do vínculo. */
+  dx: number;
+  dy: number;
+  dz: number;
+  rotDeg: number;
+}
+
+export const DEFAULT_ALIGN: LinkAlign = { mode: "projeto", dx: 0, dy: 0, dz: 0, rotDeg: 0 };
+
+type IfcMap = (p: Vec3) => Vec3;
+
+/**
+ * Mapeamento das coordenadas IFC do vínculo para as do principal, conforme o alinhamento.
+ * Devolve também um aviso quando o modo pedido não é possível (falta georreferenciamento).
+ */
+export function alignmentMap(align: LinkAlign, linkMap: MapConversion | null, hostMap: MapConversion | null): { map: IfcMap; warning: string | null } {
+  if (align.mode === "compartilhadas") {
+    if (linkMap && hostMap) return { map: (p) => fromMap(hostMap, toMap(linkMap, p)), warning: null };
+    return {
+      map: (p) => p,
+      warning: !hostMap ? "O modelo principal não tem survey point: alinhado origem a origem." : "Este vínculo não tem survey point (IfcMapConversion): alinhado origem a origem.",
+    };
+  }
+  if (align.mode === "manual") {
+    const a = (align.rotDeg * Math.PI) / 180;
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    return { map: ([x, y, z]) => [c * x - s * y + align.dx, s * x + c * y + align.dy, z + align.dz], warning: null };
+  }
+  return { map: (p) => p, warning: null };
 }
 
 /** Vínculo carregado: elementos e malhas já na cena do modelo principal, com ids próprios. */
@@ -25,6 +65,10 @@ export interface LinkData {
   elements: ElementInfo[];
   meshes: ElementMesh[];
   spaces: Space[];
+  /** Assinatura do alinhamento usado (para refazer quando mudar). */
+  alignKey: string;
+  /** Aviso do alinhamento (ex.: sem survey point). */
+  warning: string | null;
 }
 
 /** Ids de elementos dos vínculos: slot × 100.000.000 + expressID do arquivo de origem. */
@@ -34,8 +78,8 @@ export const linkSlotOf = (id: number) => (id >= LINK_ID_BASE ? Math.floor(id / 
 type Affine = { o: Vec3; x: Vec3; y: Vec3; z: Vec3 };
 
 /** Transformação da cena do vínculo para a cena do principal (pelas coordenadas IFC). */
-export function linkTransform(raw: LoadedModel, host: LoadedModel): Affine {
-  const f = (p: Vec3) => host.coordinates.ifcToWorld(raw.coordinates.worldToIfc(p));
+export function linkTransform(raw: LoadedModel, host: LoadedModel, ifcMap: IfcMap = (p) => p): Affine {
+  const f = (p: Vec3) => host.coordinates.ifcToWorld(ifcMap(raw.coordinates.worldToIfc(p)));
   const o = f([0, 0, 0]);
   const d = (p: Vec3): Vec3 => {
     const q = f(p);
@@ -50,8 +94,16 @@ const apply = (t: Affine, p: Vec3): Vec3 => [
   t.o[2] + t.x[2] * p[0] + t.y[2] * p[1] + t.z[2] * p[2],
 ];
 
-export function prepareLink(id: string, slot: number, raw: LoadedModel, host: LoadedModel): LinkData {
-  const t = linkTransform(raw, host);
+export function prepareLink(
+  id: string,
+  slot: number,
+  raw: LoadedModel,
+  host: LoadedModel,
+  align: LinkAlign = DEFAULT_ALIGN,
+  hostMap: MapConversion | null = host.georef?.map ?? null,
+): LinkData {
+  const { map: ifcMap, warning } = alignmentMap(align, raw.georef?.map ?? null, hostMap);
+  const t = linkTransform(raw, host, ifcMap);
   const base = slot * LINK_ID_BASE;
   const identity = Math.abs(t.o[0]) + Math.abs(t.o[1]) + Math.abs(t.o[2]) < 1e-9 && t.x[0] === 1 && t.y[1] === 1 && t.z[2] === 1;
   const levels = host.storeyLevels;
@@ -89,14 +141,21 @@ export function prepareLink(id: string, slot: number, raw: LoadedModel, host: Lo
     }
     return { ...m, expressID: base + m.expressID, positions, normals };
   });
-  // Ambientes: o contorno já está em coordenadas do projeto; só as cotas mudam de cena.
-  const yToHost = (y: number) => host.coordinates.ifcToWorld([0, 0, raw.coordinates.worldToIfc([0, y, 0])[2]])[1];
+  // Ambientes: contorno em coordenadas do projeto (passa pelo alinhamento); cotas para a cena do principal.
+  const yToHost = (y: number) => host.coordinates.ifcToWorld([0, 0, ifcMap([0, 0, raw.coordinates.worldToIfc([0, y, 0])[2]])[2]])[1];
   const spaces = raw.spaces.map((s): Space => {
     const floorY = yToHost(s.floorY);
-    return { ...s, expressID: base + s.expressID, floorY, topY: yToHost(s.topY), storey: levels.length ? storeyAt(floorY + 0.05, levels) : s.storey };
+    const polygon = s.polygon.map(([x, y]) => {
+      const q = ifcMap([x, y, 0]);
+      return [q[0], q[1]] as [number, number];
+    });
+    return { ...s, expressID: base + s.expressID, polygon, floorY, topY: yToHost(s.topY), storey: levels.length ? storeyAt(floorY + 0.05, levels) : s.storey };
   });
-  return { id, slot, raw, elements, meshes, spaces };
+  return { id, slot, raw, elements, meshes, spaces, alignKey: alignKey(align, hostMap), warning };
 }
+
+export const alignKey = (a: LinkAlign, hostMap: MapConversion | null) =>
+  `${a.mode}|${a.dx}|${a.dy}|${a.dz}|${a.rotDeg}|${hostMap ? `${hostMap.eastings},${hostMap.northings},${hostMap.orthogonalHeight},${hostMap.xAxisAbscissa},${hostMap.xAxisOrdinate}` : "-"}`;
 
 const withDiscipline = (els: ElementInfo[], d: LinkMeta["discipline"]) => (d === "auto" ? els : els.map((e) => ({ ...e, discipline: d })));
 

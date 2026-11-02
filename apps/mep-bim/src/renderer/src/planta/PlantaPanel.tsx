@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import type { Georef } from "../../../core/georef";
 import { DISCIPLINES } from "../../../core/disciplines";
 import type { PlanDrawing } from "../../../core/plan/drawing";
 import type { PlanLabels } from "../../../core/plan/build";
@@ -32,6 +33,8 @@ interface Props {
   fileName: string | null;
   /** Disciplinas presentes no modelo e no projeto. */
   available: Discipline[];
+  /** Coordenadas do projeto (DXF em UTM e norte na prancha). */
+  georef?: Georef;
 }
 
 const slug = (s: string) =>
@@ -42,7 +45,7 @@ const slug = (s: string) =>
     .replace(/^-|-$/g, "")
     .toLowerCase();
 
-export function PlantaPanel({ settings, onChange, storeys, drawing, sheet, fileName, available }: Props) {
+export function PlantaPanel({ settings, onChange, storeys, drawing, sheet, fileName, available, georef }: Props) {
   const [message, setMessage] = useState<string | null>(null);
   const set = <K extends keyof PlanSettings>(k: K, v: PlanSettings[K]) => onChange({ ...settings, [k]: v });
   const setInfo = (k: Exclude<keyof SheetInfo, "extras">, v: string) => onChange({ ...settings, info: { ...settings.info, [k]: v } });
@@ -79,8 +82,14 @@ export function PlantaPanel({ settings, onChange, storeys, drawing, sheet, fileN
     const saved = await saveFile({ defaultName: `${base}.svg`, content: sheet.svg, filters: [{ name: "SVG", extensions: ["svg"] }] });
     if (saved) setMessage(`SVG: ${saved}`);
   };
+  const [dxfCoords, setDxfCoords] = useState<"projeto" | "mapa">("projeto");
   const exportDxfFile = async () => {
-    const saved = await saveFile({ defaultName: `${base}.dxf`, content: exportDxf(drawing), filters: [{ name: "DXF (AutoCAD)", extensions: ["dxf"] }] });
+    const utm = dxfCoords === "mapa" && georef?.map;
+    const saved = await saveFile({
+      defaultName: `${base}${utm ? "-utm" : ""}.dxf`,
+      content: exportDxf(drawing, { map: utm ? georef!.map : null }),
+      filters: [{ name: "DXF (AutoCAD)", extensions: ["dxf"] }],
+    });
     if (saved) setMessage(`DXF: ${saved} (em mm, escala real; símbolos para 1:${settings.scale})`);
   };
 
@@ -275,6 +284,12 @@ export function PlantaPanel({ settings, onChange, storeys, drawing, sheet, fileN
         <button className="btn primary" onClick={exportPdf}>
           Exportar PDF
         </button>
+        {georef?.map && (
+          <select value={dxfCoords} onChange={(e) => setDxfCoords(e.target.value as "projeto" | "mapa")} title="Coordenadas do DXF">
+            <option value="projeto">DXF em coordenadas do projeto (mm)</option>
+            <option value="mapa">DXF em coordenadas do mapa / UTM (m)</option>
+          </select>
+        )}
         <button className="btn" onClick={exportDxfFile}>
           Exportar DXF
         </button>

@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { exportPointsIfc } from "../../../core/ifcExport";
+import { effectiveGeoref } from "../../../core/georef";
 import { deserializeProject, serializeProject } from "../../../core/project";
 import type { LoadedModel } from "../../../ifc/loadIfc";
 import { openTextFile, saveFile } from "../platform";
@@ -13,7 +14,7 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel | null, f
 
   const save = useCallback(async () => {
     if (!model) return;
-    const json = JSON.stringify(serializeProject({ points: store.points, runs: store.runs, circuits: store.circuits, program: store.program, links: store.links }, model.coordinates, fileName), null, 2);
+    const json = JSON.stringify(serializeProject({ points: store.points, runs: store.runs, circuits: store.circuits, program: store.program, links: store.links, georef: store.georef }, model.coordinates, fileName), null, 2);
     const saved = await saveFile({
       defaultName: `${base(fileName)}.locacao.json`,
       content: json,
@@ -32,8 +33,8 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel | null, f
     if (!file) return;
     try {
       const json = JSON.parse(file.content);
-      const { points, runs, circuits, program, links } = deserializeProject(json, model.coordinates);
-      store.reset(points, runs, circuits, program, links);
+      const { points, runs, circuits, program, links, georef } = deserializeProject(json, model.coordinates);
+      store.reset(points, runs, circuits, program, links, georef);
       onOpened?.();
       const other = json.modeloIfc && fileName && json.modeloIfc !== fileName;
       setMessage(
@@ -46,7 +47,14 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel | null, f
 
   const exportIfc = useCallback(async () => {
     if (!model) return;
-    const text = exportPointsIfc(store.points, { modelName: fileName, storeys: model.storeyLevels, cs: model.coordinates, runs: store.runs, circuits: store.circuits });
+    const text = exportPointsIfc(store.points, {
+      modelName: fileName,
+      storeys: model.storeyLevels,
+      cs: model.coordinates,
+      runs: store.runs,
+      circuits: store.circuits,
+      georef: effectiveGeoref(model.georef, store.georef),
+    });
     const saved = await saveFile({
       defaultName: `${base(fileName)}-mep.ifc`,
       content: text,

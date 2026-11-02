@@ -1,6 +1,7 @@
 // Vínculos IFC: modelos de outras disciplinas sobrepostos ao modelo principal.
 import { DISCIPLINES, DISCIPLINE_BY_ID } from "../../../core/disciplines";
-import type { LinkData, LinkMeta } from "../../../ifc/federate";
+import { DEFAULT_ALIGN, type LinkAlign, type LinkData, type LinkMeta } from "../../../ifc/federate";
+import { fmtCoord } from "../../../core/georef";
 import type { LoadedModel } from "../../../ifc/loadIfc";
 
 interface Props {
@@ -109,10 +110,39 @@ export function VinculosPanel({ hostName, host, links, data, status, onAdd, onCh
                   ))}
                 </select>
               </label>
+              <label title="Como o vínculo é posicionado em relação ao modelo principal">
+                Posicionamento
+                <select value={(l.align ?? DEFAULT_ALIGN).mode} onChange={(e) => onChange(l.id, { align: { ...(l.align ?? DEFAULT_ALIGN), mode: e.target.value as LinkAlign["mode"] } })}>
+                  <option value="projeto">Origem a origem (coordenadas do IFC)</option>
+                  <option value="compartilhadas">Coordenadas compartilhadas (survey point)</option>
+                  <option value="manual">Manual (deslocamento e rotação)</option>
+                </select>
+              </label>
               <label className="inline-check link-translucent">
                 <input type="checkbox" checked={l.translucent} onChange={(e) => onChange(l.id, { translucent: e.target.checked })} /> Transparente no 3D
               </label>
             </div>
+            {(l.align ?? DEFAULT_ALIGN).mode === "manual" && (
+              <div className="form-grid four">
+                {(["dx", "dy", "dz", "rotDeg"] as const).map((k) => (
+                  <label key={k}>
+                    {k === "rotDeg" ? "Rotação (°)" : `${k.slice(1).toUpperCase()} (m)`}
+                    <input
+                      type="number"
+                      step={k === "rotDeg" ? 0.01 : 0.001}
+                      value={(l.align ?? DEFAULT_ALIGN)[k]}
+                      onChange={(e) => onChange(l.id, { align: { ...(l.align ?? DEFAULT_ALIGN), [k]: Number(e.target.value) || 0 } })}
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+            {d?.warning && <div className="warn-text small">{d.warning}</div>}
+            {d && (l.align ?? DEFAULT_ALIGN).mode === "compartilhadas" && !d.warning && d.raw.georef.map && (
+              <div className="muted small">
+                Survey point do vínculo: E {fmtCoord(d.raw.georef.map.eastings)} · N {fmtCoord(d.raw.georef.map.northings)}
+              </div>
+            )}
           </section>
         );
       })}

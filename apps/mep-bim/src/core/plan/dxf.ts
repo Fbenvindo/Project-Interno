@@ -4,6 +4,7 @@
 // SOLID (ex.: paredes retas cortadas, símbolos); os demais, só o contorno.
 import type { PlanDrawing, Prim } from "./drawing";
 import type { P2 } from "./section";
+import { toMap, type MapConversion } from "../georef";
 
 /** Cor ACI por prefixo de camada. */
 const ACI: Record<string, number> = { ARQ: 8, EST: 8, ELE: 30, HID: 5, INC: 1, TEL: 6, HVAC: 3, GAS: 2, MEP: 4, OUT: 9 };
@@ -12,14 +13,31 @@ const n = (v: number) => (Math.round(v * 1000) / 1000).toString();
 /** Texto DXF em ASCII: caracteres fora do ASCII como \U+XXXX (entendido pelo AutoCAD). */
 const dxfText = (s: string) => s.replace(/[^\x20-\x7E]/g, (c) => `\\U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`);
 
-export function exportDxf(drawing: PlanDrawing): string {
-  const mm = (p: P2): P2 => [p[0] * 1000, p[1] * 1000];
+/**
+ * Coordenadas do DXF: "projeto" (mm, coordenadas do IFC) ou "mapa" (m, E/N da IfcMapConversion,
+ * para sobrepor a levantamentos e bases georreferenciadas).
+ */
+export interface DxfOptions {
+  map?: MapConversion | null;
+}
+
+export function exportDxf(drawing: PlanDrawing, opts: DxfOptions = {}): string {
+  const geo = opts.map ?? null;
+  /** Fator de comprimento (mm no projeto; m no mapa) e rotação do mapa para textos. */
+  const k = geo ? geo.scale : 1000;
+  const rot = geo ? Math.atan2(geo.xAxisOrdinate, geo.xAxisAbscissa) : 0;
+  const mm = (p: P2): P2 => {
+    if (!geo) return [p[0] * 1000, p[1] * 1000];
+    const q = toMap(geo, [p[0], p[1], 0]);
+    return [q[0], q[1]];
+  };
   const out: string[] = [];
   const g = (code: number, value: string | number) => out.push(String(code), typeof value === "number" ? n(value) : value);
 
   const layers = [...new Set(drawing.prims.map((p) => p.layer))].sort();
-  const dash = 2 * drawing.scale; // 2 mm de papel
-  const gap = 1 * drawing.scale;
+  const paper = geo ? drawing.scale / 1000 : drawing.scale; // 1 mm de papel em unidades do DXF
+  const dash = 2 * paper; // 2 mm de papel
+  const gap = 1 * paper;
 
   // Cabeçalho
   g(0, "SECTION");
@@ -28,7 +46,9 @@ export function exportDxf(drawing: PlanDrawing): string {
   g(1, "AC1009");
   g(9, "$LTSCALE");
   g(40, 1);
-  if (drawing.bounds) {
+  g(9, "$INSUNITS");
+  g(70, geo ? 6 : 4); // 6 = metros (mapa), 4 = milímetros
+  if (drawing.bounds && !geo) {
     const [a, b] = [mm(drawing.bounds.min), mm(drawing.bounds.max)];
     g(9, "$EXTMIN");
     g(10, a[0]);
@@ -60,11 +80,11 @@ export function exportDxf(drawing: PlanDrawing): string {
   g(3, "__ . __ . __");
   g(72, 65);
   g(73, 4);
-  g(40, 3 * drawing.scale + 0.6 * drawing.scale + 1.6 * drawing.scale);
-  g(49, 3 * drawing.scale);
-  g(49, -0.8 * drawing.scale);
+  g(40, 3 * paper + 0.6 * paper + 1.6 * paper);
+  g(49, 3 * paper);
+  g(49, -0.8 * paper);
   g(49, 0);
-  g(49, -0.8 * drawing.scale);
+  g(49, -0.8 * paper);
   g(0, "LTYPE");
   g(2, "DASHED");
   g(70, 0);
@@ -147,16 +167,17 @@ export function exportDxf(drawing: PlanDrawing): string {
       g(10, c[0]);
       g(20, c[1]);
       g(30, 0);
-      g(40, p.r * 1000);
+      g(40, p.r * k);
     } else {
       const at = mm(p.p);
       head("TEXT", p);
       g(10, at[0]);
       g(20, at[1]);
       g(30, 0);
-      g(40, p.height * 1000);
+      g(40, p.height * k);
       g(1, dxfText(p.text));
-      if (p.angle) g(50, (p.angle * 180) / Math.PI);
+      const ang = (p.angle ?? 0) + rot;
+      if (ang) g(50, (ang * 180) / Math.PI);
       const h = p.anchor === "middle" ? 1 : p.anchor === "end" ? 2 : 0;
       if (h) g(72, h);
       g(73, 2); // alinhamento vertical: meio

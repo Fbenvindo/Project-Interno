@@ -8,6 +8,7 @@ import { newCircuitId, type Circuit, type CircuitType } from "./circuits";
 import type { Vec3 } from "./types";
 import { EMPTY_PROGRAM, type ProgramState } from "./program";
 import type { LinkMeta } from "../ifc/federate";
+import type { GeorefSettings } from "./georef";
 
 export interface ProjectData {
   points: PlacedPoint[];
@@ -17,6 +18,8 @@ export interface ProjectData {
   program?: ProgramState;
   /** Vínculos IFC (referências externas). */
   links?: LinkMeta[];
+  /** Coordenadas do projeto (do IFC ou informadas). */
+  georef?: GeorefSettings | null;
 }
 
 interface StoredCircuit {
@@ -51,6 +54,7 @@ export interface ProjectFile extends LocacaoFile {
   trechos?: StoredRun[];
   circuitos?: StoredCircuit[];
   programa?: ProgramState;
+  georreferenciamento?: GeorefSettings;
   vinculos?: { id: string; nome: string; caminho: string | null; disciplina: LinkMeta["discipline"]; visivel: boolean; transparente: boolean }[];
 }
 
@@ -86,6 +90,7 @@ export function serializeProject(data: ProjectData, cs: CoordinateSystem, modelN
       quedaMaxima: c.dropLimit,
     })),
     ...(data.program && Object.keys(data.program.rooms).length ? { programa: data.program } : {}),
+    ...(data.georef ? { georreferenciamento: data.georef } : {}),
     ...(data.links?.length
       ? { vinculos: data.links.map((l) => ({ id: l.id, nome: l.name, caminho: l.path, disciplina: l.discipline, visivel: l.visible, transparente: l.translucent })) }
       : {}),
@@ -132,5 +137,5 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
     visible: v.visivel !== false,
     translucent: !!v.transparente,
   }));
-  return { points, runs, circuits, program, links };
+  return { points, runs, circuits, program, links, georef: file.georreferenciamento ?? null };
 }

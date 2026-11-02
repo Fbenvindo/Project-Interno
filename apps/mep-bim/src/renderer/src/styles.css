@@ -1711,3 +1711,12 @@ h3 {
 .vinculos .form-grid select {
   width: 100%;
 }
+.form-grid.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.coords .props th {
+  width: 40%;
+}
+.coords .form-grid.conv {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}

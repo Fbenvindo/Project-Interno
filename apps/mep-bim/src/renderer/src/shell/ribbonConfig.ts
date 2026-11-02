@@ -26,6 +26,7 @@ export type ToolSpec =
   | { kind: "pranchas" }
   | { kind: "biblioteca" }
   | { kind: "vinculos" }
+  | { kind: "coordenadas" }
   | { kind: "programa"; section: "tipos" | "ambientes" };
 
 export type Tool = ToolSpec & { n: number };
@@ -151,7 +152,10 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
     },
     {
       label: "Referências",
-      buttons: [{ key: "vinculos", label: "Vínculos IFC", icon: "vinculo", tool: { kind: "vinculos" }, needsModel: true }],
+      buttons: [
+        { key: "vinculos", label: "Vínculos IFC", icon: "vinculo", tool: { kind: "vinculos" }, needsModel: true },
+        { key: "coordenadas", label: "Coordenadas", icon: "coordenadas", tool: { kind: "coordenadas" }, needsModel: true },
+      ],
     },
     {
       label: "Consulta",

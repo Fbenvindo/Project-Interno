@@ -14,6 +14,7 @@ import type { LoadedModel } from "../../../ifc/loadIfc";
 import { reseatCeiling, type CeilingResolver } from "../locacao/ceiling";
 import { assemblyKey, assemblySize, defaultAssembly, supportsAssembly, type DeviceAssembly } from "../../../core/devices";
 import { AssemblyEditor } from "../locacao/AssemblyEditor";
+import { fmtCoord, toMap, type Georef } from "../../../core/georef";
 import { pointSize } from "../../../core/points";
 import type { PointsStore } from "../locacao/usePointsStore";
 
@@ -27,6 +28,8 @@ interface Props {
   slabAt: (x: number, z: number, floorY: number) => number;
   systems: string[];
   onFrame: (ids: number[]) => void;
+  /** Coordenadas do projeto (para mostrar E/N/cota do elemento). */
+  georef?: Georef;
 }
 
 const DISCIPLINE_GROUP: Record<Discipline, string> = {
@@ -153,7 +156,7 @@ const RO = ({ children }: { children: ReactNode }) => <span className="pro">{chi
 
 // ---- Painel ---------------------------------------------------------------------------------
 
-export function ParamsPanel({ selection, elementById, store, model, getProperties, resolveCeiling, slabAt, systems, onFrame }: Props) {
+export function ParamsPanel({ selection, elementById, store, model, getProperties, resolveCeiling, slabAt, systems, onFrame, georef }: Props) {
   const levels = model.storeyLevels;
   const items = useMemo<Item[]>(() => {
     const pointById = new Map(store.points.map((p) => [p.id, p]));
@@ -243,6 +246,7 @@ export function ParamsPanel({ selection, elementById, store, model, getPropertie
           {only === "trecho" && <RunRows runs={shown.map((i) => i.run!)} store={store} model={model} slabAt={slabAt} />}
           {(only === "ifc" || only === "caixa") && <ElementRows els={shown.map((i) => i.el!)} getProperties={getProperties} />}
           {!only && <MixedRows items={shown} />}
+          {shown.length === 1 && <CoordRows item={shown[0]} model={model} georef={georef} />}
         </tbody>
       </table>
       <datalist id="params-systems">
@@ -793,6 +797,40 @@ function MixedRows({ items }: { items: Item[] }) {
           Escolha um tipo na lista acima para editar os parâmetros em conjunto.
         </td>
       </tr>
+    </Group>
+  );
+}
+
+/** Coordenadas do elemento: do projeto (IFC) e do mapa (E, N, cota), se houver survey point. */
+function CoordRows({ item, model, georef }: { item: Item; model: LoadedModel; georef?: Georef }) {
+  let world: [number, number, number] | null = null;
+  let what = "centro";
+  if (item.point) world = item.point.position;
+  else if (item.run) {
+    world = item.run.vertices[0];
+    what = "início";
+  } else if (item.el?.bbox) {
+    const b = item.el.bbox;
+    world = [(b.min[0] + b.max[0]) / 2, b.min[1], (b.min[2] + b.max[2]) / 2];
+    what = "centro, base";
+  }
+  if (!world) return null;
+  const p = model.coordinates.worldToIfc(world);
+  const m = georef?.map ? toMap(georef.map, p) : null;
+  return (
+    <Group title="Coordenadas" defaultOpen={false}>
+      <Row label={`Projeto (${what})`}>
+        <RO>
+          X {fmtCoord(p[0])} · Y {fmtCoord(p[1])} · Z {fmtCoord(p[2])}
+        </RO>
+      </Row>
+      {m && (
+        <Row label={georef?.crs?.name ? `Mapa (${georef.crs.name})` : "Mapa"}>
+          <RO>
+            E {fmtCoord(m[0])} · N {fmtCoord(m[1])} · {fmtCoord(m[2])} m
+          </RO>
+        </Row>
+      )}
     </Group>
   );
 }

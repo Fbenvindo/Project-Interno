@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { IfcAPI } from "web-ifc";
 import { federate, LINK_ID_BASE, linkSlotOf, prepareLink, type LinkMeta } from "../src/ifc/federate";
+import { mapConversionFrom, toMap } from "../src/core/georef";
 import { loadIfc, type LoadedModel } from "../src/ifc/loadIfc";
 import type { Vec3 } from "../src/core/types";
 
@@ -60,5 +61,38 @@ describe("vínculos IFC", () => {
     const wall = other.elements.find((e) => e.ifcType === "IFCWALL")!;
     const props = fed.getProperties(LINK_ID_BASE + wall.expressID);
     expect(props[0].values[0].value).toBe("mep.ifc");
+  });
+});
+
+describe("alinhamento dos vínculos", () => {
+  it("coordenadas compartilhadas: o mesmo ponto no mapa (E, N, cota) nos dois arquivos", () => {
+    const hostMap = host.georef.map!;
+    expect(hostMap).toBeTruthy();
+    // Vínculo com outro survey point e outra rotação (como um modelo de outro parceiro).
+    const linkMap = mapConversionFrom(333500, 7394100, 761.5, 40);
+    const raw = { ...other, georef: { ...other.georef, map: linkMap } };
+    const link = prepareLink("l1", 1, raw, host, { mode: "compartilhadas", dx: 0, dy: 0, dz: 0, rotDeg: 0 });
+    expect(link.warning).toBeNull();
+    const e = other.elements.find((x) => x.ifcType === "IFCWALL")!;
+    const mine = link.elements.find((x) => x.expressID === LINK_ID_BASE + e.expressID)!;
+    const a = toMap(linkMap, other.coordinates.worldToIfc(center(e.bbox!)));
+    const b = toMap(hostMap, host.coordinates.worldToIfc(center(mine.bbox!)));
+    a.forEach((v, k) => expect(b[k]).toBeCloseTo(v, 3));
+  });
+
+  it("sem survey point no vínculo: avisa e alinha origem a origem", () => {
+    const link = prepareLink("l1", 1, other, host, { mode: "compartilhadas", dx: 0, dy: 0, dz: 0, rotDeg: 0 });
+    expect(link.warning).toMatch(/survey point/);
+  });
+
+  it("manual: deslocamento e rotação nas coordenadas do projeto", () => {
+    const link = prepareLink("l1", 1, other, host, { mode: "manual", dx: 10, dy: -2, dz: 0.5, rotDeg: 90 });
+    const e = other.elements.find((x) => x.ifcType === "IFCWALL")!;
+    const mine = link.elements.find((x) => x.expressID === LINK_ID_BASE + e.expressID)!;
+    const [x, y, z] = other.coordinates.worldToIfc(center(e.bbox!));
+    const b = host.coordinates.worldToIfc(center(mine.bbox!));
+    expect(b[0]).toBeCloseTo(-y + 10, 3);
+    expect(b[1]).toBeCloseTo(x - 2, 3);
+    expect(b[2]).toBeCloseTo(z + 0.5, 3);
   });
 });

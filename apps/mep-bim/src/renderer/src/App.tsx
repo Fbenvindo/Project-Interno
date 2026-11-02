@@ -23,7 +23,7 @@ import { buildPlan } from "../../core/plan/build";
 import { renderSheet } from "../../core/plan/sheet";
 import { connectedPairs, runElements, runFittings, runIdOfElement, runProperties, runSegments, RUN_TYPE_BY_ID, segmentElementId, fittingElementId } from "../../core/runs";
 import { usePointsStore } from "./locacao/usePointsStore";
-import { federate, prepareLink, type LinkData, type LinkMeta } from "../../ifc/federate";
+import { alignKey, DEFAULT_ALIGN, federate, prepareLink, type LinkData, type LinkMeta } from "../../ifc/federate";
 import { openIfcMany, readIfcPath } from "./platform";
 import { boxElements, boxIndexOf, boxProperties, pullBoxes } from "../../core/conduits";
 import { defaultTitleBlockId, titleBlockById, useTitleBlocks } from "./planta/titleBlocks";
@@ -34,6 +34,9 @@ import { ParamsPanel } from "./shell/ParamsPanel";
 import { BibliotecaPanel } from "./library/BibliotecaPanel";
 import { ProgramaPanel, ProgramaTiposOnly } from "./programa/ProgramaPanel";
 import { VinculosPanel } from "./links/VinculosPanel";
+import { CoordenadasPanel } from "./coords/CoordenadasPanel";
+import { useCursor } from "./coords/cursor";
+import { EMPTY_GEOREF, effectiveGeoref, fmtCoord, toMap, type Georef } from "../../core/georef";
 import { loadFamilyLibrary } from "./library/familyLibrary";
 import { getLibraryVersion, onLibraryChange } from "../../core/library";
 import { makeCeilingResolver, makeSlabProbe } from "./locacao/ceiling";
@@ -78,6 +81,7 @@ const TOOL_HINT: Record<ToolSpec["kind"], string> = {
   biblioteca: "Importe famílias exportadas do Revit e loque-as como qualquer item da biblioteca",
   programa: "Defina as instalações por tipo de equipamento e por ambiente e gere os pontos no modelo",
   vinculos: "Modelos de outras disciplinas sobrepostos ao principal, pelas coordenadas do projeto",
+  coordenadas: "Ponto base, survey point, sistema de referência e norte do projeto",
 };
 
 export function App() {
@@ -129,6 +133,27 @@ export function App() {
     [store.links, linkData],
   );
   const model = useMemo(() => (hostModel ? federate(hostModel, fedLinks) : null), [hostModel, fedLinks]);
+  /** Coordenadas efetivas do projeto: as do IFC principal ou as informadas no projeto. */
+  const georef = useMemo(() => (hostModel ? effectiveGeoref(hostModel.georef, store.georef) : EMPTY_GEOREF), [hostModel, store.georef]);
+  const georefRef = useRef(georef);
+  georefRef.current = georef;
+  const linksRef = useRef(store.links);
+  linksRef.current = store.links;
+  // Alinhamento do vínculo (ou o survey point do projeto) mudou: reposiciona a partir do arquivo lido.
+  useEffect(() => {
+    if (!hostModel) return;
+    let changed = false;
+    const next = new Map(linkData);
+    for (const m of store.links) {
+      const d = linkData.get(m.id);
+      if (!d) continue;
+      const align = m.align ?? DEFAULT_ALIGN;
+      if (d.alignKey === alignKey(align, georef.map)) continue;
+      next.set(m.id, prepareLink(m.id, d.slot, d.raw, hostModel, align, georef.map));
+      changed = true;
+    }
+    if (changed) setLinkData(next);
+  }, [hostModel, store.links, linkData, georef]);
   const files = useProjectFiles(store, model, fileName, () => setSelection([]));
   const pointElements = useMemo(() => store.points.map(pointToElement), [store.points]);
   const runElementList = useMemo(() => (model ? runElements(store.runs, model.storeyLevels) : []), [store.runs, model]);
@@ -228,8 +253,8 @@ export function App() {
   const planSheet = useMemo(() => {
     if (!planDrawing || !sheetSettings) return null;
     const info = { ...sheetSettings.info, conteudo: sheetSettings.info.conteudo || `Instalações MEP — Planta ${sheetSettings.storey}` };
-    return renderSheet(planDrawing, sheetSettings.format, info, titleBlocks.find((t) => t.id === sheetSettings.titleBlockId) ?? null);
-  }, [planDrawing, sheetSettings, titleBlocks]);
+    return renderSheet(planDrawing, sheetSettings.format, info, titleBlocks.find((t) => t.id === sheetSettings.titleBlockId) ?? null, georef.trueNorthDeg);
+  }, [planDrawing, sheetSettings, titleBlocks, georef.trueNorthDeg]);
 
   const allSystems = useMemo(
     () =>
@@ -400,7 +425,8 @@ export function App() {
       try {
         const api = await getIfcApi();
         const raw = loadIfc(api, file.data);
-        const data = prepareLink(id, linkSlot.current++, raw, host);
+        const meta = linksRef.current.find((m) => m.id === id);
+        const data = prepareLink(id, linkSlot.current++, raw, host, meta?.align ?? DEFAULT_ALIGN, georefRef.current.map);
         setLinkData((cur) => new Map(cur).set(id, data));
         setLinkStatus((s) => {
           const { [id]: _drop, ...rest } = s;
@@ -475,8 +501,8 @@ export function App() {
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
-    const sigOf = (m: LinkMeta) => `${m.discipline}|${m.translucent}`;
-    const want = new Map(fedLinks.filter((l) => l.meta.visible).map((l) => [l.meta.id, sigOf(l.meta)]));
+    const sigOf = (m: LinkMeta, d: LinkData) => `${m.discipline}|${m.translucent}|${d.alignKey}`;
+    const want = new Map(fedLinks.filter((l) => l.meta.visible).map((l) => [l.meta.id, sigOf(l.meta, l.data)]));
     for (const [id, cur] of [...linkInScene.current]) {
       if (want.get(id) === cur.sig) continue;
       viewer.removeModelMeshes(cur.ids);
@@ -487,7 +513,7 @@ export function App() {
       const byId = new Map(l.data.elements.map((e) => [e.expressID, e.discipline]));
       const color = (id: number) => DISCIPLINE_BY_ID[l.meta.discipline !== "auto" ? l.meta.discipline : (byId.get(id) ?? "outros")].color;
       viewer.addModelMeshes(l.data.meshes, color, l.meta.translucent ? 0.3 : 1);
-      linkInScene.current.set(l.meta.id, { sig: sigOf(l.meta), ids: l.data.meshes.map((m) => m.expressID) });
+      linkInScene.current.set(l.meta.id, { sig: sigOf(l.meta, l.data), ids: l.data.meshes.map((m) => m.expressID) });
     }
   }, [fedLinks]);
   useEffect(() => {
@@ -779,6 +805,8 @@ export function App() {
             onClear={clearHighlight}
           />
         );
+      case "coordenadas":
+        return <CoordenadasPanel fromIfc={hostModel!.georef} settings={store.georef} effective={georef} onChange={store.setGeoref} />;
       case "vinculos":
         return (
           <VinculosPanel
@@ -822,6 +850,7 @@ export function App() {
             sheet={planSheet}
             fileName={fileName}
             available={planAvailable}
+            georef={georef}
           />
         );
     }
@@ -888,6 +917,7 @@ export function App() {
                     slabAt={slabAt}
                     systems={allSystems}
                     onFrame={selectAndFrame}
+                    georef={georef}
                   />
                 </div>
               )}
@@ -1040,6 +1070,7 @@ export function App() {
             <span>{TOOL_HINT[tool.kind]}</span>
           </>
         )}
+        {model && <CursorReadout georef={georef} />}
         <div className="spacer" />
         {model && (
           <span className="num">
@@ -1051,5 +1082,25 @@ export function App() {
         <span>Fundo {theme === "claro" ? "branco" : "preto"}</span>
       </footer>
     </div>
+  );
+}
+
+/** Coordenadas do cursor na planta: do projeto e, se houver survey point, do mapa (UTM). */
+function CursorReadout({ georef }: { georef: Georef }) {
+  const c = useCursor();
+  if (!c) return null;
+  const m = georef.map ? toMap(georef.map, c) : null;
+  return (
+    <>
+      <span className="sep" />
+      <span className="num" title="Coordenadas do projeto (IFC)">
+        X {fmtCoord(c[0], 2)} · Y {fmtCoord(c[1], 2)}
+      </span>
+      {m && (
+        <span className="num" title={georef.crs?.name ? `Coordenadas do mapa (${georef.crs.name})` : "Coordenadas do mapa"}>
+          · E {fmtCoord(m[0], 2)} · N {fmtCoord(m[1], 2)}
+        </span>
+      )}
+    </>
   );
 }

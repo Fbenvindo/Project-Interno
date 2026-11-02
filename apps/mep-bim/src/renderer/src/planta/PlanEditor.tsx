@@ -3,6 +3,7 @@
 // encaixe em faces de parede e cota real de teto/piso obtida por raio no modelo.
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
 import { pullBoxes } from "../../../core/conduits";
+import { setCursor } from "../coords/cursor";
 import { DISCIPLINES } from "../../../core/disciplines";
 import type { SurfaceHit } from "../../../core/placement";
 import { buildPlan, boundsOf } from "../../../core/plan/build";
@@ -239,6 +240,9 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     drag.current = { x: e.clientX, y: e.clientY, vb, moved: false };
   };
   const onPointerMove = (e: PointerEvent) => {
+    // Coordenadas do projeto do cursor (para a barra de status), na cota do piso do pavimento.
+    const pm = toModel(e.clientX, e.clientY);
+    setCursor([pm[0], pm[1], cs.worldToIfc([0, level, 0])[2]]);
     const d = drag.current;
     if (d && (e.buttons & 1 || e.buttons & 4)) {
       const r = host.current!.getBoundingClientRect();
@@ -332,7 +336,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerLeave={() => ((lastPointer.current = null), setHover(null))}
+      onPointerLeave={() => ((lastPointer.current = null), setHover(null), setCursor(null))}
       onWheel={onWheel}
       onDoubleClick={() => (handler ? handler.doubleClick?.() : fit())}
     >

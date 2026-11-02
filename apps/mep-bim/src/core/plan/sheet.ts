@@ -43,7 +43,7 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 const f2 = (v: number) => (Math.round(v * 100) / 100).toString();
 const FONT = "font-family=\"Arial, Helvetica, sans-serif\"";
 
-export function renderSheet(drawing: PlanDrawing, format: SheetFormat, info: SheetInfo, titleBlock: TitleBlock | null = null): SheetResult {
+export function renderSheet(drawing: PlanDrawing, format: SheetFormat, info: SheetInfo, titleBlock: TitleBlock | null = null, northDeg: number | null = null): SheetResult {
   const sheet = SHEETS[format];
   const { w, h, margin } = sheet;
   const frame = { x: LEFT_MARGIN, y: margin, w: w - LEFT_MARGIN - margin, h: h - 2 * margin };
@@ -95,6 +95,25 @@ export function renderSheet(drawing: PlanDrawing, format: SheetFormat, info: She
     out.push(
       `<text x="${f2(area.x + area.w / 2)}" y="${f2(captionY - 7)}" font-size="4" font-weight="bold" text-anchor="middle" ${FONT}>${esc(`PLANTA — ${drawing.storey}`)}</text>`,
       `<text x="${f2(area.x + area.w / 2)}" y="${f2(captionY - 2.5)}" font-size="2.5" text-anchor="middle" ${FONT}>${esc(`ESCALA 1:${drawing.scale} · corte a ${drawing.cutHeight.toFixed(2).replace(".", ",")} m do piso`)}</text>`,
+    );
+  }
+
+  // ---- Norte verdadeiro (ângulo a partir do +Y do projeto, anti-horário) -------------------
+  if (northDeg != null && drawing.bounds) {
+    const cx = area.x + area.w - 10;
+    const cy = area.y + 10;
+    const a = (northDeg * Math.PI) / 180;
+    // No papel, +Y do projeto é para cima; o ângulo gira no sentido anti-horário.
+    const ux = -Math.sin(a);
+    const uy = -Math.cos(a);
+    const tip: P2 = [cx + ux * 7, cy + uy * 7];
+    const tail: P2 = [cx - ux * 5, cy - uy * 5];
+    const side = (s: number): P2 => [cx + -uy * 2.2 * s - ux * 2, cy + ux * 2.2 * s - uy * 2];
+    out.push(
+      `<g id="norte"><circle cx="${f2(cx)}" cy="${f2(cy)}" r="8" fill="none" stroke="#000" stroke-width="0.25"/>`,
+      `<line x1="${f2(tail[0])}" y1="${f2(tail[1])}" x2="${f2(tip[0])}" y2="${f2(tip[1])}" stroke="#000" stroke-width="0.35"/>`,
+      `<polygon points="${[tip, side(1), [cx, cy] as P2, side(-1)].map((p) => p.map(f2).join(",")).join(" ")}" fill="#000"/>`,
+      `<text x="${f2(cx + ux * 11)}" y="${f2(cy + uy * 11)}" font-size="3.5" font-weight="bold" text-anchor="middle" dominant-baseline="central" ${FONT}>N</text></g>`,
     );
   }
 

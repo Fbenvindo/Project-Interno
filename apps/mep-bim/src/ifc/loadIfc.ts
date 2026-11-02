@@ -13,6 +13,9 @@ import {
   IFCRELNESTS,
   IFCSPACE,
   IFCUNITASSIGNMENT,
+  IFCMAPCONVERSION,
+  IFCSITE,
+  IFCGEOMETRICREPRESENTATIONCONTEXT,
   type FlatMesh,
   type IfcAPI,
 } from "web-ifc";
@@ -23,6 +26,7 @@ import { deriveLength, deriveSize, systemsFromProps } from "../core/quantities";
 import { chainSegments, cutMesh, type P2 } from "../core/plan/section";
 import { ccw, polygonArea, type Space } from "../core/spaces";
 import type { BBox, ElementInfo, PropertyGroup, PropertyValue } from "../core/types";
+import { compoundToDegrees, EMPTY_GEOREF, type Georef } from "../core/georef";
 
 export interface ElementMesh {
   expressID: number;
@@ -49,6 +53,8 @@ export interface LoadedModel {
   spaces: Space[];
   /** Conversão entre coordenadas da cena e do IFC. */
   coordinates: CoordinateSystem;
+  /** Ponto base (IfcSite), survey point (IfcMapConversion), sistema de referência e norte verdadeiro. */
+  georef: Georef;
   systems: string[];
   getProperties(expressID: number): PropertyGroup[];
   close(): void;
@@ -300,10 +306,88 @@ export function loadIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn =
     storeyLevels,
     spaces,
     coordinates,
+    georef: safeGeoref(),
     systems: [...systemNames].sort((a, b) => a.localeCompare(b, "pt-BR")),
     getProperties,
     close: () => api.CloseModel(modelID),
   };
+
+  function safeGeoref(): Georef {
+    try {
+      return readGeoref();
+    } catch (e) {
+      console.warn("Georreferenciamento ilegível:", e);
+      return EMPTY_GEOREF;
+    }
+  }
+
+  /** IfcMapConversion + IfcProjectedCRS (IFC4), IfcSite (posição, lat/long) e TrueNorth do contexto. */
+  function readGeoref(): Georef {
+    const raw = (v: any): unknown => (v && typeof v === "object" ? ("_representationValue" in v ? v._representationValue : "value" in v ? v.value : v) : v);
+    const n = (v: unknown) => {
+      if (v == null) return null;
+      const x = Number(raw(v));
+      return Number.isFinite(x) ? x : null;
+    };
+    let map: Georef["map"] = null;
+    let crs: Georef["crs"] = null;
+    for (const id of idsOf(IFCMAPCONVERSION)) {
+      const mc = line(id, true);
+      const target = mc.TargetCRS;
+      // Sem MapUnit no sistema do mapa, os valores estão na unidade do projeto.
+      const mapUnit = target?.MapUnit;
+      const k = mapUnit ? (val(mapUnit.Prefix) === "MILLI" ? 1e-3 : 1) : unitToMeters;
+      map = {
+        eastings: (n(mc.Eastings) ?? 0) * k,
+        northings: (n(mc.Northings) ?? 0) * k,
+        orthogonalHeight: (n(mc.OrthogonalHeight) ?? 0) * k,
+        xAxisAbscissa: n(mc.XAxisAbscissa) ?? 1,
+        xAxisOrdinate: n(mc.XAxisOrdinate) ?? 0,
+        scale: n(mc.Scale) ?? 1,
+      };
+      if (target) {
+        crs = {
+          name: String(val(target.Name) ?? ""),
+          description: val(target.Description) ?? null,
+          geodeticDatum: val(target.GeodeticDatum) ?? null,
+          mapProjection: val(target.MapProjection) ?? null,
+          mapZone: val(target.MapZone) ?? null,
+        };
+      }
+      break;
+    }
+    let site: Georef["site"] = null;
+    for (const id of idsOf(IFCSITE)) {
+      const st = line(id, true);
+      const rel = st.ObjectPlacement?.RelativePlacement;
+      const loc = rel?.Location?.Coordinates?.map((c: unknown) => (Number(val(c)) || 0) * unitToMeters) ?? [0, 0, 0];
+      const ref = rel?.RefDirection?.DirectionRatios?.map((c: unknown) => Number(val(c)) || 0);
+      const rotationDeg = ref ? (Math.atan2(ref[1] ?? 0, ref[0] ?? 1) * 180) / Math.PI : 0;
+      const ang = (a: any) => {
+        const list = Array.isArray(a) ? a : Array.isArray(a?.value) ? a.value : null;
+        return list ? compoundToDegrees(list.map((x: unknown) => Number(raw(x)))) : null;
+      };
+      site = {
+        latitude: ang(st.RefLatitude),
+        longitude: ang(st.RefLongitude),
+        elevation: n(st.RefElevation) != null ? n(st.RefElevation)! * unitToMeters : null,
+        location: [loc[0] ?? 0, loc[1] ?? 0, loc[2] ?? 0],
+        rotationDeg,
+      };
+      break;
+    }
+    let trueNorthDeg: number | null = null;
+    for (const id of idsOf(IFCGEOMETRICREPRESENTATIONCONTEXT)) {
+      const ctx = line(id, true);
+      const tn = ctx.TrueNorth?.DirectionRatios?.map((c: unknown) => Number(val(c)) || 0);
+      if (tn && (tn[0] || tn[1])) {
+        // Norte verdadeiro: direção no plano XY; ângulo a partir de +Y, anti-horário.
+        trueNorthDeg = (Math.atan2(-tn[0], tn[1]) * 180) / Math.PI;
+        break;
+      }
+    }
+    return { map, crs, site, trueNorthDeg };
+  }
 
   function readLengthUnit(): number {
     const prefixes: Record<string, number> = { MILLI: 1e-3, CENTI: 1e-2, DECI: 1e-1, KILO: 1e3 };

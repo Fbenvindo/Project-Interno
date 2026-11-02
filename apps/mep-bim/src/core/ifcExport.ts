@@ -8,6 +8,7 @@ import type { Circuit } from "./circuits";
 import { derivedGuid, runFittings, runSegments, RUN_TYPE_BY_ID, segmentBasis, storeyProbeY, type Run } from "./runs";
 import { boxSizeLabel, INSTALL_LABEL, pullBoxes } from "./conduits";
 import { boxLabel, modulesText } from "./devices";
+import { degreesToCompound, type Georef } from "./georef";
 import type { Vec3 } from "./types";
 
 class StepWriter {
@@ -42,6 +43,13 @@ export function num(v: number): string {
   return s.includes(".") ? s : `${s}.`;
 }
 
+/** Número real STEP com precisão total (direções e coordenadas do mapa). */
+function numP(v: number): string {
+  const s = String(Object.is(v, -0) ? 0 : v);
+  if (s.includes("e")) return v.toExponential().replace("e", "E").replace(/^(-?\d+)E/, "$1.E");
+  return s.includes(".") ? s : `${s}.`;
+}
+
 /** String STEP: aspas duplicadas e caracteres fora do ASCII como \X2\hhhh\X0\. */
 export function str(s: string | null | undefined): string {
   if (s == null) return "$";
@@ -63,9 +71,11 @@ export interface ExportOptions {
   runs?: Run[];
   /** Circuitos: exportados como IfcDistributionCircuit com seus pontos e trechos. */
   circuits?: Circuit[];
+  /** Georreferenciamento do projeto: gravado igual ao do modelo de origem (survey point, sistema, norte, lat/long). */
+  georef?: Georef;
 }
 
-export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs, runs = [], circuits = [] }: ExportOptions): string {
+export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs, runs = [], circuits = [], georef }: ExportOptions): string {
   const w = new StepWriter();
   const MM = 1000;
   const pt = ([x, y, z]: Vec3) => w.add(`IFCCARTESIANPOINT((${num(x)},${num(y)},${num(z)}))`);
@@ -76,11 +86,28 @@ export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs,
   };
 
   const units = w.add(`IFCUNITASSIGNMENT(${list([w.add("IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.)"), w.add("IFCSIUNIT(*,.PLANEANGLEUNIT.,$,.RADIAN.)")])})`);
-  const context = w.add(`IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,${ref(w.add(`IFCAXIS2PLACEMENT3D(${ref(pt([0, 0, 0]))},$,$)`))},$)`);
+  // Norte verdadeiro (ângulo a partir de +Y, anti-horário) na direção do contexto.
+  const tn = georef?.trueNorthDeg;
+  const trueNorth = tn != null && tn !== 0 ? w.add(`IFCDIRECTION((${numP(-Math.sin((tn * Math.PI) / 180))},${numP(Math.cos((tn * Math.PI) / 180))}))`) : null;
+  const context = w.add(`IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,${ref(w.add(`IFCAXIS2PLACEMENT3D(${ref(pt([0, 0, 0]))},$,$)`))},${ref(trueNorth)})`);
+  // Survey point / coordenadas compartilhadas (IFC4): mesmo do modelo de origem, em metros.
+  if (georef?.map) {
+    const m = georef.map;
+    const meter = w.add("IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)");
+    const c = georef.crs;
+    const crs = w.add(
+      `IFCPROJECTEDCRS(${str(c?.name || "Sistema do projeto")},${str(c?.description ?? null)},${str(c?.geodeticDatum ?? null)},$,${str(c?.mapProjection ?? null)},${str(c?.mapZone ?? null)},${ref(meter)})`,
+    );
+    w.add(`IFCMAPCONVERSION(${ref(context)},${ref(crs)},${numP(m.eastings)},${numP(m.northings)},${numP(m.orthogonalHeight)},${numP(m.xAxisAbscissa)},${numP(m.xAxisOrdinate)},${numP(m.scale)})`);
+  }
   const projectName = `Locação MEP${modelName ? ` - ${modelName.replace(/\.ifc$/i, "")}` : ""}`;
   const project = w.add(`IFCPROJECT('${newGuid()}',$,${str(projectName)},$,$,$,$,${list([context])},${ref(units)})`);
   const sitePlacement = placement([0, 0, 0]);
-  const site = w.add(`IFCSITE('${newGuid()}',$,'Terreno',$,$,${ref(sitePlacement)},$,$,.ELEMENT.,$,$,$,$,$)`);
+  const ll = (deg: number | null | undefined) => (deg == null ? "$" : `(${degreesToCompound(deg).join(",")})`);
+  const elev = georef?.site?.elevation;
+  const site = w.add(
+    `IFCSITE('${newGuid()}',$,'Terreno',$,$,${ref(sitePlacement)},$,$,.ELEMENT.,${ll(georef?.site?.latitude)},${ll(georef?.site?.longitude)},${elev == null ? "$" : num(elev * MM)},$,$)`,
+  );
   const buildingPlacement = placement([0, 0, 0], null, null, sitePlacement);
   const building = w.add(`IFCBUILDING('${newGuid()}',$,'Edifício',$,$,${ref(buildingPlacement)},$,$,.ELEMENT.,$,$,$)`);
   w.add(`IFCRELAGGREGATES('${newGuid()}',$,$,$,${ref(project)},${list([site])})`);
