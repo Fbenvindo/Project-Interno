@@ -32,6 +32,8 @@ interface Props {
   selection: number[];
   elementById: Map<number, ElementInfo>;
   onPick: (id: number | null, additive: boolean) => void;
+  /** Janela de seleção: ids encontrados; additive = somar à seleção atual (Ctrl/Shift). */
+  onPickMany?: (ids: number[], additive: boolean) => void;
   /** Fundo preto: a planta é desenhada invertida (traço claro). */
   dark?: boolean;
   /** Muda a cada pedido de enquadramento vindo de fora (faixa de ferramentas). */
@@ -73,7 +75,7 @@ function primsToSvg(prims: Prim[]): string {
     .join("");
 }
 
-export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick, dark, fitSignal, planTool, viewDef = null, projectDisciplines = [] }: Props) {
+export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick, onPickMany, dark, fitSignal, planTool, viewDef = null, projectDisciplines = [] }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const cs = model.coordinates;
   const level = model.storeyLevels.find((s) => s.name === storey)?.level ?? 0;
@@ -395,8 +397,8 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === "z") return (e.preventDefault(), e.shiftKey ? storeRef.current.redo() : storeRef.current.undo());
       if (mod && e.key.toLowerCase() === "y") return (e.preventDefault(), storeRef.current.redo());
+      // Esc é tratado pelo app (encerra o comando e volta a Selecionar).
       if (e.key === "Enter") (e.preventDefault(), toolRef.current?.finish());
-      else if (e.key === "Escape") toolRef.current?.cancel();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -407,8 +409,16 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   // ---- Ponteiro ---------------------------------------------------------------------------------
   const drag = useRef<{ x: number; y: number; vb: ViewBox; moved: boolean; box: boolean; start: P2 } | null>(null);
   const raf = useRef(0);
+  // Selecionar (sem comando): clique seleciona, arrastar desenha a janela de seleção.
+  // Botão do meio (ou, durante comandos de desenho/locação, o esquerdo) arrasta a vista.
+  const selectMode = !planTool && !handler;
   const onPointerDown = (e: PointerEvent) => {
-    drag.current = { x: e.clientX, y: e.clientY, vb, moved: false, box: !!planTool?.selecting && e.button === 0, start: toModel(e.clientX, e.clientY) };
+    if (edit) return;
+    if (e.button === 1) e.preventDefault();
+    const box = e.button === 0 && (planTool ? planTool.selecting : selectMode);
+    drag.current = { x: e.clientX, y: e.clientY, vb, moved: false, box, start: toModel(e.clientX, e.clientY) };
+    // O soltar do botão volta para cá mesmo sobre botões e sobreposições.
+    host.current?.setPointerCapture?.(e.pointerId);
   };
   const onPointerMove = (e: PointerEvent) => {
     // Coordenadas do projeto do cursor (para a barra de status), na cota do piso do pavimento.
@@ -420,7 +430,10 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       const dx = e.clientX - d.x;
       const dy = e.clientY - d.y;
       if (Math.hypot(dx, dy) > 4) d.moved = true;
-      if (d.moved && d.box && e.buttons & 1) setBoxRect({ a: d.start, b: pm });
+      if (d.moved && d.box) {
+        if (e.buttons & 1) setBoxRect({ a: d.start, b: pm });
+        return;
+      }
       else if (d.moved) setVb({ ...d.vb, x: d.vb.x - (dx / r.width) * d.vb.w, y: d.vb.y - (dy / r.height) * d.vb.h });
       return;
     }
@@ -452,6 +465,12 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       planTool.click(r.p, { id: hitAt(e.clientX, e.clientY, raw), edge: edgeAt(raw), shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
       return;
     }
+    if (d?.box && d.moved) {
+      const b = toModel(e.clientX, e.clientY);
+      setBoxRect(null);
+      onPickMany?.(idsInBox(d.start, b, b[0] < d.start[0]), e.ctrlKey || e.metaKey || e.shiftKey);
+      return;
+    }
     if (!d || d.moved || e.button !== 0) return;
     const h = isSection ? null : viewer.getPlacementHandler();
     if (h) {
@@ -461,9 +480,24 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       requestAnimationFrame(updateHover);
       return;
     }
-    const target = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-id]");
-    const id = target ? Number(target.getAttribute("data-id")) : NaN;
-    onPick(Number.isFinite(id) ? id : null, e.ctrlKey || e.metaKey || e.shiftKey);
+    const id = hitAt(e.clientX, e.clientY, toModel(e.clientX, e.clientY));
+    onPick(id, e.ctrlKey || e.metaKey || e.shiftKey);
+  };
+
+  // ---- Edição de texto no local (duplo clique num texto, ou comando Texto) -----------------------
+  const [edit, setEdit] = useState<{ id: number; at: P2; value: string } | null>(null);
+  const textEdit = planTool?.textInput ?? null;
+  const editDraftText = (clientX: number, clientY: number): boolean => {
+    const id = hitAt(clientX, clientY, toModel(clientX, clientY));
+    const d = id != null ? store.drafts.find((x) => x.id === id) : undefined;
+    if (!d || d.kind !== "texto") return false;
+    setEdit({ id: d.id, at: d.p, value: d.text });
+    return true;
+  };
+  const toScreen = (p: P2) => {
+    const el = host.current;
+    if (!el) return { left: 0, top: 0 };
+    return { left: ((p[0] - vb.x) / vb.w) * el.clientWidth, top: ((-p[1] - vb.y) / vb.h) * el.clientHeight };
   };
   const onWheel = (e: WheelEvent) => {
     const [mx, my] = toModel(e.clientX, e.clientY);
@@ -538,13 +572,6 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
           const k = 14 * px;
           out += `<line x1="${f3(x - k)}" y1="${f3(-y)}" x2="${f3(x + k)}" y2="${f3(-y)}" stroke="#0ea5e9" stroke-width="1" vector-effect="non-scaling-stroke"/><line x1="${f3(x)}" y1="${f3(-y - k)}" x2="${f3(x)}" y2="${f3(-y + k)}" stroke="#0ea5e9" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
         }
-        if (boxRect) {
-          const crossing = boxRect.b[0] < boxRect.a[0];
-          const x = Math.min(boxRect.a[0], boxRect.b[0]);
-          const y = -Math.max(boxRect.a[1], boxRect.b[1]);
-          const color = crossing ? "#16a34a" : "#2563eb";
-          out += `<rect x="${f3(x)}" y="${f3(y)}" width="${f3(Math.abs(boxRect.b[0] - boxRect.a[0]))}" height="${f3(Math.abs(boxRect.b[1] - boxRect.a[1]))}" fill="${color}" fill-opacity="0.08" stroke="${color}" stroke-width="1.2" ${crossing ? 'stroke-dasharray="6 4"' : ""} vector-effect="non-scaling-stroke"/>`;
-        }
         return out;
       })()
     : "";
@@ -552,14 +579,18 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   return (
     <div
       ref={host}
-      className={`plan-editor ${handler || planTool ? "editing" : ""} ${planTool?.selecting ? "selecting" : ""} ${dark ? "dark" : ""}`}
+      className={`plan-editor ${handler || planTool ? "editing" : ""} ${planTool?.selecting || selectMode ? "selecting" : ""} ${dark ? "dark" : ""}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerLeave={() => ((lastPointer.current = null), setHover(null), setCursor(null), setToolCursor(null))}
       onWheel={onWheel}
       onContextMenu={(e) => planTool && e.preventDefault()}
-      onDoubleClick={() => (planTool ? planTool.finish() : handler ? handler.doubleClick?.() : fit())}
+      onDoubleClick={(e) => {
+        if (planTool) return planTool.finish();
+        if (handler) return handler.doubleClick?.();
+        if (!editDraftText(e.clientX, e.clientY)) fit();
+      }}
     >
       <style>{highlight}</style>
       <svg id="editor-planta" viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} width="100%" height="100%">
@@ -578,7 +609,58 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
           />
         )}
         <g pointerEvents="none" dangerouslySetInnerHTML={{ __html: toolSvg }} />
+        {boxRect &&
+          (() => {
+            const crossing = boxRect.b[0] < boxRect.a[0];
+            const color = crossing ? "#16a34a" : "#2563eb";
+            return (
+              <rect
+                pointerEvents="none"
+                x={Math.min(boxRect.a[0], boxRect.b[0])}
+                y={-Math.max(boxRect.a[1], boxRect.b[1])}
+                width={Math.abs(boxRect.b[0] - boxRect.a[0])}
+                height={Math.abs(boxRect.b[1] - boxRect.a[1])}
+                fill={color}
+                fillOpacity={0.08}
+                stroke={color}
+                strokeWidth={1.2}
+                strokeDasharray={crossing ? "6 4" : undefined}
+                vectorEffect="non-scaling-stroke"
+              />
+            );
+          })()}
       </svg>
+      {(edit || textEdit) &&
+        (() => {
+          const at = edit ? edit.at : textEdit!.at;
+          const pos = toScreen(at);
+          const commit = (v: string) => {
+            if (edit) {
+              if (v.trim() && v !== edit.value) store.setDrafts((l) => l.map((x) => (x.id === edit.id && x.kind === "texto" ? { ...x, text: v } : x)));
+              setEdit(null);
+            } else textEdit!.onCommit(v);
+          };
+          const cancel = () => (edit ? setEdit(null) : textEdit!.onCancel());
+          return (
+            <input
+              key={edit ? `e${edit.id}` : `t${at[0]},${at[1]}`}
+              className="inline-text"
+              style={{ left: pos.left, top: pos.top }}
+              autoFocus
+              defaultValue={edit ? edit.value : textEdit!.value}
+              placeholder="Digite o texto e tecle Enter"
+              onPointerDown={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") commit((e.target as HTMLInputElement).value);
+                else if (e.key === "Escape") cancel();
+              }}
+              onBlur={(e) => (edit ? commit(e.target.value) : undefined)}
+            />
+          );
+        })()}
       {viewDef && (
         <div className={`view-badge ${viewDef.section}`}>
           {viewDef.section === "documentacao" ? "Documentação" : "Trabalho"} · {viewDef.name} · 1:{viewDef.scale}

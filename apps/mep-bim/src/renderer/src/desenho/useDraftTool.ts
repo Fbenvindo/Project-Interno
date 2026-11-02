@@ -135,6 +135,8 @@ interface Args {
   draftView: string | null;
   /** Altura de corte da planta ativa (ampliações herdam). */
   cutHeight: number;
+  /** Comando terminado: voltar a Selecionar. */
+  onDone: () => void;
 }
 
 export interface DraftOptions {
@@ -164,6 +166,8 @@ export function useDraftTool(a: Args) {
   const [clipVersion, setClipVersion] = useState(0);
   /** Vista aguardando a escolha da seção (Trabalho ou Documentação). */
   const [pending, setPending] = useState<ViewDef | null>(null);
+  /** Comando Texto: posição onde o texto está sendo digitado. */
+  const [textAt, setTextAt] = useState<P2 | null>(null);
   const argsRef = useRef(a);
   argsRef.current = a;
 
@@ -184,6 +188,7 @@ export function useDraftTool(a: Args) {
     setMessage(null);
     setPhase("selecionar");
     setPending(null);
+    setTextAt(null);
     if (NEEDS_SELECTION.has(cmd)) argsRef.current.setSelection(editable(argsRef.current.selection));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmd, n]);
@@ -440,6 +445,7 @@ export function useDraftTool(a: Args) {
 
   // ---- Cliques ---------------------------------------------------------------------------
   const onCreateClick = (p: P2) => {
+    if (cmd === "texto") return setTextAt(p);
     const last = pts[pts.length - 1];
     if (last && dist(last, p) < 1e-6) return; // duplo clique: ignora o ponto repetido
     const next = [...pts, p];
@@ -556,13 +562,31 @@ export function useDraftTool(a: Args) {
   };
 
   const tool: PlanTool = {
-    prompt: promptFor(cmd, phase, pts.length, count),
+    prompt: textAt ? "Texto: digite e tecle Enter para gravar · Esc cancela" : promptFor(cmd, phase, pts.length, count),
     question,
+    textInput: textAt
+      ? {
+          at: textAt,
+          value: "",
+          onCommit: (v) => {
+            if (v.trim()) {
+              addDraft({ id: newDraftId(), ...base, kind: "texto", p: textAt, text: v, size: opts.textSize, rot: (opts.textRot * Math.PI) / 180 } as DraftEntity);
+            }
+            setTextAt(null);
+            a.onDone();
+          },
+          onCancel: () => {
+            setTextAt(null);
+            a.onDone();
+          },
+        }
+      : null,
     selecting: !pending && NEEDS_SELECTION.has(cmd) && phase !== "executar" && phase !== "confirmar",
     snap: !(NEEDS_SELECTION.has(cmd) && phase !== "executar") && !(cmd === "estender"),
     anchor: pts[pts.length - 1] ?? null,
     preview(cursor) {
       const out: Prim[] = [];
+      if (cmd === "texto" && textAt) return out;
       if (isCreateCmd(cmd)) {
         const p = cursor ? [...pts, cursor] : pts;
         const e = build(p);
@@ -721,7 +745,7 @@ function promptFor(cmd: DraftCmd, phase: Phase, k: number, count: number): strin
     retangulo: ["primeiro canto", "canto oposto"],
     triangulo: ["primeiro vértice", "segundo vértice", "terceiro vértice"],
     poligonal: ["primeiro ponto", "próximo ponto", "próximo ponto (Enter termina; clique no primeiro ponto fecha)"],
-    texto: ["ponto de inserção (o texto e a altura ficam no painel)"],
+    texto: ["clique onde o texto começa (a altura e a rotação ficam no painel)"],
     "cota-ortogonal": ["primeiro ponto", "segundo ponto", "posição da linha de cota (acima/abaixo: horizontal; ao lado: vertical)"],
     "cota-inclinada": ["primeiro ponto", "segundo ponto", "posição da linha de cota"],
     "cota-angular": ["vértice do ângulo", "ponto na primeira direção", "ponto na segunda direção", "posição do arco de cota"],

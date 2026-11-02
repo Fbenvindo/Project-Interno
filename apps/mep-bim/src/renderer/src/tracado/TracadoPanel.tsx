@@ -418,7 +418,9 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
       const mod = e.ctrlKey || e.metaKey;
       const L = live.current;
       if (e.key === "Escape") {
-        if (L.draft.length) setDraft([]);
+        // Esc encerra: o trecho em andamento (2+ vértices) é gravado; o app volta a Selecionar.
+        if (L.draft.length >= 2) finishRun(L.draft);
+        else if (L.draft.length) setDraft([]);
         else if (L.pickingDestination) setPickingDestination(false);
         else setDrawing(false);
         return;

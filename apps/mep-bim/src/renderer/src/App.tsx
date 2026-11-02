@@ -43,7 +43,7 @@ import { CoordenadasPanel } from "./coords/CoordenadasPanel";
 import { useCursor } from "./coords/cursor";
 import { EMPTY_GEOREF, effectiveGeoref, fmtCoord, toMap, type Georef } from "../../core/georef";
 import { loadFamilyLibrary } from "./library/familyLibrary";
-import { useDraftTool, CMD_LABEL } from "./desenho/useDraftTool";
+import { useDraftTool, CMD_LABEL, isCreateCmd } from "./desenho/useDraftTool";
 import { DesenhoPanel } from "./desenho/DesenhoPanel";
 import { CoordinateSystem } from "../../core/math";
 import { getLibraryVersion, onLibraryChange } from "../../core/library";
@@ -79,7 +79,7 @@ function viewDirectionFor(points: PlacedPoint[]): Vec3 | undefined {
 }
 
 const TOOL_HINT: Record<ToolSpec["kind"], string> = {
-  propriedades: "Clique para selecionar · Ctrl+clique para somar · duplo clique para enquadrar",
+  propriedades: "Clique: selecionar (Ctrl soma) · arrastar →: só o que fica inteiro na janela · arrastar ←: tudo o que ela toca · botão do meio: mover · 3D: botão direito gira · duplo clique em texto: editar · Esc: limpar",
   locacao: "Clique na planta para locar · Esc cancela",
   tracado: "Clique para inserir vértices · duplo clique ou Enter termina · Esc cancela",
   circuitos: "Selecione pontos na vista e atribua ao circuito",
@@ -325,6 +325,7 @@ export function App() {
   }, []);
   useEffect(() => {
     viewerRef.current!.onPick = pick;
+    viewerRef.current!.onPickMany = (ids, additive) => setSelection((cur) => (additive ? [...new Set([...cur, ...ids])] : ids));
   }, [pick]);
 
   // Selecionar um segmento destaca o trecho inteiro.
@@ -932,8 +933,33 @@ export function App() {
     onCreateView: openViewDef,
     draftView,
     cutHeight: activeViewDef?.cutHeight ?? editorCut,
+    onDone: () => chooseTool({ kind: "propriedades" }),
   });
   const planTool = tool.kind === "desenho" ? draft.tool : null;
+
+  // Esc: encerra o comando em andamento (locar, traçar, desenhar, modificar) e volta a Selecionar;
+  // já em Selecionar, limpa a seleção. Em campos de texto, o Esc é do campo.
+  const escRef = useRef<() => void>(() => {});
+  escRef.current = () => {
+    if (tool.kind === "desenho") {
+      if (isCreateCmd(tool.cmd)) draft.tool.finish(); // poligonal em andamento é gravada
+      return chooseTool({ kind: "propriedades" });
+    }
+    if (tool.kind === "locacao" || tool.kind === "tracado") return chooseTool({ kind: "propriedades" });
+    setSelection([]);
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      // Deixa os painéis tratarem o Esc antes (ex.: o traçado grava o trecho em andamento).
+      setTimeout(() => escRef.current(), 0);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const pickMany = useCallback((ids: number[], additive: boolean) => setSelection((cur) => (additive ? [...new Set([...cur, ...ids])] : ids)), []);
 
   const disc = toolDisc ? DISCIPLINE_TABS[toolDisc] : null;
   const selectedOne = selection.length === 1 ? (elementById.get(selection[0]) ?? null) : null;
@@ -1344,6 +1370,7 @@ export function App() {
                 selection={selection}
                 elementById={elementById}
                 onPick={pick}
+                onPickMany={pickMany}
                 dark={theme === "escuro"}
                 fitSignal={fitSignal}
                 planTool={planTool}
@@ -1371,6 +1398,11 @@ export function App() {
                 moveMode={moveMode}
                 viewports={sheetRender.result.viewports}
                 onMoveViewport={moveViewport}
+                textOf={(id) => {
+                  const d = store.drafts.find((x) => x.id === id);
+                  return d?.kind === "texto" ? d.text : null;
+                }}
+                onEditText={(id, text) => store.setDrafts((l) => l.map((x) => (x.id === id && x.kind === "texto" ? { ...x, text } : x)))}
                 onOpenViewport={(id) => {
                   const v = resolveView(id);
                   if (v) openViewDef(v);

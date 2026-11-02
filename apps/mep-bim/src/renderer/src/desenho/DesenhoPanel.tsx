@@ -131,10 +131,7 @@ export function DesenhoPanel({ cmd, ctl, store, selection, setSelection, hasClip
 
       {cmd === "texto" && (
         <div className="form-grid">
-          <label className="span2">
-            Texto
-            <input value={opts.text} onChange={(e) => setOpts({ ...opts, text: e.target.value })} autoFocus />
-          </label>
+          <p className="muted small span2">Clique na planta onde o texto começa, digite no próprio local e tecle Enter (Esc desiste). Para editar um texto depois, dê duplo clique nele.</p>
           <label>
             Altura no papel (mm)
             <input type="number" step={0.5} min={1} value={opts.textSize} onChange={(e) => setOpts({ ...opts, textSize: Math.max(0.5, Number(e.target.value) || 2.5) })} />

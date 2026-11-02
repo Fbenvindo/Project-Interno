@@ -122,6 +122,18 @@ Na aba **Planta 2D**, escolha o pavimento, a altura de corte (padrão 1,20 m aci
 
 A simbologia é um ponto de partida: confira com o padrão gráfico do escritório antes de emitir pranchas.
 
+### Selecionar (comando padrão), janela de seleção e Esc
+
+Fora de qualquer comando, o app está sempre em **Selecionar**, em todas as vistas: planta (Trabalho ou Documentação), ampliações, cortes, 3D e folhas.
+- **Clique** num elemento seleciona; Ctrl/Shift+clique soma ou tira; clique numa área livre limpa.
+- **Arrastar** a partir de qualquer ponto desenha uma **janela de seleção**:
+  - **da esquerda para a direita** (linha contínua, azul): só os elementos que ficam **inteiros** dentro da janela;
+  - **da direita para a esquerda** (tracejada, verde): **todos** os que a janela toca, mesmo parcialmente.
+- **Botão do meio** desloca a vista e a **roda** dá zoom. No 3D, o **botão direito** (ou Shift + botão do meio) gira a vista.
+- **Esc** encerra o comando em andamento e volta a Selecionar. Vale para texto, linha, poligonal (gravada como está), copiar/mover, locar e traçar (o trecho em andamento é gravado). Em Selecionar, o Esc limpa a seleção.
+- **Texto:** clique onde o texto começa, digite no próprio local e tecle **Enter**. O texto é gravado e o app volta a Selecionar.
+- **Duplo clique num texto** (na planta, no corte ou na folha) abre a edição no local; Enter grava e Esc desiste.
+
 ### IFC por disciplina, vistas de Trabalho e de Documentação, folhas
 
 **Um IFC por disciplina.** Cada projeto entrega o IFC da sua disciplina (elétrica, hidráulica, climatização…). Marque as **disciplinas do projeto** no topo do navegador *Vistas e folhas*:

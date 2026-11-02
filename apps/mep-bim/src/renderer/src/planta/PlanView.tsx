@@ -13,18 +13,23 @@ interface Props {
   onMoveViewport?: (viewId: string, center: [number, number]) => void;
   /** Duplo clique numa vista da folha: abrir a vista. */
   onOpenViewport?: (viewId: string) => void;
+  /** Texto editável (anotação) pelo id, ou null; e a gravação do texto editado. */
+  textOf?: (id: number) => string | null;
+  onEditText?: (id: number, text: string) => void;
 }
 
 type ViewBox = { x: number; y: number; w: number; h: number };
 
 /** Prancha interativa: roda do mouse = zoom, arrastar = deslocar, clique = selecionar. */
-export function PlanView({ sheet, selection, onSelect, fitSignal, moveMode, viewports = [], onMoveViewport, onOpenViewport }: Props) {
+export function PlanView({ sheet, selection, onSelect, fitSignal, moveMode, viewports = [], onMoveViewport, onOpenViewport, textOf, onEditText }: Props) {
+  const [box, setBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const [edit, setEdit] = useState<{ id: number; left: number; top: number; value: string } | null>(null);
   /** Vista sendo arrastada e deslocamento atual (mm da folha). */
   const [dragVp, setDragVp] = useState<{ id: string; dx: number; dy: number } | null>(null);
   const vpDrag = useRef<{ id: string; x: number; y: number } | null>(null);
   const host = useRef<HTMLDivElement>(null);
   const [vb, setVb] = useState<ViewBox>({ x: 0, y: 0, w: sheet.width, h: sheet.height });
-  const drag = useRef<{ x: number; y: number; vb: ViewBox; moved: boolean } | null>(null);
+  const drag = useRef<{ x: number; y: number; vb: ViewBox; moved: boolean; box?: boolean } | null>(null);
 
   const fit = useCallback(() => {
     const el = host.current;
@@ -74,7 +79,9 @@ export function PlanView({ sheet, selection, onSelect, fitSignal, moveMode, view
         return;
       }
     }
-    drag.current = { x: e.clientX, y: e.clientY, vb, moved: false };
+    if (e.button === 1) e.preventDefault();
+    // Selecionar: o botão esquerdo faz janela de seleção; o do meio desloca a folha.
+    drag.current = { x: e.clientX, y: e.clientY, vb, moved: false, box: e.button === 0 };
     (e.target as Element).setPointerCapture?.(e.pointerId);
   };
   const onPointerMove = (e: PointerEvent) => {
@@ -89,6 +96,11 @@ export function PlanView({ sheet, selection, onSelect, fitSignal, moveMode, view
     const dx = e.clientX - d.x;
     const dy = e.clientY - d.y;
     if (Math.hypot(dx, dy) > 3) d.moved = true;
+    if (d.moved && d.box) {
+      const r0 = host.current!.getBoundingClientRect();
+      setBox({ x0: d.x - r0.left, y0: d.y - r0.top, x1: e.clientX - r0.left, y1: e.clientY - r0.top });
+      return;
+    }
     if (d.moved) setVb({ ...d.vb, x: d.vb.x - (dx / r.width) * d.vb.w, y: d.vb.y - (dy / r.height) * d.vb.h });
   };
   const onPointerUp = (e: PointerEvent) => {
@@ -104,7 +116,25 @@ export function PlanView({ sheet, selection, onSelect, fitSignal, moveMode, view
     }
     const d = drag.current;
     drag.current = null;
-    if (!d || d.moved) return;
+    if (d?.box && d.moved) {
+      setBox(null);
+      const [minX, maxX] = [Math.min(d.x, e.clientX), Math.max(d.x, e.clientX)];
+      const [minY, maxY] = [Math.min(d.y, e.clientY), Math.max(d.y, e.clientY)];
+      const crossing = e.clientX < d.x;
+      // Extensão na tela de cada elemento (todas as suas partes) contra a janela.
+      const ext = new Map<number, [number, number, number, number]>();
+      host.current!.querySelectorAll<SVGGraphicsElement>("#prancha [data-id]").forEach((el) => {
+        const id = Number(el.getAttribute("data-id"));
+        if (!Number.isFinite(id)) return;
+        const r = el.getBoundingClientRect();
+        const b = ext.get(id);
+        ext.set(id, b ? [Math.min(b[0], r.left), Math.min(b[1], r.top), Math.max(b[2], r.right), Math.max(b[3], r.bottom)] : [r.left, r.top, r.right, r.bottom]);
+      });
+      const ids = [...ext].filter(([, b]) => (crossing ? b[0] <= maxX && b[2] >= minX && b[1] <= maxY && b[3] >= minY : b[0] >= minX && b[2] <= maxX && b[1] >= minY && b[3] <= maxY)).map(([id]) => id);
+      onSelect(ids, e.ctrlKey || e.metaKey || e.shiftKey);
+      return;
+    }
+    if (!d || d.moved || e.button !== 0) return;
     const target = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-id]");
     const id = target ? Number(target.getAttribute("data-id")) : null;
     onSelect(id != null && Number.isFinite(id) ? [id] : [], e.ctrlKey || e.metaKey || e.shiftKey);
@@ -123,12 +153,22 @@ export function PlanView({ sheet, selection, onSelect, fitSignal, moveMode, view
   return (
     <div
       ref={host}
-      className="plan-view"
+      className={`plan-view ${moveMode ? "" : "selecting"}`}
       onWheel={onWheel}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onDoubleClick={(e) => {
+        // Duplo clique num texto de anotação: edição no local.
+        const t = document.elementFromPoint(e.clientX, e.clientY)?.closest("text[data-id]");
+        const tid = t ? Number(t.getAttribute("data-id")) : NaN;
+        const value = Number.isFinite(tid) ? (textOf?.(tid) ?? null) : null;
+        if (value != null && t) {
+          const r = t.getBoundingClientRect();
+          const h = host.current!.getBoundingClientRect();
+          setEdit({ id: tid, left: r.left - h.left, top: r.top + r.height / 2 - h.top, value });
+          return;
+        }
         const id = !moveMode && onOpenViewport && viewports.length > 1 ? vpAt(e.clientX, e.clientY) : null;
         if (id) onOpenViewport!(id);
         else fit();
@@ -140,10 +180,35 @@ export function PlanView({ sheet, selection, onSelect, fitSignal, moveMode, view
         {moveMode ? `#prancha [data-vp]{cursor:move}` : ""}
       </style>
       <svg id="prancha" viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} width="100%" height="100%" dangerouslySetInnerHTML={{ __html: sheet.inner }} />
+      {box && <div className={`plan-view-box ${box.x1 < box.x0 ? "crossing" : ""}`} style={{ left: Math.min(box.x0, box.x1), top: Math.min(box.y0, box.y1), width: Math.abs(box.x1 - box.x0), height: Math.abs(box.y1 - box.y0) }} />}
+      {edit && (
+        <input
+          className="inline-text"
+          style={{ left: edit.left, top: edit.top }}
+          autoFocus
+          defaultValue={edit.value}
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            const v = (e.target as HTMLInputElement).value;
+            if (e.key === "Enter") {
+              if (v.trim() && v !== edit.value) onEditText?.(edit.id, v);
+              setEdit(null);
+            } else if (e.key === "Escape") setEdit(null);
+          }}
+          onBlur={(e) => {
+            const v = e.target.value;
+            if (v.trim() && v !== edit.value) onEditText?.(edit.id, v);
+            setEdit(null);
+          }}
+        />
+      )}
       <div className="plan-hint">
         {moveMode
           ? "Arraste uma vista para reposicioná-la na folha"
-          : `Roda do mouse: zoom · arrastar: mover · duplo clique: ${viewports.length > 1 ? "abrir a vista / " : ""}enquadrar a folha · clique: selecionar`}
+          : `Clique: selecionar · arrastar: janela de seleção · botão do meio: mover · roda: zoom · duplo clique: editar texto / ${viewports.length > 1 ? "abrir a vista / " : ""}enquadrar`}
       </div>
     </div>
   );

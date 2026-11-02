@@ -1962,3 +1962,42 @@ h3 {
 .folha input.narrow {
   width: 64px;
 }
+
+/* Janela de seleção no 3D e edição de texto no local */
+.viewer-box {
+  position: absolute;
+  border: 1.5px solid #2563eb;
+  background: rgba(37, 99, 235, 0.08);
+  pointer-events: none;
+  z-index: 3;
+}
+.viewer-box.crossing {
+  border: 1.5px dashed #16a34a;
+  background: rgba(22, 163, 74, 0.08);
+}
+.inline-text {
+  position: absolute;
+  transform: translate(0, -50%);
+  min-width: 180px;
+  padding: 3px 6px;
+  font: 14px Arial, sans-serif;
+  border: 1.5px solid #0ea5e9;
+  border-radius: 3px;
+  background: #ffffff;
+  color: #111827;
+  z-index: 6;
+}
+.plan-view.selecting {
+  cursor: default;
+}
+.plan-view-box {
+  position: absolute;
+  border: 1.5px solid #2563eb;
+  background: rgba(37, 99, 235, 0.08);
+  pointer-events: none;
+}
+.plan-view-box.crossing {
+  border-style: dashed;
+  border-color: #16a34a;
+  background: rgba(22, 163, 74, 0.08);
+}

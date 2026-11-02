@@ -104,6 +104,10 @@ export class Viewer {
   private hoverDirty = false;
 
   onPick: (expressID: number | null, additive: boolean) => void = () => {};
+  /** Janela de seleção (arrastar com o botão esquerdo fora dos comandos de locação/traçado). */
+  onPickMany: (ids: number[], additive: boolean) => void = () => {};
+  private boxStart: { x: number; y: number } | null = null;
+  private boxEl: HTMLDivElement;
 
   constructor(private container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -116,6 +120,7 @@ export class Viewer {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.screenSpacePanning = true;
+    this.applyMouseButtons();
     this.controls.addEventListener("change", () => this.requestRender());
 
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.6));
@@ -129,8 +134,38 @@ export class Viewer {
     this.scene.add(grid);
 
     const canvas = this.renderer.domElement;
-    canvas.addEventListener("pointerdown", (e) => (this.pointerDown = { x: e.clientX, y: e.clientY }));
+    // Janela de seleção: esquerda→direita só o que está inteiro dentro; direita→esquerda o que ela toca.
+    this.boxEl = document.createElement("div");
+    this.boxEl.className = "viewer-box";
+    this.boxEl.hidden = true;
+    container.appendChild(this.boxEl);
+    canvas.addEventListener("pointerdown", (e) => {
+      this.pointerDown = { x: e.clientX, y: e.clientY };
+      this.boxStart = e.button === 0 && !this.placement ? { x: e.clientX, y: e.clientY } : null;
+    });
+    canvas.addEventListener("pointermove", (e) => {
+      const b = this.boxStart;
+      if (!b || !(e.buttons & 1) || Math.hypot(e.clientX - b.x, e.clientY - b.y) < 4) return;
+      const r = this.container.getBoundingClientRect();
+      const crossing = e.clientX < b.x;
+      Object.assign(this.boxEl.style, {
+        left: `${Math.min(b.x, e.clientX) - r.left}px`,
+        top: `${Math.min(b.y, e.clientY) - r.top}px`,
+        width: `${Math.abs(e.clientX - b.x)}px`,
+        height: `${Math.abs(e.clientY - b.y)}px`,
+      });
+      this.boxEl.classList.toggle("crossing", crossing);
+      this.boxEl.hidden = false;
+    });
     canvas.addEventListener("pointerup", (e) => {
+      const b = this.boxStart;
+      this.boxStart = null;
+      if (b && !this.boxEl.hidden) {
+        this.boxEl.hidden = true;
+        this.pointerDown = null;
+        this.onPickMany(this.idsInScreenBox(b.x, b.y, e.clientX, e.clientY, e.clientX < b.x), e.ctrlKey || e.metaKey || e.shiftKey);
+        return;
+      }
       if (!this.pointerDown) return;
       const moved = Math.hypot(e.clientX - this.pointerDown.x, e.clientY - this.pointerDown.y);
       this.pointerDown = null;
@@ -256,6 +291,7 @@ export class Viewer {
   /** Ativa (ou desativa, com null) o modo de locação. */
   setPlacementHandler(handler: PlacementHandler | null) {
     this.placement = handler;
+    this.applyMouseButtons();
     this.renderer.domElement.style.cursor = handler ? "crosshair" : "";
     if (!handler) this.showPreview([]);
     this.hoverDirty = true;
@@ -429,6 +465,55 @@ export class Viewer {
     this.highlighted = new Set(ids);
     this.ghosted = ghostOthers && ids.length > 0;
     this.setVisible(this.visible);
+  }
+
+  /**
+   * Botões do mouse: em Selecionar, o esquerdo faz a janela de seleção, o do meio desloca e o
+   * direito (ou Shift + meio) gira. Locando/traçando, o esquerdo volta a girar a vista.
+   */
+  private applyMouseButtons() {
+    this.controls.mouseButtons = {
+      LEFT: (this.placement ? THREE.MOUSE.ROTATE : null) as unknown as THREE.MOUSE,
+      MIDDLE: THREE.MOUSE.PAN,
+      RIGHT: THREE.MOUSE.ROTATE,
+    };
+  }
+
+  /** Elementos visíveis na janela da tela (coordenadas do cliente). */
+  private idsInScreenBox(x0: number, y0: number, x1: number, y1: number, crossing: boolean): number[] {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const [minX, maxX] = [Math.min(x0, x1), Math.max(x0, x1)];
+    const [minY, maxY] = [Math.min(y0, y1), Math.max(y0, y1)];
+    this.camera.updateMatrixWorld();
+    const out: number[] = [];
+    const v = new THREE.Vector3();
+    for (const [id, e] of this.entries) {
+      const m = e.mesh;
+      if (!m.visible || !m.parent?.visible) continue;
+      const g = m.geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      const bb = g.boundingBox!;
+      let sx0 = Infinity;
+      let sy0 = Infinity;
+      let sx1 = -Infinity;
+      let sy1 = -Infinity;
+      let behind = false;
+      for (let i = 0; i < 8; i++) {
+        v.set(i & 1 ? bb.max.x : bb.min.x, i & 2 ? bb.max.y : bb.min.y, i & 4 ? bb.max.z : bb.min.z).applyMatrix4(m.matrixWorld).project(this.camera);
+        if (v.z > 1) behind = true;
+        const px = r.left + ((v.x + 1) / 2) * r.width;
+        const py = r.top + ((1 - v.y) / 2) * r.height;
+        sx0 = Math.min(sx0, px);
+        sy0 = Math.min(sy0, py);
+        sx1 = Math.max(sx1, px);
+        sy1 = Math.max(sy1, py);
+      }
+      if (behind) continue;
+      const inside = sx0 >= minX && sx1 <= maxX && sy0 >= minY && sy1 <= maxY;
+      const touches = sx0 <= maxX && sx1 >= minX && sy0 <= maxY && sy1 >= minY;
+      if (crossing ? touches : inside) out.push(id);
+    }
+    return out;
   }
 
   /** Caixa (cena) dos elementos indicados, ou null. */

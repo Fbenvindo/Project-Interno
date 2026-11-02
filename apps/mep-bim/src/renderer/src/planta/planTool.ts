@@ -36,4 +36,6 @@ export interface PlanTool {
   finish(): void;
   /** Esc. */
   cancel(): void;
+  /** Texto sendo digitado no local (comando Texto): Enter grava, Esc desiste. */
+  textInput?: { at: P2; value: string; onCommit: (text: string) => void; onCancel: () => void } | null;
 }
