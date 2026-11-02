@@ -13,7 +13,7 @@ import type { PlacedPoint, StoreyLevel } from "./points";
 import type { Run } from "./runs";
 import type { Space } from "./spaces";
 import type { Discipline, ElementInfo } from "./types";
-import { applyHalftone, clipPrims, DEFAULT_LABELS, filterLegend, viewFilter, viewMarkers, type ViewDef } from "./views";
+import { applyHalftone, beamOptions, clipPrims, DEFAULT_LABELS, filterLegend, viewFilter, viewMarkers, type ViewDef } from "./views";
 
 export interface ModelContext {
   elements: ElementInfo[];
@@ -67,6 +67,7 @@ export function viewDrawing(view: ViewDef, ctx: ModelContext): PlanDrawing | nul
       boxes: ctx.boxes,
       drafts: ctx.drafts,
       draftView: view.section === "trabalho" && view.kind === "planta" ? null : view.id,
+      beams: beamOptions(view),
     });
     let prims = applyHalftone(d.prims, f);
     if (view.section === "documentacao" && view.workNotes)

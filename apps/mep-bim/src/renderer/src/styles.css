@@ -2001,3 +2001,37 @@ h3 {
   border-color: #16a34a;
   background: rgba(22, 163, 74, 0.08);
 }
+
+/* Abas de vista com botão de fechar */
+.view-tab-wrap {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  border-bottom: 2px solid transparent;
+}
+.view-tab-wrap.active {
+  border-bottom-color: var(--cyan);
+}
+.view-tab-wrap .view-tab {
+  border-bottom: none;
+}
+.view-tab-wrap:has(.tab-close) .view-tab {
+  padding-right: 4px;
+}
+.tab-close {
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 18px;
+  cursor: pointer;
+}
+.tab-close:hover {
+  background: var(--hover-bg);
+  color: var(--fail);
+}

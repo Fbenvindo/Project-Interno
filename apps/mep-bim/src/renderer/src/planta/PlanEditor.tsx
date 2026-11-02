@@ -6,7 +6,7 @@ import { pullBoxes } from "../../../core/conduits";
 import { setCursor } from "../coords/cursor";
 import { DISCIPLINES } from "../../../core/disciplines";
 import type { SurfaceHit } from "../../../core/placement";
-import { buildPlan, boundsOf } from "../../../core/plan/build";
+import { buildPlan, boundsOf, type BeamOptions } from "../../../core/plan/build";
 import type { Prim } from "../../../core/plan/drawing";
 import type { P2 } from "../../../core/plan/section";
 import { snapToWall, wallEdges, type WallSnap } from "../../../core/plan/snap";
@@ -44,6 +44,8 @@ interface Props {
   viewDef?: ViewDef | null;
   /** Disciplinas do projeto (filtro das vistas de documentação). */
   projectDisciplines?: Discipline[];
+  /** Vigas em projeção (piso/teto) e seus textos. */
+  beams?: BeamOptions;
 }
 
 type ViewBox = { x: number; y: number; w: number; h: number };
@@ -61,7 +63,7 @@ function primsToSvg(prims: Prim[]): string {
   const px = (w: number) => Math.max(0.6, w * 4).toFixed(2);
   return prims
     .map((p) => {
-      const id = p.id != null ? ` data-id="${p.id}"` : "";
+      const id = (p.id != null ? ` data-id="${p.id}"` : "") + (p.opacity != null ? ` opacity="${p.opacity}"` : "");
       const dash = "dashdot" in p && p.dashdot ? ` stroke-dasharray="9 3 2 3"` : "dashed" in p && p.dashed ? ` stroke-dasharray="6 4"` : "";
       const stroke = `stroke="${p.color}" vector-effect="non-scaling-stroke"`;
       if (p.t === "line") return `<line x1="${f3(p.a[0])}" y1="${f3(-p.a[1])}" x2="${f3(p.b[0])}" y2="${f3(-p.b[1])}" ${stroke} stroke-width="${px(p.weight)}"${dash}${id}/>`;
@@ -75,7 +77,7 @@ function primsToSvg(prims: Prim[]): string {
     .join("");
 }
 
-export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick, onPickMany, dark, fitSignal, planTool, viewDef = null, projectDisciplines = [] }: Props) {
+export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick, onPickMany, dark, fitSignal, planTool, viewDef = null, projectDisciplines = [], beams }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const cs = model.coordinates;
   const level = model.storeyLevels.find((s) => s.name === storey)?.level ?? 0;
@@ -105,9 +107,9 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
         name: viewDef!.name,
         labels,
       });
-    return buildPlan({ elements: model.elements, meshes, cs, storeyLevels: model.storeyLevels, storey, cutHeight, points: [], runs: [], scale: SCALE, disciplines, labels });
+    return buildPlan({ elements: model.elements, meshes, cs, storeyLevels: model.storeyLevels, storey, cutHeight, points: [], runs: [], scale: SCALE, disciplines, labels, beams });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, meshes, cs, storey, cutHeight, isSection, isSection ? store.points : null, isSection ? store.runs : null, viewDef?.cut, SCALE, disciplines]);
+  }, [model, meshes, cs, storey, cutHeight, isSection, isSection ? store.points : null, isSection ? store.runs : null, viewDef?.cut, SCALE, disciplines, beams?.mode, beams?.show, beams?.text]);
   const mep = useMemo(() => {
     if (isSection) {
       const prims = store.drafts.filter((d) => d.view === viewDef!.id).flatMap((d) => draftPrims(d, SCALE));

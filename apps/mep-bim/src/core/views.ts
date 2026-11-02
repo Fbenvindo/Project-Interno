@@ -60,6 +60,11 @@ export interface ViewDef {
   labels?: PlanLabels;
   /** Documentação: inclui também as anotações feitas na planta de trabalho. */
   workNotes?: boolean;
+  /** Plantas: de piso (vigas da laje de baixo) ou de teto (vigas do pavimento de cima). */
+  planType?: "piso" | "teto";
+  /** Vigas em projeção e o texto de cada uma (podem ser ocultados separadamente). */
+  showBeams?: boolean;
+  showBeamText?: boolean;
 }
 
 export const DEFAULT_LABELS: PlanLabels = { tags: true, circuits: true, power: true, sizes: true };
@@ -141,7 +146,7 @@ export function applyHalftone(prims: Prim[], f: ViewFilter): Prim[] {
   if (!f.halftone.size && !f.halftoneBackground) return prims;
   return prims.map((p) => {
     const d = disciplineOfLayer(p.layer);
-    if (!d) return p;
+    if (!d || p.layer.includes("VIGAS")) return p;
     if (f.halftone.has(d)) return { ...p, color: HALF, ...("fill" in p && p.fill ? { fill: HALF_FILL } : {}) } as Prim;
     if (f.halftoneBackground && BACKGROUND.includes(d)) return { ...p, color: HALF_BG, ...("fill" in p && p.fill ? { fill: HALF_FILL } : {}) } as Prim;
     return p;
@@ -303,3 +308,10 @@ export function nextViewName(views: ViewDef[], kind: ViewKind, storey?: string):
   const n = views.filter((v) => v.kind === kind).length + 1;
   return `${label} ${n}${storey ? ` — ${storey}` : ""}`;
 }
+
+/** Opções de vigas de uma planta (padrão: planta de piso, vigas e textos visíveis). */
+export const beamOptions = (v: Pick<ViewDef, "planType" | "showBeams" | "showBeamText"> | null) => ({
+  mode: v?.planType ?? ("piso" as const),
+  show: v?.showBeams !== false,
+  text: v?.showBeamText !== false,
+});

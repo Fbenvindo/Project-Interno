@@ -122,6 +122,17 @@ Na aba **Planta 2D**, escolha o pavimento, a altura de corte (padrão 1,20 m aci
 
 A simbologia é um ponto de partida: confira com o padrão gráfico do escritório antes de emitir pranchas.
 
+### Representação dos modelos de arquitetura e estrutura
+
+- **Pilares e alvenarias:** pilares cortados têm hachura mais escura que as alvenarias, nas plantas e nos cortes. No 3D, os pilares também ficam mais escuros.
+- **Vigas** (em projeção, tracejadas, verde suave com 50% de transparência) com o texto **largura × altura em cm**:
+  - na **planta de piso**, as vigas da laje de baixo;
+  - na **planta de teto**, as do pavimento de cima.
+  - Na paleta Propriedades da planta (com nada selecionado) escolhem-se *Planta de piso/teto* e, separadamente, *Vigas* e *Textos das vigas*.
+- **Layout e equipamentos que vêm do IFC** sempre em cinza, na planta, no corte e no 3D: mobiliário, louças e metais (vasos, lavatórios, pias), eletrodomésticos. As exceções mantêm a cor da disciplina: luminárias, tomadas e difusores/grelhas.
+- **Cortes 2D:** as emendas internas da triangulação das faces (comuns em paredes com aberturas) não aparecem mais como linhas.
+- **Abas de vista:** o botão **×** fecha a vista aberta. Num corte, ampliação ou planta extra, volta à planta do pavimento. Numa vista 3D salva ou recortada, volta ao modelo completo sem recortes. Na folha, volta à planta.
+
 ### Selecionar (comando padrão), janela de seleção e Esc
 
 Fora de qualquer comando, o app está sempre em **Selecionar**, em todas as vistas: planta (Trabalho ou Documentação), ampliações, cortes, 3D e folhas.
@@ -167,9 +178,7 @@ Comandos de desenho e edição na planta do pavimento, no estilo dos programas d
 - **Encaixe:** extremidades, meios, centros e vértices do desenho, cantos das paredes cortadas e pontos locados (quadrado laranja). **Shift** trava na horizontal/vertical a partir do último ponto. Enter, duplo clique ou botão direito terminam; Esc cancela.
 - **Modificar:** Copiar (vários destinos), Mover, Recortar, Colar (também em outro pavimento: a cota acompanha o piso), Apagar, Estender (até outra linha/forma ou até a face de uma parede) e Conectar (duas linhas viram um canto; linhas e poligonais que se tocam viram uma poligonal só). Valem para desenhos, pontos locados e trechos. Cópias recebem ids, GUIDs e etiquetas novos e saem sem circuito.
 - **Seleção dos comandos de modificar:** clique em vários elementos ou arraste uma janela (da esquerda para a direita pega o que está inteiro dentro; da direita para a esquerda, o que a janela cruza). Shift/Ctrl+clique tira da seleção, e a lista do painel tem um ✕ por item. A seleção que já existia entra como ponto de partida. Ao concluir a seleção (Enter ou botão), o app **pergunta se você deseja remover algum elemento**: *Sim* abre o modo de remoção (clique, janela ou ✕) e *Não* segue para o comando.
-- **Geral:**
-  - **Coordenadas do projeto** abre o painel de ponto base, survey point e norte.
-  - **Indicar coordenada** marca um ponto com X/Y do projeto e E/N do mapa (UTM).
+- **Geral** (as coordenadas do projeto ficam em Modelo › Coordenadas; *Indicar coordenada*, que marca X/Y do projeto e E/N do mapa, está em Criar › Anotação):
   - **Corte pela seleção** recorta o 3D por uma caixa em volta dos elementos selecionados, na planta ou no 3D. Num único pavimento, a caixa para abaixo da laje de cima.
   - **Corte por linha** pede dois pontos e o lado que deve ficar visível.
   - **Remover cortes** desfaz esses recortes.

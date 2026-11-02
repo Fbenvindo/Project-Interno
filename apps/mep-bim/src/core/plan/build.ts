@@ -14,6 +14,7 @@ import { assemblySymbol, LEGEND_LINE, RISER_DOWN, RISER_UP, symbolFor, TEE_MARK 
 import { assemblyKey } from "../devices";
 import { draftPrims, type DraftEntity } from "../draft";
 import { pointSize } from "../points";
+import { BEAM_COLOR, BEAM_OPACITY, COLUMN_FILL, COLUMN_TYPES, isLayout, LAYOUT_GRAY, minAreaRect, WALL_FILL } from "./style";
 import { BOX_LABEL, INSTALL_LABEL, type BoxKind, type PullBox } from "../conduits";
 
 export interface PlanLabels {
@@ -46,6 +47,17 @@ export interface PlanInput {
   drafts?: DraftEntity[];
   /** Vista cujas anotações entram (null = as da planta de trabalho). */
   draftView?: string | null;
+  /**
+   * Vigas em projeção (tracejadas): na planta de piso, as da laje de baixo; na planta de teto,
+   * as do pavimento de cima. `text` = largura × altura (cm) em cada viga.
+   */
+  beams?: BeamOptions;
+}
+
+export interface BeamOptions {
+  mode: "piso" | "teto";
+  show: boolean;
+  text: boolean;
 }
 
 /** Símbolos das caixas de passagem (mm de papel). */
@@ -69,7 +81,6 @@ export const BOX_SYMBOL: Record<BoxKind, SymbolPrim[]> = {
 /** Tipos cortados com hachura cheia (poché). */
 const POCHE_TYPES = new Set(["IFCWALL", "IFCWALLSTANDARDCASE", "IFCCOLUMN", "IFCCURTAINWALL", "IFCMEMBER", "IFCPILE"]);
 const OPENING_TYPES = new Set(["IFCDOOR", "IFCWINDOW"]);
-const POCHE_FILL = "#a6a6a6";
 
 export function buildPlan(input: PlanInput): PlanDrawing {
   const { cs, scale, storey, labels } = input;
@@ -109,21 +120,53 @@ export function buildPlan(input: PlanInput): PlanDrawing {
     const segs = cutMesh(mesh.positions, mesh.indices, y).map(({ a, b }): [P2, P2] => [plan(a), plan(b)]);
     if (!segs.length) continue;
     const prefix = LAYER_PREFIX[e.discipline];
-    const color = PRINT_COLOR[e.discipline];
+    // Layout e equipamentos da arquitetura (inclusive louças e metais): cinza, sempre.
+    const layout = isLayout(e.ifcType);
+    const color = layout ? LAYOUT_GRAY : PRINT_COLOR[e.discipline];
     const poche = !isMep && POCHE_TYPES.has(e.ifcType);
-    const weight = isMep ? PEN.mep : poche ? PEN.corte : OPENING_TYPES.has(e.ifcType) ? PEN.porta : PEN.vista;
-    const layer = isMep ? `${prefix}-IFC` : poche ? `${prefix}-CORTE` : `${prefix}-ELEMENTOS`;
+    const weight = layout ? PEN.vista : isMep ? PEN.mep : poche ? PEN.corte : OPENING_TYPES.has(e.ifcType) ? PEN.porta : PEN.vista;
+    const layer = layout ? "ARQ-LAYOUT" : isMep ? `${prefix}-IFC` : poche ? `${prefix}-CORTE` : `${prefix}-ELEMENTOS`;
+    const pocheFill = COLUMN_TYPES.has(e.ifcType) ? COLUMN_FILL : WALL_FILL;
     for (const ch of chainSegments(segs)) {
       prims.push({
         t: "poly",
         pts: ch.points,
         closed: ch.closed,
         weight,
-        fill: poche && ch.closed ? POCHE_FILL : null,
+        fill: poche && ch.closed ? pocheFill : null,
         layer,
-        color: isMep ? color : "#222222",
+        color: isMep || layout ? color : "#222222",
         id: e.expressID,
       });
+    }
+  }
+
+  // ---- Vigas (projeção tracejada, verde com 50% de transparência) ---------------------------
+  const bo = input.beams;
+  if (bo?.show && input.disciplines.has("estrutura")) {
+    // Piso: vigas da laje deste pavimento (topo junto ao nível). Teto: as do pavimento de cima.
+    const ref = bo.mode === "teto" ? (Number.isFinite(nextLevel) ? nextLevel : level + 3) : level;
+    for (const e of input.elements) {
+      if (e.ifcType !== "IFCBEAM" || !e.bbox) continue;
+      const top = e.bbox.max[1];
+      if (top < ref - 0.6 || top > ref + 0.1) continue;
+      const mesh = input.meshes.get(e.expressID);
+      if (!mesh) continue;
+      const pts: P2[] = [];
+      for (let i = 0; i < mesh.positions.length; i += 3) pts.push(plan([mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]]));
+      const r = minAreaRect(pts);
+      if (!r || r.length < 0.05) continue;
+      const base = { layer: "EST-VIGAS", color: BEAM_COLOR, opacity: BEAM_OPACITY, id: e.expressID };
+      prims.push({ t: "poly", pts: r.corners, closed: true, weight: PEN.vista + 0.05, dashed: true, ...base });
+      if (bo.text) {
+        const cm = (v: number) => Math.round(v * 100);
+        let angle = Math.atan2(r.axis[1], r.axis[0]);
+        if (angle > Math.PI / 2 + 1e-6) angle -= Math.PI;
+        if (angle <= -Math.PI / 2 + 1e-6) angle += Math.PI;
+        const off = r.width / 2 + 1.6 * m;
+        const at: P2 = [r.center[0] - Math.sin(angle) * off, r.center[1] + Math.cos(angle) * off];
+        prims.push({ t: "text", p: at, text: `${cm(r.width)}x${cm(e.bbox.max[1] - e.bbox.min[1])}`, height: 1.8 * m, anchor: "middle", angle, ...base, layer: "EST-VIGAS-TEXTOS" });
+      }
     }
   }
 

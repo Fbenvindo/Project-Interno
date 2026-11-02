@@ -298,7 +298,7 @@ function customTitleBlock(tbDef: TitleBlock, box: { x: number; y: number; w: num
 }
 
 function primSvg(p: Prim, T: (q: P2) => P2, k: number, scale: number): string {
-  const id = p.id != null ? ` data-id="${p.id}"` : "";
+  const id = (p.id != null ? ` data-id="${p.id}"` : "") + (p.opacity != null ? ` opacity="${p.opacity}"` : "");
   const dash = "dashdot" in p && p.dashdot ? ` stroke-dasharray="3 0.8 0.6 0.8"` : "dashed" in p && p.dashed ? ` stroke-dasharray="2 1"` : "";
   if (p.t === "line") {
     const [a, b] = [T(p.a), T(p.b)];

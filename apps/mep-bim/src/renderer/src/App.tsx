@@ -21,7 +21,7 @@ import { NO_SECTION, SectionTools, sectionToPlanes, type SectionState } from "./
 import { FolhaPanel } from "./planta/FolhaPanel";
 import { renderSheetViews, type SheetViewport } from "../../core/plan/sheet";
 import type { PlanDrawing } from "../../core/plan/drawing";
-import { docPlanOf, viewFilter, type ViewDef } from "../../core/views";
+import { beamOptions, docPlanOf, viewFilter, type ViewDef } from "../../core/views";
 import { newSheetId, viewDrawing, viewSubtitle, viewTitle, type ModelContext, type SheetDef } from "../../core/viewDrawing";
 import { sectionFrame } from "../../core/plan/elevation";
 import { VistasBrowser } from "./shell/VistasBrowser";
@@ -46,6 +46,7 @@ import { loadFamilyLibrary } from "./library/familyLibrary";
 import { useDraftTool, CMD_LABEL, isCreateCmd } from "./desenho/useDraftTool";
 import { DesenhoPanel } from "./desenho/DesenhoPanel";
 import { CoordinateSystem } from "../../core/math";
+import { color3d } from "../../core/plan/style";
 import { getLibraryVersion, onLibraryChange } from "../../core/library";
 import { makeCeilingResolver, makeSlabProbe } from "./locacao/ceiling";
 import { Icon, LogoMark } from "./shell/icons";
@@ -148,6 +149,8 @@ export function App() {
   // ---- Vistas: Trabalho / Documentação, vistas 3D e folhas ----------------------------------
   /** Planta aberta: "trab" ou "doc" do pavimento atual, ou "view:<id>" (ampliação, corte, planta extra). */
   const [planKey, setPlanKey] = useState<string>("trab");
+  /** Plantas de trabalho: tipo (piso/teto) e vigas — as de documentação guardam isso na própria vista. */
+  const [workDisplay, setWorkDisplay] = useState<Pick<ViewDef, "planType" | "showBeams" | "showBeamText">>({ planType: "piso", showBeams: true, showBeamText: true });
   const [view3dId, setView3dId] = useState<string | null>(null);
   const [sheetId, setSheetId] = useState<string | null>(null);
   const [moveMode, setMoveMode] = useState(false);
@@ -419,7 +422,12 @@ export function App() {
       const loaded = loadIfc(api, file.data, (stage) => setProgress(stage));
       modelRef.current = loaded;
       const disciplineOf = new Map(loaded.elements.map((e) => [e.expressID, e.discipline]));
-      viewerRef.current!.load(loaded.meshes, (id) => DISCIPLINE_BY_ID[disciplineOf.get(id) ?? "outros"].color);
+      const byId = new Map(loaded.elements.map((e) => [e.expressID, e]));
+      viewerRef.current!.load(loaded.meshes, (id) => {
+        const e = byId.get(id);
+        const c = DISCIPLINE_BY_ID[disciplineOf.get(id) ?? "outros"].color;
+        return e ? color3d(e, c) : c;
+      });
       store.reset();
       setPlanKey("trab");
       setView3dId(null);
@@ -539,7 +547,12 @@ export function App() {
     for (const l of fedLinks) {
       if (!l.meta.visible || linkInScene.current.has(l.meta.id)) continue;
       const byId = new Map(l.data.elements.map((e) => [e.expressID, e.discipline]));
-      const color = (id: number) => DISCIPLINE_BY_ID[l.meta.discipline !== "auto" ? l.meta.discipline : (byId.get(id) ?? "outros")].color;
+      const typeOf = new Map(l.data.elements.map((e) => [e.expressID, e]));
+      const color = (id: number) => {
+        const c = DISCIPLINE_BY_ID[l.meta.discipline !== "auto" ? l.meta.discipline : (byId.get(id) ?? "outros")].color;
+        const e = typeOf.get(id);
+        return e ? color3d(e, c) : c;
+      };
       viewer.addModelMeshes(l.data.meshes, color, l.meta.translucent ? 0.3 : 1);
       linkInScene.current.set(l.meta.id, { sig: sigOf(l.meta, l.data), ids: l.data.meshes.map((m) => m.expressID) });
     }
@@ -1175,6 +1188,8 @@ export function App() {
                 <div className="dock-body">
                   <VistaPanel
                     view={view === "3d" ? view3dDef : activeViewDef}
+                    workDisplay={workDisplay}
+                    onWorkDisplay={setWorkDisplay}
                     storey={storey}
                     projectDisciplines={store.disciplines}
                     available={planAvailable}
@@ -1307,22 +1322,55 @@ export function App() {
             </button>
             {model && (
               <>
-                <button className={`view-tab ${view === "planta" ? "active" : ""}`} onClick={() => setView("planta")}>
-                  {activeViewDef && planKey.startsWith("view:") ? activeViewDef.name : `Planta · ${storey}`}
-                </button>
-                <button
-                  className={`view-tab ${view === "3d" ? "active" : ""}`}
-                  onClick={() => {
-                    setView("3d");
-                    if (view === "3d") setView3dId(null);
-                  }}
-                  title={view3dDef ? "Clique de novo para voltar ao modelo completo" : undefined}
-                >
-                  3D · {view3dDef ? view3dDef.name : (storeyView ?? "Modelo completo")}
-                </button>
-                <button className={`view-tab ${view === "prancha" ? "active" : ""}`} onClick={() => chooseTool({ kind: "pranchas" })}>
-                  Prancha
-                </button>
+                <span className={`view-tab-wrap ${view === "planta" ? "active" : ""}`}>
+                  <button className={`view-tab ${view === "planta" ? "active" : ""}`} onClick={() => setView("planta")}>
+                    {activeViewDef && planKey.startsWith("view:") ? activeViewDef.name : `Planta · ${storey}`}
+                  </button>
+                  {planKey.startsWith("view:") && (
+                    <button className="tab-close" title="Fechar esta vista (volta à planta do pavimento)" aria-label="Fechar vista" onClick={() => (setPlanKey("trab"), setView("planta"))}>
+                      ×
+                    </button>
+                  )}
+                </span>
+                <span className={`view-tab-wrap ${view === "3d" ? "active" : ""}`}>
+                  <button className={`view-tab ${view === "3d" ? "active" : ""}`} onClick={() => setView("3d")}>
+                    3D · {view3dDef ? view3dDef.name : (storeyView ?? "Modelo completo")}
+                  </button>
+                  {(view3dDef || extraClip) && (
+                    <button
+                      className="tab-close"
+                      title="Fechar esta vista 3D (volta ao modelo completo, sem recortes)"
+                      aria-label="Fechar vista 3D"
+                      onClick={() => {
+                        setView3dId(null);
+                        viewerRef.current?.setExtraClip(null);
+                        setExtraClip(false);
+                        setView("3d");
+                        setTimeout(() => viewerRef.current?.fitTo(), 60);
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
+                </span>
+                <span className={`view-tab-wrap ${view === "prancha" ? "active" : ""}`}>
+                  <button className={`view-tab ${view === "prancha" ? "active" : ""}`} onClick={() => chooseTool({ kind: "pranchas" })}>
+                    Prancha{activeSheet && view === "prancha" ? ` · ${activeSheet.name}` : ""}
+                  </button>
+                  {view === "prancha" && (
+                    <button
+                      className="tab-close"
+                      title="Fechar a folha (volta à planta)"
+                      aria-label="Fechar folha"
+                      onClick={() => {
+                        setView("planta");
+                        if (tool.kind === "pranchas") chooseTool({ kind: "propriedades" });
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
+                </span>
               </>
             )}
             <div className="spacer" />
@@ -1376,6 +1424,7 @@ export function App() {
                 planTool={planTool}
                 viewDef={activeViewDef}
                 projectDisciplines={store.disciplines}
+                beams={beamOptions(activeViewDef ?? workDisplay)}
               />
             )}
             {view === "3d" && model && (

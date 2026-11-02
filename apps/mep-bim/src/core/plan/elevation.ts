@@ -13,6 +13,7 @@ import type { CutDef } from "../views";
 import { boundsOf } from "./build";
 import { LAYER_PREFIX, PEN, PRINT_COLOR, type PlanDrawing, type Prim } from "./drawing";
 import { chainSegments, cutMesh, type P2 } from "./section";
+import { COLUMN_FILL, COLUMN_TYPES, isLayout, LAYOUT_GRAY, WALL_FILL } from "./style";
 
 export interface SectionInput {
   elements: ElementInfo[];
@@ -29,7 +30,6 @@ export interface SectionInput {
 }
 
 const POCHE = new Set(["IFCWALL", "IFCWALLSTANDARDCASE", "IFCCOLUMN", "IFCSLAB", "IFCBEAM", "IFCROOF", "IFCCURTAINWALL", "IFCMEMBER", "IFCPILE", "IFCFOOTING"]);
-const POCHE_FILL = "#a6a6a6";
 
 export interface SectionFrame {
   /** Origem (cena) e eixos horizontais: U ao longo do corte, W para onde se olha. */
@@ -108,7 +108,8 @@ export function buildSection(input: SectionInput): PlanDrawing {
 
     const isMep = MEP_DISCIPLINES.includes(e.discipline);
     const prefix = LAYER_PREFIX[e.discipline];
-    const color = isMep ? PRINT_COLOR[e.discipline] : "#222222";
+    const layout = isLayout(e.ifcType);
+    const color = layout ? LAYOUT_GRAY : isMep ? PRINT_COLOR[e.discipline] : "#222222";
     const { positions, indices } = mesh;
     const n = positions.length / 3;
     // Posições no sistema do corte: (u, w, v) — o plano de corte vira w = 0.
@@ -122,13 +123,18 @@ export function buildSection(input: SectionInput): PlanDrawing {
 
     // Arestas visíveis além do plano: contorno e quinas (ângulo entre faces > 20°) voltadas ao observador.
     if (wMax > 0) {
-      const edges = new Map<string, { a: number; b: number; normals: Vec3[] }>();
+      const edges = new Map<string, { a: number; b: number; normals: Vec3[]; tri: number; c: number }>();
       const vk = (i: number) => key3(t[i * 3], t[i * 3 + 1], t[i * 3 + 2]);
+      const P = (i: number): Vec3 => [t[i * 3], t[i * 3 + 1], t[i * 3 + 2]];
+      // Triângulos agrupados por plano (normal e distância), para reconhecer emendas internas
+      // de faces trianguladas com aberturas (junções em T), que não são arestas reais.
+      const tris: { a: Vec3; b: Vec3; c: Vec3; n: Vec3 }[] = [];
+      const byPlane = new Map<string, number[]>();
+      const planeKey = (n: Vec3, d: number) => `${Math.round(n[0] * 500)}|${Math.round(n[1] * 500)}|${Math.round(n[2] * 500)}|${Math.round(d * 500)}`;
       for (let k = 0; k < indices.length; k += 3) {
         const ia = indices[k];
         const ib = indices[k + 1];
         const ic = indices[k + 2];
-        const P = (i: number): Vec3 => [t[i * 3], t[i * 3 + 1], t[i * 3 + 2]];
         const [pa, pb, pc] = [P(ia), P(ib), P(ic)];
         const e1: Vec3 = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
         const e2: Vec3 = [pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]];
@@ -136,25 +142,66 @@ export function buildSection(input: SectionInput): PlanDrawing {
         const nl = Math.hypot(...nn);
         if (nl < 1e-12) continue;
         const nrm: Vec3 = [nn[0] / nl, nn[1] / nl, nn[2] / nl];
-        for (const [x, y] of [
-          [ia, ib],
-          [ib, ic],
-          [ic, ia],
+        const ti = tris.length;
+        tris.push({ a: pa, b: pb, c: pc, n: nrm });
+        const pk = planeKey(nrm, nrm[0] * pa[0] + nrm[1] * pa[1] + nrm[2] * pa[2]);
+        const list = byPlane.get(pk);
+        if (list) list.push(ti);
+        else byPlane.set(pk, [ti]);
+        for (const [x, y, z] of [
+          [ia, ib, ic],
+          [ib, ic, ia],
+          [ic, ia, ib],
         ]) {
           const [kx, ky] = [vk(x), vk(y)];
           const kk = kx < ky ? `${kx}/${ky}` : `${ky}/${kx}`;
           const cur = edges.get(kk);
           if (cur) cur.normals.push(nrm);
-          else edges.set(kk, { a: x, b: y, normals: [nrm] });
+          else edges.set(kk, { a: x, b: y, normals: [nrm], tri: ti, c: z });
         }
       }
-      for (const { a, b, normals } of edges.values()) {
+      const inTri = (p: Vec3, tr: { a: Vec3; b: Vec3; c: Vec3 }) => {
+        const v0: Vec3 = [tr.c[0] - tr.a[0], tr.c[1] - tr.a[1], tr.c[2] - tr.a[2]];
+        const v1: Vec3 = [tr.b[0] - tr.a[0], tr.b[1] - tr.a[1], tr.b[2] - tr.a[2]];
+        const v2: Vec3 = [p[0] - tr.a[0], p[1] - tr.a[1], p[2] - tr.a[2]];
+        const d = (x: Vec3, y: Vec3) => x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+        const [d00, d01, d02, d11, d12] = [d(v0, v0), d(v0, v1), d(v0, v2), d(v1, v1), d(v1, v2)];
+        const den = d00 * d11 - d01 * d01;
+        if (Math.abs(den) < 1e-18) return false;
+        const u = (d11 * d02 - d01 * d12) / den;
+        const v = (d00 * d12 - d01 * d02) / den;
+        return u >= -1e-6 && v >= -1e-6 && u + v <= 1 + 1e-6;
+      };
+      /** Aresta de um triângulo só, mas com outro triângulo do mesmo plano do outro lado: emenda interna. */
+      const isSeam = (ed: { a: number; b: number; tri: number; c: number }) => {
+        const tr = tris[ed.tri];
+        const A = P(ed.a);
+        const B = P(ed.b);
+        const C = P(ed.c);
+        const dir: Vec3 = [B[0] - A[0], B[1] - A[1], B[2] - A[2]];
+        // Perpendicular no plano, apontando para fora do próprio triângulo.
+        let out: Vec3 = [tr.n[1] * dir[2] - tr.n[2] * dir[1], tr.n[2] * dir[0] - tr.n[0] * dir[2], tr.n[0] * dir[1] - tr.n[1] * dir[0]];
+        const ol = Math.hypot(...out) || 1;
+        out = [out[0] / ol, out[1] / ol, out[2] / ol];
+        const mid: Vec3 = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2, (A[2] + B[2]) / 2];
+        if ((C[0] - mid[0]) * out[0] + (C[1] - mid[1]) * out[1] + (C[2] - mid[2]) * out[2] > 0) out = [-out[0], -out[1], -out[2]];
+        const eps = 2e-3;
+        const list = byPlane.get(planeKey(tr.n, tr.n[0] * A[0] + tr.n[1] * A[1] + tr.n[2] * A[2])) ?? [];
+        // Testa alguns pontos ao longo da aresta (junções em T podem cobrir só parte dela).
+        for (const s of [0.25, 0.5, 0.75]) {
+          const q: Vec3 = [A[0] + dir[0] * s + out[0] * eps, A[1] + dir[1] * s + out[1] * eps, A[2] + dir[2] * s + out[2] * eps];
+          if (list.some((i) => i !== ed.tri && inTri(q, tris[i]))) return true;
+        }
+        return false;
+      };
+      for (const ed of edges.values()) {
+        const { a, b, normals } = ed;
         // Faces voltadas ao observador têm normal com componente w negativa (olhamos para +w).
         if (!normals.some((q) => q[1] < 0.05)) continue;
         if (normals.length === 2) {
           const [p, q] = normals;
           if (p[0] * q[0] + p[1] * q[1] + p[2] * q[2] > Math.cos((20 * Math.PI) / 180)) continue;
-        }
+        } else if (normals.length === 1 && isSeam(ed)) continue;
         let A: Vec3 = [t[a * 3], t[a * 3 + 1], t[a * 3 + 2]];
         let B: Vec3 = [t[b * 3], t[b * 3 + 1], t[b * 3 + 2]];
         // Trecho da aresta entre o plano (w = 0) e a profundidade de vista.
@@ -167,7 +214,7 @@ export function buildSection(input: SectionInput): PlanDrawing {
         if (B[1] < 0) B = at(B, A, 0);
         if (A[1] > depth) A = at(A, B, depth);
         if (B[1] > depth) B = at(B, A, depth);
-        pushEdge([A[0], A[2]], [B[0], B[2]], isMep ? `${prefix}-IFC` : `${prefix}-VISTA`, color, PEN.vista, e.expressID);
+        pushEdge([A[0], A[2]], [B[0], B[2]], layout ? "ARQ-LAYOUT" : isMep ? `${prefix}-IFC` : `${prefix}-VISTA`, color, PEN.vista, e.expressID);
       }
     }
 
@@ -185,8 +232,8 @@ export function buildSection(input: SectionInput): PlanDrawing {
           pts: ch.points.map((p): P2 => [Math.min(Math.max(p[0], 0), L), p[1]]),
           closed: ch.closed,
           weight: isMep ? PEN.mep : PEN.corte,
-          fill: poche && ch.closed ? POCHE_FILL : null,
-          layer: isMep ? `${prefix}-IFC` : `${prefix}-CORTE`,
+          fill: poche && ch.closed ? (COLUMN_TYPES.has(e.ifcType) ? COLUMN_FILL : WALL_FILL) : null,
+          layer: layout ? "ARQ-LAYOUT" : isMep ? `${prefix}-IFC` : `${prefix}-CORTE`,
           color,
           id: e.expressID,
         });

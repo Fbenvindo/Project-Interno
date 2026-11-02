@@ -9,6 +9,8 @@ interface Base {
   color: string;
   /** Elemento do modelo associado (seleção). */
   id?: number;
+  /** Opacidade (0–1); ausente = opaco. */
+  opacity?: number;
 }
 
 export type Prim = Base &

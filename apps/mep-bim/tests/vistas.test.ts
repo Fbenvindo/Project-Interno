@@ -161,3 +161,74 @@ describe("corte vertical no modelo de exemplo", () => {
     expect(vd!.prims.filter((p) => p.layer === "ARQ-CORTE").every((p) => p.color === "#8c8c8c")).toBe(true);
   });
 });
+
+describe("corte: arestas sem emendas de triangulação", () => {
+  it("face com junção em T (triangulação com aberturas) mostra só o contorno", () => {
+    // Quadrado 2×2 numa face a 1 m além do plano, triangulado com uma junção em T na diagonal.
+    const P = (x: number, y: number) => [x, y, -1];
+    const verts = [P(0, 0), P(2, 0), P(2, 2), P(0, 2), P(1, 1)].flat();
+    const mesh = { positions: new Float32Array(verts), indices: new Uint32Array([0, 1, 2, 0, 4, 3, 4, 2, 3]) };
+    const el = { expressID: 7, ifcType: "IFCWALL", discipline: "arquitetura", bbox: { min: [0, 0, -1], max: [2, 2, -1] } } as unknown as import("../src/core/types").ElementInfo;
+    const d = buildSection({
+      elements: [el],
+      meshes: new Map([[7, mesh]]),
+      cs: new CoordinateSystem(),
+      storeyLevels: [],
+      points: [],
+      runs: [],
+      disciplines: new Set(["arquitetura"]),
+      cut: { a: [0, 0], b: [3, 0], side: 1, depth: 3 },
+      scale: 50,
+      name: "C",
+    });
+    const lines = d.prims.filter((p) => p.t === "line" && p.layer === "ARQ-VISTA") as Extract<Prim, { t: "line" }>[];
+    const diag = lines.filter((l) => Math.abs(l.a[0] - l.b[0]) > 1e-6 && Math.abs(l.a[1] - l.b[1]) > 1e-6);
+    expect(diag).toHaveLength(0);
+    expect(lines).toHaveLength(4);
+  });
+});
+
+describe("planta: vigas, pilares e layout", () => {
+  it("vigas da laje de baixo na planta de piso (texto LxA) e as de cima na de teto; pilar mais escuro; louça em cinza", async () => {
+    const { obbMesh } = await import("../src/core/obb");
+    const { buildPlan } = await import("../src/core/plan/build");
+    const I: [[number, number, number], [number, number, number], [number, number, number]] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    const mk = (id: number, ifcType: string, discipline: string, center: [number, number, number], half: [number, number, number]) => ({
+      el: { expressID: id, ifcType, discipline, storey: "T", systems: [], bbox: { min: center.map((c, i) => c - half[i]), max: center.map((c, i) => c + half[i]) } } as unknown as import("../src/core/types").ElementInfo,
+      mesh: obbMesh({ center, axes: I, half }),
+    });
+    const parts = [
+      mk(1, "IFCBEAM", "estrutura", [2, -0.25, 0], [2, 0.25, 0.075]), // viga 15×50 da laje do térreo
+      mk(2, "IFCBEAM", "estrutura", [2, 2.75, 0], [2, 0.25, 0.1]), // viga 20×50 do pavimento de cima
+      mk(3, "IFCCOLUMN", "estrutura", [5, 1.5, 0], [0.1, 1.5, 0.1]),
+      mk(4, "IFCWALL", "arquitetura", [5, 1.5, 2], [0.07, 1.5, 1]),
+      mk(5, "IFCSANITARYTERMINAL", "hidraulica", [1, 0.4, 2], [0.2, 0.4, 0.3]),
+    ];
+    const base = {
+      elements: parts.map((p) => p.el),
+      meshes: new Map(parts.map((p) => [p.el.expressID, p.mesh])),
+      cs: new CoordinateSystem(),
+      storeyLevels: [{ name: "T", level: 0 }, { name: "S", level: 3 }],
+      storey: "T",
+      cutHeight: 1.2,
+      points: [],
+      runs: [],
+      scale: 50,
+      disciplines: new Set(["arquitetura", "estrutura", "hidraulica"] as const),
+      labels: { tags: true, circuits: true, power: true, sizes: true },
+    };
+    const piso = buildPlan({ ...base, beams: { mode: "piso", show: true, text: true } });
+    const beams = piso.prims.filter((p) => p.layer === "EST-VIGAS");
+    expect(beams).toHaveLength(1);
+    expect(beams[0]).toMatchObject({ dashed: true, opacity: 0.5 });
+    expect(piso.prims.find((p) => p.layer === "EST-VIGAS-TEXTOS")).toMatchObject({ text: "15x50", opacity: 0.5 });
+    const teto = buildPlan({ ...base, beams: { mode: "teto", show: true, text: false } });
+    expect(teto.prims.filter((p) => p.layer === "EST-VIGAS")).toHaveLength(1);
+    expect(teto.prims.some((p) => p.layer === "EST-VIGAS-TEXTOS")).toBe(false);
+    expect(buildPlan({ ...base, beams: { mode: "piso", show: false, text: true } }).prims.some((p) => p.layer.startsWith("EST-VIGAS"))).toBe(false);
+    const fills = (id: number) => piso.prims.filter((p) => p.id === id && p.t === "poly").map((p) => (p as { fill?: string | null }).fill);
+    expect(fills(3)[0]).toBe("#5a5a5a");
+    expect(fills(4)[0]).toBe("#a6a6a6");
+    expect(piso.prims.filter((p) => p.id === 5).every((p) => p.color === "#8c8c8c" && p.layer === "ARQ-LAYOUT")).toBe(true);
+  });
+});

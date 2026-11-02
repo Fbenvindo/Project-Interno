@@ -176,6 +176,7 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
         draw("cota-ortogonal", "Cota ortogonal", "dCotaOrto"),
         draw("cota-inclinada", "Cota inclinada", "dCotaInclinada"),
         draw("cota-angular", "Cota angular", "dCotaAngular"),
+        draw("coordenada", "Indicar coordenada", "gIndicar"),
       ],
     },
   ],
@@ -190,13 +191,6 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
     },
   ],
   geral: [
-    {
-      label: "Coordenadas",
-      buttons: [
-        { key: "g-coordenadas", label: "Coordenadas do projeto", icon: "coordenadas", tool: { kind: "coordenadas" }, needsModel: true },
-        draw("coordenada", "Indicar coordenada", "gIndicar"),
-      ],
-    },
     {
       label: "Corte",
       buttons: [

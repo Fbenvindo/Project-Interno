@@ -165,6 +165,20 @@ wall("Parede social/íntima", 5000, 4500, 10000, T);
 wall("Parede banho/serviço", 8500, 6250, T, 3500);
 element("SLAB", "Laje de cobertura", box(5000, 4000, H, 10000 + T, 8000 + T, 150), "ROOF", cobertura);
 
+// Estrutura: pilares 20×20 nos cantos e nos encontros das paredes; vigas 15×50 sob a laje de cobertura.
+const column = (name, cx, cy) => element("COLUMN", name, box(cx, cy, 0, 200, 200, H), "COLUMN", tipo);
+column("Pilar P1", 0, 0);
+column("Pilar P2", 6000, 0);
+column("Pilar P3", 10000, 0);
+column("Pilar P4", 0, 8000);
+column("Pilar P5", 6000, 8000);
+column("Pilar P6", 10000, 8000);
+const beam = (name, cx, cy, dx, dy) => element("BEAM", name, box(cx, cy, H - 500, dx, dy, 500), "BEAM", tipo);
+beam("Viga V1", 5000, 0, 10000, 150);
+beam("Viga V2", 5000, 8000, 10000, 150);
+beam("Viga V3", 6000, 4000, 150, 8000);
+beam("Viga V4", 3000, 4500, 6000, 150);
+
 // Equipamentos (nomes como saem do Revit: Família:Tipo)
 const eq = (type, name, cx, cy, z, dx, dy, dz, predefined, objectType) => element(type, name, box(cx, cy, z, dx, dy, dz), predefined, tipo, objectType);
 // Sala

@@ -20,9 +20,40 @@ interface Props {
   onShow3D?: () => void;
   /** Vista 3D: grava a câmera atual na vista. */
   onSaveCamera?: () => void;
+  /** Plantas de trabalho: tipo de planta e vigas. */
+  workDisplay: BeamFields;
+  onWorkDisplay: (d: BeamFields) => void;
 }
 
-export function VistaPanel({ view, storey, projectDisciplines, available, sheets, onChange, onAddToSheet, onShow3D, onSaveCamera }: Props) {
+type BeamFields = Pick<ViewDef, "planType" | "showBeams" | "showBeamText">;
+
+/** Planta de piso/teto e vigas (projeção tracejada com largura × altura). */
+function BeamControls({ value, onChange }: { value: BeamFields; onChange: (v: BeamFields) => void }) {
+  return (
+    <>
+      <div className="field-label">Planta e vigas</div>
+      <div className="segmented small">
+        <button className={(value.planType ?? "piso") === "piso" ? "on" : ""} onClick={() => onChange({ ...value, planType: "piso" })} title="Vigas da laje de baixo">
+          Planta de piso
+        </button>
+        <button className={value.planType === "teto" ? "on" : ""} onClick={() => onChange({ ...value, planType: "teto" })} title="Vigas do pavimento de cima">
+          Planta de teto
+        </button>
+      </div>
+      <div className="options">
+        <label>
+          <input type="checkbox" checked={value.showBeams !== false} onChange={(e) => onChange({ ...value, showBeams: e.target.checked })} /> Vigas
+        </label>
+        <label>
+          <input type="checkbox" checked={value.showBeamText !== false} disabled={value.showBeams === false} onChange={(e) => onChange({ ...value, showBeamText: e.target.checked })} /> Textos das vigas
+          (L×A)
+        </label>
+      </div>
+    </>
+  );
+}
+
+export function VistaPanel({ view, storey, projectDisciplines, available, sheets, onChange, onAddToSheet, onShow3D, onSaveCamera, workDisplay, onWorkDisplay }: Props) {
   if (!view)
     return (
       <div className="vista-panel">
@@ -32,6 +63,7 @@ export function VistaPanel({ view, storey, projectDisciplines, available, sheets
         <p className="muted small">
           Vista de trabalho: tudo visível (modelo, vínculos e todas as disciplinas). Para as folhas, use a planta deste pavimento em Documentação.
         </p>
+        <BeamControls value={workDisplay} onChange={onWorkDisplay} />
       </div>
     );
   const set = (patch: Partial<ViewDef>) => onChange({ ...view, ...patch });
@@ -141,6 +173,7 @@ export function VistaPanel({ view, storey, projectDisciplines, available, sheets
         </>
       )}
 
+      {(view.kind === "planta" || view.kind === "ampliacao") && <BeamControls value={view} onChange={(v) => set(v)} />}
       {view.kind !== "3d" && (
         <>
           <div className="field-label">Textos</div>
