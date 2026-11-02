@@ -2019,21 +2019,23 @@ h3 {
   padding-right: 4px;
 }
 .tab-close {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   margin-right: 8px;
   padding: 0;
-  border: none;
-  border-radius: 4px;
-  background: none;
-  color: var(--muted);
-  font-size: 16px;
-  line-height: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 19px;
   cursor: pointer;
 }
 .tab-close:hover {
-  background: var(--hover-bg);
-  color: var(--fail);
+  background: var(--fail);
+  border-color: var(--fail);
+  color: #ffffff;
 }
 
 /* ---- Importar elementos (IFC / Revit) ----------------------------------------- */
