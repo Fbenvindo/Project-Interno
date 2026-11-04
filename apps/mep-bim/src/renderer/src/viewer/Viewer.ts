@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { label3Point, measure3Text, type Measure3 } from "../../../core/measure";
 import type { ComponentMesh, Shape } from "../../../core/library";
 import type { SurfaceHit } from "../../../core/placement";
 import { segmentBasis, type Profile } from "../../../core/runs";
@@ -111,6 +112,19 @@ export class Viewer {
   /** Janela de seleção (arrastar com o botão esquerdo fora dos comandos de locação/traçado). */
   onPickMany: (ids: number[], additive: boolean) => void = () => {};
   private boxStart: { x: number; y: number } | null = null;
+  // ---- Medição no 3D ----
+  private measureMode: { onClick: (p: Vec3) => void; onFinish: () => void } | null = null;
+  private measureGroup = new THREE.Group();
+  private measureLabelsEl: HTMLDivElement;
+  private measureLabels: { el: HTMLDivElement; p: THREE.Vector3 }[] = [];
+  private measureDone: Measure3[] = [];
+  private measurePending: Measure3 | null = null;
+  private measureHover: { p: Vec3; snapped: boolean } | null = null;
+  private measureLineMat = new THREE.LineBasicMaterial({ color: 0xdb2777, depthTest: false, transparent: true });
+  private measureDotMat = new THREE.MeshBasicMaterial({ color: 0xdb2777, depthTest: false, transparent: true });
+  private measureSnapMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b, depthTest: false, transparent: true });
+  private measureDot = new THREE.SphereGeometry(1, 12, 8);
+  private measureRaf = 0;
   private boxEl: HTMLDivElement;
 
   constructor(private container: HTMLElement) {
@@ -131,7 +145,11 @@ export class Viewer {
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
     sun.position.set(30, 50, 20);
     this.scene.add(sun);
-    this.scene.add(this.modelGroup, this.pointsGroup, this.runsGroup, this.previewGroup, this.staticPreviewGroup, this.spacesGroup);
+    this.scene.add(this.modelGroup, this.pointsGroup, this.runsGroup, this.previewGroup, this.staticPreviewGroup, this.spacesGroup, this.measureGroup);
+    this.measureGroup.renderOrder = 999;
+    this.measureLabelsEl = document.createElement("div");
+    this.measureLabelsEl.className = "measure-labels";
+    container.appendChild(this.measureLabelsEl);
 
     const grid = new THREE.GridHelper(100, 100, 0x3a4250, 0x262c35);
     grid.name = "grid";
@@ -145,7 +163,7 @@ export class Viewer {
     container.appendChild(this.boxEl);
     canvas.addEventListener("pointerdown", (e) => {
       this.pointerDown = { x: e.clientX, y: e.clientY };
-      this.boxStart = e.button === 0 && !this.placement ? { x: e.clientX, y: e.clientY } : null;
+      this.boxStart = e.button === 0 && !this.placement && !this.measureMode ? { x: e.clientX, y: e.clientY } : null;
     });
     canvas.addEventListener("pointermove", (e) => {
       const b = this.boxStart;
@@ -174,6 +192,11 @@ export class Viewer {
       const moved = Math.hypot(e.clientX - this.pointerDown.x, e.clientY - this.pointerDown.y);
       this.pointerDown = null;
       if (moved >= 4 || e.button !== 0) return;
+      if (this.measureMode) {
+        const s = this.measureSnap(e.clientX, e.clientY);
+        if (s) this.measureMode.onClick(s.p);
+        return;
+      }
       if (this.placement) {
         this.shiftDown = e.shiftKey;
         const { hit, ctx } = this.probe(e.clientX, e.clientY);
@@ -184,6 +207,15 @@ export class Viewer {
       }
     });
     canvas.addEventListener("pointermove", (e) => {
+      if (this.measureMode && !e.buttons) {
+        const { clientX, clientY } = e;
+        cancelAnimationFrame(this.measureRaf);
+        this.measureRaf = requestAnimationFrame(() => {
+          this.measureHover = this.measureSnap(clientX, clientY);
+          this.rebuildMeasure();
+        });
+        return;
+      }
       if (!this.placement) return;
       this.hoverPos = { x: e.clientX, y: e.clientY };
       this.shiftDown = e.shiftKey;
@@ -195,6 +227,7 @@ export class Viewer {
       this.hoverDirty = true;
     });
     canvas.addEventListener("dblclick", () => {
+      if (this.measureMode) return this.measureMode.onFinish();
       if (this.placement) this.placement.doubleClick?.();
       else this.fitTo(this.selected.size ? [...this.selected] : undefined);
     });
@@ -480,7 +513,7 @@ export class Viewer {
    */
   private applyMouseButtons() {
     this.controls.mouseButtons = {
-      LEFT: (this.placement ? THREE.MOUSE.ROTATE : null) as unknown as THREE.MOUSE,
+      LEFT: (this.placement || this.measureMode ? THREE.MOUSE.ROTATE : null) as unknown as THREE.MOUSE,
       MIDDLE: THREE.MOUSE.PAN,
       RIGHT: THREE.MOUSE.ROTATE,
     };
@@ -893,6 +926,107 @@ export class Viewer {
     if (this.needsRender || changed) {
       this.needsRender = false;
       this.renderer.render(this.scene, this.camera);
+      this.placeMeasureLabels();
     }
   };
+
+  // ---- Medição no 3D ---------------------------------------------------------------------
+
+  /** Liga (ou desliga, com null) a medição: cliques no modelo viram pontos, com encaixe. */
+  setMeasureMode(handler: { onClick: (p: Vec3) => void; onFinish: () => void } | null) {
+    this.measureMode = handler;
+    this.measureHover = null;
+    this.applyMouseButtons();
+    this.renderer.domElement.style.cursor = handler ? "crosshair" : this.placement ? "crosshair" : "";
+    this.rebuildMeasure();
+  }
+
+  /** Medições feitas e a em andamento (desenhadas por cima do modelo, com o valor). */
+  setMeasures(done: Measure3[], pending: Measure3 | null) {
+    this.measureDone = done;
+    this.measurePending = pending;
+    this.rebuildMeasure();
+  }
+
+  /** Ponto do modelo sob o cursor; encaixa em vértices e meios de arestas do triângulo atingido (até 14 px). */
+  private measureSnap(clientX: number, clientY: number): { p: Vec3; snapped: boolean } | null {
+    this.raycaster.setFromCamera(this.ndc(clientX, clientY), this.camera);
+    const targets = [...this.modelGroup.children, ...this.pointsGroup.children, ...this.runsGroup.children].filter((o) => o.visible && (o as THREE.Mesh).material !== this.ghostMaterial);
+    const hit = this.raycaster.intersectObjects(targets, false).find((h) => !this.clipped(h.point));
+    if (!hit) return null;
+    let best: { p: THREE.Vector3; d: number } | null = null;
+    const geo = (hit.object as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
+    const pos = geo?.getAttribute("position");
+    if (hit.face && pos) {
+      const v = [hit.face.a, hit.face.b, hit.face.c].map((i) => new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(hit.object.matrixWorld));
+      const cands = [...v, v[0].clone().lerp(v[1], 0.5), v[1].clone().lerp(v[2], 0.5), v[2].clone().lerp(v[0], 0.5)];
+      for (const c of cands) {
+        if (this.clipped(c)) continue;
+        const sp = this.toScreen([c.x, c.y, c.z]);
+        const d = Math.hypot(sp.x - clientX, sp.y - clientY);
+        if (d < 14 && (!best || d < best.d)) best = { p: c, d };
+      }
+    }
+    const p = best?.p ?? hit.point;
+    return { p: [p.x, p.y, p.z], snapped: !!best };
+  }
+
+  private rebuildMeasure() {
+    for (const c of [...this.measureGroup.children]) {
+      this.measureGroup.remove(c);
+      if (c instanceof THREE.Line) c.geometry.dispose();
+    }
+    this.measureLabelsEl.replaceChildren();
+    this.measureLabels = [];
+    if (this.measureMode || this.measureDone.length) {
+      const live = this.measurePending
+        ? { ...this.measurePending, pts: this.measureHover && this.measureMode ? [...this.measurePending.pts, this.measureHover.p] : this.measurePending.pts }
+        : null;
+      // Tamanho dos marcadores proporcional à distância da câmera (aparência constante).
+      const scaleAt = (p: Vec3) => Math.max(0.01, this.camera.position.distanceTo(new THREE.Vector3(...p)) * 0.006);
+      for (const m of [...this.measureDone, ...(live ? [live] : [])]) {
+        if (m.pts.length >= 2) {
+          const g = new THREE.BufferGeometry().setFromPoints(m.pts.map((q) => new THREE.Vector3(...q)));
+          const line = m.kind === "area" && m.pts.length >= 3 ? new THREE.LineLoop(g, this.measureLineMat) : new THREE.Line(g, this.measureLineMat);
+          line.renderOrder = 999;
+          this.measureGroup.add(line);
+        }
+        for (const q of m.pts) {
+          const dot = new THREE.Mesh(this.measureDot, this.measureDotMat);
+          dot.position.set(...q);
+          dot.scale.setScalar(scaleAt(q));
+          dot.renderOrder = 1000;
+          this.measureGroup.add(dot);
+        }
+        const text = measure3Text(m);
+        if (text) {
+          const el = document.createElement("div");
+          el.className = "measure-label";
+          el.textContent = text;
+          this.measureLabelsEl.appendChild(el);
+          this.measureLabels.push({ el, p: new THREE.Vector3(...label3Point(m)) });
+        }
+      }
+      if (this.measureMode && this.measureHover) {
+        const dot = new THREE.Mesh(this.measureDot, this.measureHover.snapped ? this.measureSnapMat : this.measureDotMat);
+        dot.position.set(...this.measureHover.p);
+        dot.scale.setScalar(scaleAt(this.measureHover.p) * (this.measureHover.snapped ? 1.6 : 1));
+        dot.renderOrder = 1001;
+        this.measureGroup.add(dot);
+      }
+    }
+    this.requestRender();
+  }
+
+  private placeMeasureLabels() {
+    if (!this.measureLabels.length) return;
+    const r = this.renderer.domElement.getBoundingClientRect();
+    for (const { el, p } of this.measureLabels) {
+      const v = p.clone().project(this.camera);
+      const visible = v.z < 1 && Math.abs(v.x) <= 1.2 && Math.abs(v.y) <= 1.2;
+      el.style.display = visible ? "" : "none";
+      el.style.left = `${((v.x + 1) / 2) * r.width}px`;
+      el.style.top = `${((1 - v.y) / 2) * r.height}px`;
+    }
+  }
 }

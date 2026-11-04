@@ -40,7 +40,7 @@ import type { Vec3 } from "../../../core/types";
 import type { CoordinateSystem } from "../../../core/math";
 import type { PointsStore } from "../locacao/usePointsStore";
 import type { ClickInfo, PlanTool, ToolQuestion } from "../planta/planTool";
-import { labelPoint, measureText, type Measure } from "../../../core/measure";
+import { labelPoint, measureText, type Measure, type Measure3 } from "../../../core/measure";
 
 export type DraftCmd =
   | "linha"
@@ -178,6 +178,9 @@ export function useDraftTool(a: Args) {
   const [textAt, setTextAt] = useState<P2 | null>(null);
   /** Medições feitas (ficam na tela enquanto o comando de medir está ativo). */
   const [measures, setMeasures] = useState<Measure[]>([]);
+  /** Medições no 3D (cena) e os pontos da que está em andamento. */
+  const [measures3d, setMeasures3d] = useState<Measure3[]>([]);
+  const [pending3d, setPending3d] = useState<Vec3[]>([]);
   const argsRef = useRef(a);
   argsRef.current = a;
 
@@ -199,7 +202,8 @@ export function useDraftTool(a: Args) {
     setPhase("selecionar");
     setPending(null);
     setTextAt(null);
-    if (!isMeasureCmd(cmd)) setMeasures([]);
+    setPending3d([]);
+    if (!isMeasureCmd(cmd)) (setMeasures([]), setMeasures3d([]));
     if (NEEDS_SELECTION.has(cmd)) argsRef.current.setSelection(editable(argsRef.current.selection));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmd, n]);
@@ -573,7 +577,7 @@ export function useDraftTool(a: Args) {
   };
 
   const tool: PlanTool = {
-    prompt: textAt ? "Texto: digite e tecle Enter para gravar · Esc cancela" : promptFor(cmd, phase, pts.length, count),
+    prompt: textAt ? "Texto: digite e tecle Enter para gravar · Esc cancela" : promptFor(cmd, phase, Math.max(pts.length, pending3d.length), count),
     question,
     textInput: textAt
       ? {
@@ -717,6 +721,7 @@ export function useDraftTool(a: Args) {
     },
   };
 
+  const kind3d: Measure3["kind"] = cmd === "medir-area" ? "area" : cmd === "medir-angulo" ? "angulo" : "distancia";
   return {
     tool,
     phase,
@@ -733,6 +738,25 @@ export function useDraftTool(a: Args) {
     angleDeg,
     measures,
     setMeasures,
+    measures3d,
+    setMeasures3d,
+    /** Medição em andamento no 3D (para desenhar com o ponto sob o cursor). */
+    pending3d: isMeasureCmd(cmd) ? ({ kind: kind3d, pts: pending3d } as Measure3) : null,
+    click3d: (q: Vec3) => {
+      const last = pending3d[pending3d.length - 1];
+      if (last && Math.hypot(last[0] - q[0], last[1] - q[1], last[2] - q[2]) < 1e-6) return;
+      const next = [...pending3d, q];
+      if (kind3d === "angulo" && next.length === 3) {
+        setMeasures3d((m) => [...m, { kind: "angulo", pts: next }]);
+        return setPending3d([]);
+      }
+      setPending3d(next);
+    },
+    finish3d: () => {
+      if (kind3d === "distancia" && pending3d.length >= 2) setMeasures3d((m) => [...m, { kind: "distancia", pts: pending3d }]);
+      if (kind3d === "area" && pending3d.length >= 3) setMeasures3d((m) => [...m, { kind: "area", pts: pending3d }]);
+      setPending3d([]);
+    },
     /** Grava uma medição como texto na vista (anotação permanente). */
     measureToText: (m: Measure) => addDraft({ id: newDraftId(), ...base, kind: "texto", p: labelPoint(m), text: measureText(m), size: 2.5, rot: 0 } as DraftEntity),
   };

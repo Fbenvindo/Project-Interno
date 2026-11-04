@@ -1,5 +1,6 @@
 // Medições na planta, ampliações e cortes (coordenadas do desenho, em metros).
 import type { P2 } from "./plan/section";
+import type { Vec3 } from "./types";
 
 export type MeasureKind = "distancia" | "area" | "angulo";
 
@@ -71,4 +72,69 @@ export function labelPoint(m: Measure): P2 {
   const a = m.pts[m.pts.length - 2] ?? m.pts[0];
   const b = m.pts[m.pts.length - 1];
   return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+}
+
+// ---- Medições no 3D (cena: metros, Y para cima) ----------------------------------------------
+
+export interface Measure3 {
+  kind: MeasureKind;
+  pts: Vec3[];
+}
+
+const sub3 = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const len3 = (a: Vec3) => Math.hypot(a[0], a[1], a[2]);
+const cross3 = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+export function chainLength3(pts: Vec3[]): number {
+  return pts.slice(1).reduce((s, p, i) => s + len3(sub3(p, pts[i])), 0);
+}
+
+/** Área de um polígono plano no espaço (inclinado ou vertical) e perímetro. */
+export function polygonMeasure3(pts: Vec3[]): { area: number; perimeter: number } {
+  let s: Vec3 = [0, 0, 0];
+  for (let i = 0; i < pts.length; i++) {
+    const c = cross3(pts[i], pts[(i + 1) % pts.length]);
+    s = [s[0] + c[0], s[1] + c[1], s[2] + c[2]];
+  }
+  return { area: len3(s) / 2, perimeter: pts.length > 1 ? chainLength3([...pts, pts[0]]) : 0 };
+}
+
+export function angleAt3(a: Vec3, b: Vec3, c: Vec3): number {
+  const u = sub3(a, b);
+  const v = sub3(c, b);
+  const lu = len3(u);
+  const lv = len3(v);
+  if (lu < 1e-12 || lv < 1e-12) return 0;
+  return (Math.acos(Math.max(-1, Math.min(1, (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]) / (lu * lv)))) * 180) / Math.PI;
+}
+
+export function measure3Text(m: Measure3): string {
+  if (m.kind === "distancia") {
+    if (m.pts.length < 2) return "";
+    const total = chainLength3(m.pts);
+    if (m.pts.length === 2) {
+      const d = sub3(m.pts[1], m.pts[0]);
+      return `${fmtM(total)} (horizontal ${br(Math.hypot(d[0], d[2]), 3)} · vertical ${br(Math.abs(d[1]), 3)})`;
+    }
+    return `${fmtM(total)} em ${m.pts.length - 1} trechos`;
+  }
+  if (m.kind === "area") {
+    if (m.pts.length < 3) return "";
+    const { area, perimeter } = polygonMeasure3(m.pts);
+    return `${fmtM2(area)} · perímetro ${fmtM(perimeter)}`;
+  }
+  if (m.pts.length < 3) return "";
+  const a = angleAt3(m.pts[0], m.pts[1], m.pts[2]);
+  return `${fmtDeg(a)} (replemento ${fmtDeg(360 - a)})`;
+}
+
+export function label3Point(m: Measure3): Vec3 {
+  if (m.kind === "angulo") return m.pts[1] ?? m.pts[0];
+  if (m.kind === "area") {
+    const n = m.pts.length;
+    return [0, 1, 2].map((k) => m.pts.reduce((s, p) => s + p[k], 0) / n) as Vec3;
+  }
+  const a = m.pts[m.pts.length - 2] ?? m.pts[0];
+  const b = m.pts[m.pts.length - 1];
+  return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
 }

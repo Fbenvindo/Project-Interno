@@ -3,7 +3,7 @@ import { DRAFT_LABEL } from "../../../core/draft";
 import { runIdOfElement } from "../../../core/runs";
 import type { PointsStore } from "../locacao/usePointsStore";
 import { CMD_LABEL, isCreateCmd, isMeasureCmd, NEEDS_SELECTION, type DraftCmd, type DraftController } from "./useDraftTool";
-import { measureText } from "../../../core/measure";
+import { measure3Text, measureText } from "../../../core/measure";
 
 interface Props {
   cmd: DraftCmd;
@@ -189,15 +189,34 @@ export function DesenhoPanel({ cmd, ctl, store, selection, setSelection, hasClip
       {isMeasureCmd(cmd) && (
         <section className="card">
           <div className="panel-head">
-            <h3>Medições ({ctl.measures.length})</h3>
-            {ctl.measures.length > 0 && (
-              <button className="link" onClick={() => ctl.setMeasures([])}>
+            <h3>Medições ({ctl.measures.length + ctl.measures3d.length})</h3>
+            {ctl.measures.length + ctl.measures3d.length > 0 && (
+              <button className="link" onClick={() => (ctl.setMeasures([]), ctl.setMeasures3d([]))}>
                 limpar
               </button>
             )}
           </div>
+          {ctl.measures3d.length > 0 && (
+            <ul className="sel-list">
+              {ctl.measures3d.map((m, i) => (
+                <li key={`3d${i}`}>
+                  <span className="grow">
+                    <b>3D · {m.kind === "distancia" ? "Distância" : m.kind === "area" ? "Área" : "Ângulo"}:</b> {measure3Text(m)}
+                  </span>
+                  <button className="link danger-link" title="Apagar esta medição" onClick={() => ctl.setMeasures3d((l) => l.filter((_, j) => j !== i))}>
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           {ctl.measures.length === 0 ? (
-            <p className="muted small">Clique nos pontos na planta (ou no corte). As medidas ficam na tela até você sair do comando (Esc).</p>
+            ctl.measures3d.length === 0 && (
+              <p className="muted small">
+                Clique nos pontos na planta, no corte ou no 3D. No 3D, o clique pega a superfície do modelo e encaixa em vértices e meios de arestas (marcador
+                laranja); arrastar gira a vista. As medidas ficam na tela até você sair do comando (Esc).
+              </p>
+            )
           ) : (
             <ul className="sel-list">
               {ctl.measures.map((m, i) => (

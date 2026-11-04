@@ -43,7 +43,7 @@ import { CoordenadasPanel } from "./coords/CoordenadasPanel";
 import { useCursor } from "./coords/cursor";
 import { EMPTY_GEOREF, effectiveGeoref, fmtCoord, toMap, type Georef } from "../../core/georef";
 import { loadFamilyLibrary } from "./library/familyLibrary";
-import { useDraftTool, CMD_LABEL, isCreateCmd } from "./desenho/useDraftTool";
+import { useDraftTool, CMD_LABEL, isCreateCmd, isMeasureCmd } from "./desenho/useDraftTool";
 import { DesenhoPanel } from "./desenho/DesenhoPanel";
 import { CoordinateSystem } from "../../core/math";
 import { color3d } from "../../core/plan/style";
@@ -210,6 +210,8 @@ export function App() {
       setToolDisc(disc);
       if (spec.kind === "pranchas") setView("prancha");
       else if (spec.kind === "locacao" || spec.kind === "tracado") setView("planta");
+      // Medir funciona na planta, nos cortes e no 3D: fica na vista atual (da folha vai para a planta).
+      else if (spec.kind === "desenho" && isMeasureCmd(spec.cmd)) setView((v) => (v === "prancha" || v === "vazio" ? "planta" : v));
       else if (spec.kind === "desenho" && spec.cmd !== "corte-selecao") setView("planta");
       setRightOpen(true);
     },
@@ -1007,6 +1009,26 @@ export function App() {
     onDone: () => chooseTool({ kind: "propriedades" }),
   });
   const planTool = tool.kind === "desenho" ? draft.tool : null;
+
+  // Medição no 3D: cliques no modelo (com encaixe), Enter ou duplo clique encerra.
+  const measuring3d = tool.kind === "desenho" && isMeasureCmd(tool.cmd) && view === "3d";
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  useEffect(() => {
+    const vw = viewerRef.current;
+    if (!vw) return;
+    vw.setMeasureMode(measuring3d ? { onClick: (p) => draftRef.current.click3d(p), onFinish: () => draftRef.current.finish3d() } : null);
+    if (!measuring3d) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key === "Enter" && !(t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT"))) draftRef.current.finish3d();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [measuring3d]);
+  useEffect(() => {
+    viewerRef.current?.setMeasures(tool.kind === "desenho" && isMeasureCmd(tool.cmd) && view === "3d" ? draft.measures3d : [], measuring3d ? draft.pending3d : null);
+  }, [draft.measures3d, draft.pending3d, measuring3d, tool, view]);
 
   // Esc: encerra o comando em andamento (locar, traçar, desenhar, modificar) e volta a Selecionar;
   // já em Selecionar, limpa a seleção. Em campos de texto, o Esc é do campo.

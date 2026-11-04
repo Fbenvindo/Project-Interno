@@ -2121,3 +2121,24 @@ h3 {
   background: var(--bg);
   color: var(--text);
 }
+
+/* Medição no 3D */
+.measure-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 2;
+}
+.measure-label {
+  position: absolute;
+  transform: translate(-50%, -130%);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #db2777;
+  color: #9d174d;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}

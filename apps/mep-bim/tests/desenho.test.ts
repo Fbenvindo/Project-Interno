@@ -68,3 +68,12 @@ describe("medições", async () => {
     expect(measureText({ kind: "angulo", pts: [[1, 0], [0, 0], [1, 1]] })).toBe("45,0° (replemento 315,0°)");
   });
 });
+
+describe("medições no 3D", async () => {
+  const { measure3Text, polygonMeasure3, angleAt3 } = await import("../src/core/measure");
+  it("distância com horizontal e vertical; área de face vertical; ângulo", () => {
+    expect(measure3Text({ kind: "distancia", pts: [[0, 0, 0], [3, 4, 0]] })).toBe("5,000 m (horizontal 3,000 · vertical 4,000)");
+    expect(polygonMeasure3([[0, 0, 0], [2, 0, 0], [2, 3, 0], [0, 3, 0]]).area).toBeCloseTo(6); // parede (plano vertical)
+    expect(angleAt3([1, 0, 0], [0, 0, 0], [0, 0, 1])).toBeCloseTo(90);
+  });
+});
