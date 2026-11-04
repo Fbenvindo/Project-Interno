@@ -14,6 +14,7 @@ import { migrateViews, type ViewDef } from "./views";
 import type { SheetDef } from "./viewDrawing";
 import type { Discipline } from "./types";
 import type { ProjectChoices } from "./alternatives";
+import { normalizeInstall, withInstallDefaults, type ConduitInstall, type InstallSettings } from "./conduits";
 
 /** Vista 3D criada pelo usuário (coordenadas do projeto, m). */
 export interface SavedView {
@@ -43,6 +44,8 @@ export interface ProjectData {
   disciplines?: Discipline[];
   /** Marca de referência por grupo e elemento escolhido entre equivalentes. */
   choices?: ProjectChoices;
+  /** Medidas das formas de instalação no empreendimento. */
+  installSettings?: InstallSettings;
 }
 
 interface StoredCircuit {
@@ -71,6 +74,8 @@ interface StoredRun {
   vertices: Vec3[];
   parametros: Record<string, string | number>;
   circuito?: string | null;
+  /** Eletrodutos: forma de instalação. */
+  instalacao?: ConduitInstall;
 }
 
 export interface ProjectFile extends LocacaoFile {
@@ -83,6 +88,7 @@ export interface ProjectFile extends LocacaoFile {
   folhas?: SheetDef[];
   disciplinas?: Discipline[];
   marcas?: Record<string, string>;
+  instalacoes?: InstallSettings;
   variantes?: Record<string, string>;
   vinculos?: { id: string; nome: string; caminho: string | null; disciplina: LinkMeta["discipline"]; visivel: boolean; transparente: boolean; alinhamento?: LinkMeta["align"] }[];
 }
@@ -105,6 +111,7 @@ export function serializeProject(data: ProjectData, cs: CoordinateSystem, modelN
       vertices: r.vertices.map((v) => cs.worldToIfc(v).map(round6) as Vec3),
       parametros: r.params,
       ...(r.circuit ? { circuito: r.circuit } : {}),
+      ...(r.install ? { instalacao: r.install } : {}),
     })),
     circuitos: data.circuits.map((c) => ({
       uid: c.uid,
@@ -126,6 +133,7 @@ export function serializeProject(data: ProjectData, cs: CoordinateSystem, modelN
     ...(data.disciplines?.length ? { disciplinas: data.disciplines } : {}),
     ...(data.choices && Object.keys(data.choices.brands).length ? { marcas: data.choices.brands } : {}),
     ...(data.choices && Object.keys(data.choices.variants).length ? { variantes: data.choices.variants } : {}),
+    ...(data.installSettings ? { instalacoes: data.installSettings } : {}),
     ...(data.links?.length
       ? { vinculos: data.links.map((l) => ({ id: l.id, nome: l.name, caminho: l.path, disciplina: l.discipline, visivel: l.visible, transparente: l.translucent, ...(l.align ? { alinhamento: l.align } : {}) })) }
       : {}),
@@ -148,6 +156,7 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
       vertices: s.vertices.map((v) => cs.ifcToWorld(v)),
       params: s.parametros ?? {},
       circuit: s.circuito ?? null,
+      ...(normalizeInstall(s.instalacao) ? { install: normalizeInstall(s.instalacao) } : {}),
     };
   });
   const circuits: Circuit[] = (file.circuitos ?? []).map((c) => ({
@@ -180,5 +189,6 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
     sheets: Array.isArray(file.folhas) ? file.folhas : [],
     disciplines: Array.isArray(file.disciplinas) ? file.disciplinas : [],
     choices: { brands: file.marcas ?? {}, variants: file.variantes ?? {} },
+    installSettings: withInstallDefaults(file.instalacoes),
   };
 }

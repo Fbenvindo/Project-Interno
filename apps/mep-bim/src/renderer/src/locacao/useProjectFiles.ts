@@ -53,7 +53,7 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel | null, f
       const json = JSON.stringify(
         {
           ...serializeProject(
-            { points: store.points, runs: store.runs, circuits: store.circuits, program: store.program, links: store.links, georef: store.georef, drafts: store.drafts, views: store.views, sheets: store.sheets, disciplines: store.disciplines, choices: store.choices },
+            { points: store.points, runs: store.runs, circuits: store.circuits, program: store.program, links: store.links, georef: store.georef, drafts: store.drafts, views: store.views, sheets: store.sheets, disciplines: store.disciplines, choices: store.choices, installSettings: store.installSettings },
             model.coordinates,
             fileName,
           ),

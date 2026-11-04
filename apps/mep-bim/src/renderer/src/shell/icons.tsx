@@ -455,6 +455,15 @@ const P: Record<string, ReactNode> = {
       <path d="M4 4 L20 20" />
     </>
   ),
+  gInstal: (
+    <>
+      <path d="M3 20 H21 M3 4 H21 M4 4 V20" />
+      <circle cx="10" cy="17" r="1.6" />
+      <circle cx="7" cy="11" r="1.6" />
+      <circle cx="13" cy="6.5" r="1.6" />
+      <path d="M15 10 H20 M15 13 H20 M15 16 H20" />
+    </>
+  ),
   gMedDist: (
     <>
       <path d="M3 15 L21 15 M3 12 V18 M21 12 V18" />

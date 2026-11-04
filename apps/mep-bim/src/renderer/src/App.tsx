@@ -30,7 +30,9 @@ import { connectedPairs, runElements, runFittings, runIdOfElement, runProperties
 import { usePointsStore } from "./locacao/usePointsStore";
 import { alignKey, DEFAULT_ALIGN, federate, prepareLink, type LinkData, type LinkMeta } from "../../ifc/federate";
 import { openIfcMany, readIfcPath } from "./platform";
-import { boxElements, boxIndexOf, boxProperties, pullBoxes } from "../../core/conduits";
+import { applyInstall, boxElements, boxIndexOf, boxProperties, DEFAULT_INSTALL, isConduitRun, pullBoxes, runFloorProbeY, type InstallMode } from "../../core/conduits";
+import { storeyAt } from "../../core/points";
+import { InstalacoesPanel } from "./tracado/InstalacoesPanel";
 import { defaultTitleBlockId, titleBlockById, useTitleBlocks } from "./planta/titleBlocks";
 import { setHostLoader, setProjectFile, useProjectFile, useProjectFiles } from "./locacao/useProjectFiles";
 import { EMPTY_FILTERS, Navigator, NO_STOREY, type Filters } from "./shell/Navigator";
@@ -95,6 +97,7 @@ const TOOL_HINT: Record<ToolSpec["kind"], string> = {
   programa: "Defina as instalações por tipo de equipamento e por ambiente e gere os pontos no modelo",
   vinculos: "Modelos de outras disciplinas sobrepostos ao principal, pelas coordenadas do projeto",
   coordenadas: "Ponto base, survey point, sistema de referência e norte do projeto",
+  instalacoes: "Medidas de cada forma de instalação dos eletrodutos neste empreendimento",
   desenho: "Siga as instruções sobre a planta · Enter conclui · Esc cancela",
 };
 
@@ -1114,8 +1117,34 @@ export function App() {
             typeIds={disc?.runs}
             elementById={elementById}
             preset={{ typeId: tool.typeId, n: tool.n }}
+            onConfigureInstalls={() => chooseTool({ kind: "instalacoes" }, toolDisc)}
           />
         );
+      case "instalacoes": {
+        const counts: Partial<Record<InstallMode, number>> = {};
+        for (const r of store.runs) if (isConduitRun(r)) counts[(r.install ?? DEFAULT_INSTALL).mode] = (counts[(r.install ?? DEFAULT_INSTALL).mode] ?? 0) + 1;
+        return (
+          <InstalacoesPanel
+            settings={store.installSettings}
+            onChange={store.setInstallSettings}
+            counts={counts}
+            onApply={() => {
+              if (!slabAt) return;
+              const conduits = store.runs.filter(isConduitRun);
+              const changes = new Map(
+                conduits.map((r) => {
+                  const name = storeyAt(runFloorProbeY(r), model.storeyLevels);
+                  const floorY = model.storeyLevels.find((l) => l.name === name)?.level ?? 0;
+                  const mid = r.vertices[Math.floor(r.vertices.length / 2)];
+                  return [r.id, applyInstall(r, r.install ?? DEFAULT_INSTALL, { floorY, slabUnderside: slabAt(mid[0], mid[2], floorY), settings: store.installSettings, points: store.points })];
+                }),
+              );
+              store.updateRuns([...changes.keys()], (r) => changes.get(r.id)!);
+              files.setMessage(`${changes.size} eletroduto(s) levados às cotas das medidas atuais.`);
+            }}
+          />
+        );
+      }
       case "circuitos":
         return <CircuitosPanel model={model} fileName={fileName} store={store} selection={selection} onSelect={selectPoints} />;
       case "quantitativos":

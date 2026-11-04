@@ -31,6 +31,7 @@ export type ToolSpec =
   | { kind: "biblioteca" }
   | { kind: "vinculos" }
   | { kind: "coordenadas" }
+  | { kind: "instalacoes" }
   | { kind: "desenho"; cmd: DraftCmd }
   | { kind: "programa"; section: "tipos" | "ambientes" };
 
@@ -280,6 +281,7 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
         run("eletroduto", "Eletroduto rígido", "eletroduto", "eletroduto-pvc"),
         run("eletroduto-flex", "Eletroduto flexível", "eletrodutoFlex", "eletroduto-flexivel"),
         run("eletrocalha", "Eletrocalha", "eletrocalha", "eletrocalha"),
+        { key: "instalacoes", label: "Instalações", icon: "gInstal", tool: { kind: "instalacoes" } },
       ],
     },
     {

@@ -6,7 +6,7 @@ import type { OBB } from "./obb";
 import { COMPONENT_BY_ID } from "./library";
 import { pointOBB, storeyAt, type PlacedPoint, type StoreyLevel } from "./points";
 import type { BBox, Discipline, ElementInfo, PropertyGroup, Vec3 } from "./types";
-import type { ConduitInstall } from "./conduits";
+import { INSTALL_LABEL, type ConduitInstall } from "./conduits";
 
 export type Profile = "circular" | "retangular";
 
@@ -110,8 +110,8 @@ export interface Run {
  */
 export function storeyProbeY(run: Pick<Run, "install">, y: number): number {
   const mode = run.install?.mode;
-  if (mode === "laje" || mode === "aparente") return y - 0.4;
-  if (mode === "piso") return y + 0.1;
+  if (mode === "laje" || mode === "laje-aparente" || mode === "entreforro") return y - 0.4;
+  if (mode === "piso" || mode === "canaleta") return y + 0.1;
   return y;
 }
 
@@ -441,7 +441,8 @@ export function runElements(runs: Run[], levels: StoreyLevel[]): ElementInfo[] {
   return out;
 }
 
-const INSTALL_TEXT = { piso: "Embutido no piso", laje: "Embutido na laje", aparente: "Aparente no teto" } as const;
+
+const capitalize = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
 export function runProperties(r: Run): PropertyGroup[] {
   const t = RUN_TYPE_BY_ID[r.typeId];
@@ -456,7 +457,7 @@ export function runProperties(r: Run): PropertyGroup[] {
         { name: "Bitola", value: r.size.label },
         { name: "Material", value: t.material },
         { name: "Sistema", value: r.system },
-        ...(r.install ? [{ name: "Instalação", value: INSTALL_TEXT[r.install.mode] + (r.install.mode === "aparente" ? (r.install.apparentRef === "entreforro" ? " (entreforro)" : " (sob a laje)") : r.install.mode === "piso" && r.install.external ? " (área externa)" : "") }] : []),
+        ...(r.install ? [{ name: "Instalação", value: capitalize(INSTALL_LABEL[r.install.mode]) + (r.install.mode === "piso" && r.install.external ? " (área externa)" : "") }] : []),
         ...(t.flexible ? [{ name: "Eletroduto", value: "flexível (curvatura livre)" }] : t.conduitMaterial ? [{ name: "Eletroduto", value: "rígido (curvas de 45° e 90°)" }] : []),
         { name: "Comprimento total (m)", value: Math.round(runLength(r) * 100) / 100 },
         { name: "Segmentos", value: runSegments(r).length },

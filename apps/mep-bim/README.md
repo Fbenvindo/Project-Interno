@@ -122,6 +122,31 @@ Na aba **Planta 2D**, escolha o pavimento, a altura de corte (padrão 1,20 m aci
 
 A simbologia é um ponto de partida: confira com o padrão gráfico do escritório antes de emitir pranchas.
 
+### Formas de instalação da infraestrutura
+
+Os eletrodutos podem ser instalados de sete formas, escolhidas no traçado (agrupadas em Piso, Parede e Teto) ou nas Propriedades do trecho:
+
+- **Piso:** embutido no piso; em canaleta (de piso ou perimetral, na parede).
+- **Parede:** embutido na alvenaria; aparente na alvenaria. O traçado acompanha a face da parede clicada.
+- **Teto:** aparente no entreforro; aparente na laje; embutido na laje.
+
+**Elétrica › Infraestrutura › Instalações** define as **medidas do empreendimento** (mm), salvas no `.seb`:
+- eixo abaixo do piso;
+- canaleta: profundidade ou altura e afastamento;
+- alvenaria: altura dos trechos horizontais e profundidade dentro da parede;
+- aparente na alvenaria: altura e folga;
+- entreforro: abaixo da laje ou acima do forro;
+- aparente na laje: folga;
+- embutido na laje: eixo acima da face inferior.
+
+O botão **Atualizar** leva os eletrodutos já traçados para as cotas atuais.
+
+Demais regras:
+- Aparentes exigem eletroduto rígido.
+- As caixas seguem a forma de instalação: piso; PVC de embutir na alvenaria; octogonal na laje; sobrepor ou condulete nas aparentes.
+- Na planta: piso e canaleta tracejados, embutidos contínuos, aparentes em traço-ponto.
+- Projetos antigos ("aparente" sob a laje ou no entreforro) são convertidos ao abrir.
+
 ### Detalhe das famílias do Revit
 
 - **3D:** a peça mantém as **arestas vivas** (só as superfícies curvas são suavizadas) e é desenhada com o **contorno das arestas**, como a vista sombreada com arestas do Revit.

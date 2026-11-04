@@ -15,7 +15,7 @@ import { assemblyKey } from "../devices";
 import { draftPrims, type DraftEntity } from "../draft";
 import { pointSize } from "../points";
 import { BEAM_COLOR, BEAM_OPACITY, COLUMN_FILL, COLUMN_TYPES, isLayout, LAYOUT_GRAY, minAreaRect, WALL_FILL } from "./style";
-import { BOX_LABEL, INSTALL_LABEL, type BoxKind, type PullBox } from "../conduits";
+import { BOX_LABEL, INSTALL_LABEL, INSTALL_ZONE, isApparent, type BoxKind, type PullBox } from "../conduits";
 
 export interface PlanLabels {
   tags: boolean;
@@ -289,8 +289,8 @@ export function buildPlan(input: PlanInput): PlanDrawing {
       const meanY = (s.start[1] + s.end[1]) / 2;
       // Eletrodutos: estilo pela instalação (piso tracejado, laje contínuo, aparente traço-ponto).
       const mode = isConduit ? (run.install?.mode ?? null) : null;
-      const onFloor = isConduit && (mode ? mode === "piso" : meanY < level + 0.5);
-      const dashdot = mode === "aparente";
+      const onFloor = isConduit && (mode ? INSTALL_ZONE[mode] === "piso" : meanY < level + 0.5);
+      const dashdot = isApparent(mode ?? undefined);
       const style = isConduit ? (mode ?? (onFloor ? "piso" : "teto")) : "rede";
       if (t.profile === "retangular") {
         const w = run.size.width / 1000;

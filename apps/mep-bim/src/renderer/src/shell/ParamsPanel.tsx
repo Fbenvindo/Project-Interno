@@ -2,7 +2,7 @@
 // (Restrições, disciplina, Dimensões, Identidade, Dados IFC) editáveis para os
 // objetos criados no app e somente leitura para os elementos do IFC.
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { applyInstall, boxIndexOf, DEFAULT_INSTALL, isConduitRun, isConduitType, runFloorProbeY, typeAllowed, type ConduitInstall, type InstallMode } from "../../../core/conduits";
+import { applyInstall, boxIndexOf, DEFAULT_INSTALL, INSTALL_LABEL, INSTALL_MODES, isConduitRun, isConduitType, runFloorProbeY, typeAllowed, type ConduitInstall, type InstallMode } from "../../../core/conduits";
 import { DISCIPLINE_BY_ID, getTypeLabel } from "../../../core/disciplines";
 import { formatNumber } from "../../../core/format";
 import { COMPONENTS, COMPONENT_BY_ID, MOUNTING_LABEL } from "../../../core/library";
@@ -578,7 +578,6 @@ function RunRows({
   const sameType = !common(types, (t) => t.id).varies;
   const conduits = runs.every(isConduitRun);
   const mode = common(runs, (r) => r.install?.mode ?? "laje");
-  const apparentRef = common(runs, (r) => r.install?.apparentRef ?? "laje");
   const size = common(runs, (r) => r.size.label);
   const sys = common(runs, (r) => r.system);
   const slope = common(runs, (r) => r.slope);
@@ -597,8 +596,7 @@ function RunRows({
         const inst = { ...(r.install ?? DEFAULT_INSTALL), ...patch };
         const floorY = floorOf(r);
         const mid = r.vertices[Math.floor(r.vertices.length / 2)];
-        const ent = r.install?.apparentRef === "entreforro" ? mid[1] - floorY : 2.8;
-        return [r.id, applyInstall(r, inst, { floorY, slabUnderside: slabAt(mid[0], mid[2], floorY), entreforroHeight: ent, points: store.points })];
+        return [r.id, applyInstall(r, inst, { floorY, slabUnderside: slabAt(mid[0], mid[2], floorY), settings: store.installSettings, points: store.points })];
       }),
     );
     store.updateRuns(ids, (r) => changes.get(r.id)!);
@@ -616,25 +614,8 @@ function RunRows({
             <SelectCell
               value={mode.value ?? ""}
               varies={mode.varies}
-              options={[
-                ["piso", "Embutido no piso"],
-                ["laje", "Embutido na laje"],
-                ["aparente", "Aparente no teto"],
-              ]}
+              options={INSTALL_MODES.map((m) => [m, INSTALL_LABEL[m].charAt(0).toUpperCase() + INSTALL_LABEL[m].slice(1)])}
               onChange={(m) => reinstall({ mode: m as InstallMode })}
-            />
-          </Row>
-        )}
-        {conduits && mode.value === "aparente" && (
-          <Row label="Fixação">
-            <SelectCell
-              value={apparentRef.value ?? "laje"}
-              varies={apparentRef.varies}
-              options={[
-                ["laje", "Sob a laje"],
-                ["entreforro", "No entreforro"],
-              ]}
-              onChange={(v) => reinstall({ apparentRef: v as "laje" | "entreforro" })}
             />
           </Row>
         )}

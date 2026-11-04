@@ -8,12 +8,18 @@ import type { ElementInfo, PropertyGroup, Vec3 } from "./types";
 
 // ---- Instalação ---------------------------------------------------------------------------
 
-export type InstallMode = "piso" | "laje" | "aparente";
+/**
+ * Formas de instalação da infraestrutura:
+ * piso — embutido no piso (contrapiso); canaleta — em canaleta (de piso ou perimetral na parede);
+ * alvenaria — embutido na alvenaria; alvenaria-aparente — aparente fixado na alvenaria;
+ * entreforro — aparente no entreforro; laje-aparente — aparente fixado sob a laje; laje — embutido na laje.
+ */
+export type InstallMode = "piso" | "canaleta" | "alvenaria" | "alvenaria-aparente" | "entreforro" | "laje-aparente" | "laje";
+
+export const INSTALL_MODES: InstallMode[] = ["piso", "canaleta", "alvenaria", "alvenaria-aparente", "entreforro", "laje-aparente", "laje"];
 
 export interface ConduitInstall {
   mode: InstallMode;
-  /** Aparente: encostado sob a laje ou no entreforro (altura informada no traçado). */
-  apparentRef?: "laje" | "entreforro";
   /** Piso: rede externa (caixas em alvenaria). */
   external?: boolean;
   /** Caixas de teto e piso: tubos lado a lado na horizontal (padrão) ou na vertical. */
@@ -26,34 +32,146 @@ export interface ConduitInstall {
 
 export const INSTALL_LABEL: Record<InstallMode, string> = {
   piso: "embutido no piso",
+  canaleta: "em canaleta",
+  alvenaria: "embutido na alvenaria",
+  "alvenaria-aparente": "aparente na alvenaria",
+  entreforro: "aparente no entreforro",
+  "laje-aparente": "aparente na laje",
   laje: "embutido na laje",
-  aparente: "aparente no teto",
 };
 
+/** Onde fica a instalação (para o pavimento e para o estilo na planta). */
+export const INSTALL_ZONE: Record<InstallMode, "piso" | "parede" | "teto"> = {
+  piso: "piso",
+  canaleta: "piso",
+  alvenaria: "parede",
+  "alvenaria-aparente": "parede",
+  entreforro: "teto",
+  "laje-aparente": "teto",
+  laje: "teto",
+};
+
+/** Instalações aparentes (eletroduto rígido, caixas de sobrepor ou conduletes). */
+export const isApparent = (m: InstallMode | undefined) => m === "alvenaria-aparente" || m === "entreforro" || m === "laje-aparente";
+
 export const DEFAULT_INSTALL: ConduitInstall = { mode: "laje", layout: "horizontal" };
+
+/** Instalações de arquivos antigos ("aparente" com referência laje/entreforro). */
+export function normalizeInstall(raw: unknown): ConduitInstall | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Omit<ConduitInstall, "mode"> & { mode: string; apparentRef?: string };
+  if (r.mode === "aparente") {
+    const { apparentRef, ...rest } = r;
+    return { ...rest, mode: apparentRef === "entreforro" ? "entreforro" : "laje-aparente" };
+  }
+  return INSTALL_MODES.includes(r.mode as InstallMode) ? (r as ConduitInstall) : undefined;
+}
 
 /** Eletrodutos (segmentos de eletroduto, não eletrocalhas). */
 export const isConduitType = (t: RunType) => t.segmentType === "IFCCABLECARRIERSEGMENT" && t.segmentPredefined === "CONDUITSEGMENT";
 export const isConduitRun = (r: Run) => isConduitType(RUN_TYPE_BY_ID[r.typeId]);
 
-/** Flexíveis (PVC/PEAD corrugado) só embutidos no piso ou na laje; aparente exige rígido. */
+/** Flexíveis (PVC/PEAD corrugado) só embutidos ou em canaleta; aparente exige rígido. */
 export function typeAllowed(t: RunType, mode: InstallMode): boolean {
   if (!isConduitType(t)) return true;
-  return mode === "aparente" ? !t.flexible : true;
+  return isApparent(mode) ? !t.flexible : true;
 }
 
-/** Afastamento do eixo em relação ao piso ou à face da laje, quando embutido (m). */
+// ---- Medidas do empreendimento ------------------------------------------------------------------
+
+/** Medidas de cada forma de instalação (mm), definidas por empreendimento. */
+export interface InstallSettings {
+  /** Embutido no piso: eixo abaixo do piso acabado. */
+  piso: { profundidade: number };
+  /** Canaleta de piso (eixo abaixo do piso) ou perimetral na parede (altura do eixo e afastamento da face). */
+  canaleta: { local: "piso" | "parede"; profundidade: number; altura: number; afastamento: number };
+  /** Embutido na alvenaria: altura do eixo dos trechos horizontais e profundidade do eixo a partir da face. */
+  alvenaria: { altura: number; profundidade: number };
+  /** Aparente na alvenaria: altura do eixo e folga entre o tubo e a face (abraçadeira). */
+  alvenariaAparente: { altura: number; afastamento: number };
+  /** Entreforro: eixo a uma distância abaixo da laje, ou acima do forro (forro na altura informada). */
+  entreforro: { referencia: "laje" | "forro"; distancia: number; forroAltura: number };
+  /** Aparente na laje: folga entre o tubo e a face inferior da laje. */
+  lajeAparente: { afastamento: number };
+  /** Embutido na laje: eixo acima da face inferior da laje. */
+  laje: { profundidade: number };
+}
+
+export const DEFAULT_INSTALL_SETTINGS: InstallSettings = {
+  piso: { profundidade: 50 },
+  canaleta: { local: "piso", profundidade: 40, altura: 300, afastamento: 25 },
+  alvenaria: { altura: 300, profundidade: 30 },
+  alvenariaAparente: { altura: 300, afastamento: 5 },
+  entreforro: { referencia: "laje", distancia: 150, forroAltura: 2600 },
+  lajeAparente: { afastamento: 10 },
+  laje: { profundidade: 50 },
+};
+
+/** Completa as medidas de um arquivo (campos que faltarem ficam com o padrão). */
+export function withInstallDefaults(s: Partial<InstallSettings> | null | undefined): InstallSettings {
+  const d = DEFAULT_INSTALL_SETTINGS;
+  const m = <K extends keyof InstallSettings>(k: K): InstallSettings[K] => ({ ...d[k], ...(s?.[k] ?? {}) });
+  return { piso: m("piso"), canaleta: m("canaleta"), alvenaria: m("alvenaria"), alvenariaAparente: m("alvenariaAparente"), entreforro: m("entreforro"), lajeAparente: m("lajeAparente"), laje: m("laje") };
+}
+
+/** Afastamento do eixo em relação ao piso ou à face da laje, quando embutido (m) — padrão. */
 export const EMBED_DEPTH = 0.05;
 
 /**
- * Cota (Y) do eixo do eletroduto horizontal conforme a instalação.
+ * Cota (Y) do eixo do eletroduto horizontal conforme a instalação e as medidas do empreendimento.
  * slabUnderside: face inferior da laje acima; floorY: piso acabado.
  */
-export function conduitElevation(install: ConduitInstall, floorY: number, slabUnderside: number, sizeMm: number, entreforroHeight: number): number {
-  if (install.mode === "piso") return floorY - EMBED_DEPTH;
-  if (install.mode === "laje") return slabUnderside + EMBED_DEPTH;
-  if (install.apparentRef === "entreforro") return floorY + entreforroHeight;
-  return slabUnderside - sizeMm / 2000;
+export function conduitElevation(install: ConduitInstall, floorY: number, slabUnderside: number, sizeMm: number, settings: InstallSettings = DEFAULT_INSTALL_SETTINGS): number {
+  const s = settings;
+  const r = sizeMm / 2;
+  switch (install.mode) {
+    case "piso":
+      return floorY - s.piso.profundidade / 1000;
+    case "canaleta":
+      return s.canaleta.local === "parede" ? floorY + s.canaleta.altura / 1000 : floorY - s.canaleta.profundidade / 1000;
+    case "alvenaria":
+      return floorY + s.alvenaria.altura / 1000;
+    case "alvenaria-aparente":
+      return floorY + s.alvenariaAparente.altura / 1000;
+    case "entreforro":
+      return s.entreforro.referencia === "forro" ? floorY + (s.entreforro.forroAltura + s.entreforro.distancia) / 1000 : slabUnderside - s.entreforro.distancia / 1000;
+    case "laje-aparente":
+      return slabUnderside - (r + s.lajeAparente.afastamento) / 1000;
+    case "laje":
+      return slabUnderside + s.laje.profundidade / 1000;
+  }
+}
+
+/**
+ * Deslocamento horizontal do eixo em relação à face da parede (m; positivo = para o ambiente):
+ * embutido na alvenaria fica dentro da parede; aparente e canaleta perimetral, fora. null = não é de parede.
+ */
+export function wallOffset(install: ConduitInstall, sizeMm: number, settings: InstallSettings = DEFAULT_INSTALL_SETTINGS): number | null {
+  const r = sizeMm / 2;
+  if (install.mode === "alvenaria") return -settings.alvenaria.profundidade / 1000;
+  if (install.mode === "alvenaria-aparente") return (r + settings.alvenariaAparente.afastamento) / 1000;
+  if (install.mode === "canaleta" && settings.canaleta.local === "parede") return settings.canaleta.afastamento / 1000;
+  return null;
+}
+
+/** Resumo das medidas de uma instalação (para o traçado e as propriedades). */
+export function installSummary(mode: InstallMode, s: InstallSettings = DEFAULT_INSTALL_SETTINGS): string {
+  switch (mode) {
+    case "piso":
+      return `eixo ${s.piso.profundidade} mm abaixo do piso acabado`;
+    case "canaleta":
+      return s.canaleta.local === "parede" ? `canaleta na parede, eixo a ${s.canaleta.altura} mm do piso` : `canaleta de piso, eixo ${s.canaleta.profundidade} mm abaixo do piso`;
+    case "alvenaria":
+      return `horizontais a ${s.alvenaria.altura} mm do piso, eixo ${s.alvenaria.profundidade} mm dentro da parede`;
+    case "alvenaria-aparente":
+      return `a ${s.alvenariaAparente.altura} mm do piso, ${s.alvenariaAparente.afastamento} mm de folga da parede`;
+    case "entreforro":
+      return s.entreforro.referencia === "forro" ? `${s.entreforro.distancia} mm acima do forro (forro a ${s.entreforro.forroAltura} mm)` : `eixo ${s.entreforro.distancia} mm abaixo da laje`;
+    case "laje-aparente":
+      return `sob a laje, ${s.lajeAparente.afastamento} mm de folga`;
+    case "laje":
+      return `eixo ${s.laje.profundidade} mm acima da face inferior da laje`;
+  }
 }
 
 // ---- Bitolas ---------------------------------------------------------------------------------
@@ -308,7 +426,7 @@ export function boxSpec(conduits: BoxConduit[], install: ConduitInstall): BoxSpe
     };
   };
 
-  if (install.mode === "piso") {
+  if (install.mode === "piso" || (install.mode === "canaleta" && !install.external)) {
     if (install.external) return masonry();
     if (maxInch <= 1 + 1e-6 && Math.max(...need) <= 100) {
       return { kind: "ferro-fundido", label: BOX_LABEL["ferro-fundido"], dims: [100, 100, 100], count: 1, required: need };
@@ -317,6 +435,12 @@ export function boxSpec(conduits: BoxConduit[], install: ConduitInstall): BoxSpe
       return { kind: "parede", label: BOX_LABEL.parede, dims: [ceilTo(along, 50), ceilTo(across, 50), 100], count: 1, required: [along, across] };
     }
     return masonry('Eletroduto acima de 1" ou mais tubos do que cabem na caixa 4×4" de piso: caixa em alvenaria.');
+  }
+
+  if (install.mode === "alvenaria") {
+    // Embutido na parede: caixa de embutir 4×2/4×4 (ou maior, quadrada).
+    const s = pickSquare(SQUARE_PVC, Math.max(...need));
+    return { kind: "pvc-embutir", label: BOX_LABEL["pvc-embutir"], dims: s ? [s, s, 50] : [ceilTo(need[0], 50), ceilTo(need[1], 50), 100], count: 1, required: need };
   }
 
   if (install.mode === "laje") {
@@ -332,7 +456,7 @@ export function boxSpec(conduits: BoxConduit[], install: ConduitInstall): BoxSpe
     };
   }
 
-  // Aparente no teto
+  // Aparentes (alvenaria, entreforro, laje) e canaleta perimetral
   const steel = conduits.some((c) => c.type.conduitMaterial === "aco");
   if (steel) {
     if (maxInch <= 1 + 1e-6) {
@@ -499,7 +623,8 @@ export function boxProperties(b: PullBox, runs: Run[]): PropertyGroup[] {
 /** Pavimento (piso) de um eletroduto: pelas cotas, conforme a instalação anterior. */
 export function runFloorProbeY(run: Run): number {
   const minY = Math.min(...run.vertices.map((v) => v[1]));
-  return (run.install?.mode ?? "laje") === "piso" ? minY + 0.06 : minY - 0.3;
+  const zone = INSTALL_ZONE[run.install?.mode ?? "laje"];
+  return zone === "piso" ? minY + 0.06 : zone === "parede" ? minY - 0.1 : minY - 0.3;
 }
 
 /**
@@ -510,7 +635,7 @@ export function runFloorProbeY(run: Run): number {
 export function applyInstall(
   run: Run,
   install: ConduitInstall,
-  ctx: { floorY: number; slabUnderside: number; entreforroHeight: number; points: PlacedPoint[] },
+  ctx: { floorY: number; slabUnderside: number; settings?: InstallSettings; points: PlacedPoint[] },
 ): Partial<Run> {
   let t = RUN_TYPE_BY_ID[run.typeId];
   let size = run.size;
@@ -520,7 +645,7 @@ export function applyInstall(
     typeId = t.id;
     size = t.sizes.find((s) => s.width >= run.size.width - 1e-6) ?? t.sizes[t.sizes.length - 1];
   }
-  const y = conduitElevation(install, ctx.floorY, ctx.slabUnderside, size.width, ctx.entreforroHeight);
+  const y = conduitElevation(install, ctx.floorY, ctx.slabUnderside, size.width, ctx.settings);
   const atPoint = (p: Vec3) => ctx.points.some((q) => distance(q.position, p) < 0.25);
   const v = run.vertices;
   const vertices: Vec3[] = [];

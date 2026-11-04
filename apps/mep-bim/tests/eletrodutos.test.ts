@@ -10,6 +10,10 @@ import {
   pullBoxes,
   rowLength,
   typeAllowed,
+  DEFAULT_INSTALL_SETTINGS,
+  normalizeInstall,
+  wallOffset,
+  withInstallDefaults,
   type ConduitInstall,
 } from "../src/core/conduits";
 import { newGuid } from "../src/core/points";
@@ -105,7 +109,7 @@ describe("dimensão das caixas", () => {
   });
 
   it("aparente: PVC de sobrepor; aço até 1\" condulete, até 2\" caixa metálica", () => {
-    const ap: ConduitInstall = { mode: "aparente" };
+    const ap: ConduitInstall = { mode: "laje-aparente" };
     expect(boxSpec([{ size: size("eletroduto-pvc", "Ø25"), type: T("eletroduto-pvc") }], ap).kind).toBe("pvc-sobrepor");
     const c = boxSpec([{ size: size("eletroduto-aco", '1"'), type: T("eletroduto-aco") }, { size: size("eletroduto-aco", '3/4"'), type: T("eletroduto-aco") }], ap);
     expect(c.kind).toBe("condulete");
@@ -118,8 +122,8 @@ describe("dimensão das caixas", () => {
       { size: size("eletroduto-pvc", "Ø50"), type: T("eletroduto-pvc") },
       { size: size("eletroduto-pvc", "Ø75"), type: T("eletroduto-pvc") },
     ];
-    const h = boxSpec(tubos, { mode: "aparente", layout: "horizontal" });
-    const v = boxSpec(tubos, { mode: "aparente", layout: "vertical" });
+    const h = boxSpec(tubos, { mode: "laje-aparente", layout: "horizontal" });
+    const v = boxSpec(tubos, { mode: "laje-aparente", layout: "vertical" });
     expect(h.required).toEqual([v.required[1], v.required[0]]);
   });
 
@@ -132,16 +136,43 @@ describe("dimensão das caixas", () => {
 
 describe("instalação", () => {
   it("flexível só embutido; aparente exige rígido", () => {
-    expect(typeAllowed(T("eletroduto-flexivel"), "aparente")).toBe(false);
+    expect(typeAllowed(T("eletroduto-flexivel"), "laje-aparente")).toBe(false);
+    expect(typeAllowed(T("eletroduto-flexivel"), "alvenaria-aparente")).toBe(false);
+    expect(typeAllowed(T("eletroduto-flexivel"), "alvenaria")).toBe(true);
     expect(typeAllowed(T("eletroduto-pead"), "piso")).toBe(true);
-    expect(typeAllowed(T("eletroduto-aco"), "aparente")).toBe(true);
+    expect(typeAllowed(T("eletroduto-aco"), "entreforro")).toBe(true);
   });
 
-  it("cota do eixo por instalação", () => {
-    expect(conduitElevation({ mode: "piso" }, 0, 2.9, 25, 2.6)).toBeCloseTo(-0.05);
-    expect(conduitElevation({ mode: "laje" }, 0, 2.9, 25, 2.6)).toBeCloseTo(2.95);
-    expect(conduitElevation({ mode: "aparente" }, 0, 2.9, 40, 2.6)).toBeCloseTo(2.88);
-    expect(conduitElevation({ mode: "aparente", apparentRef: "entreforro" }, 0, 2.9, 40, 2.6)).toBeCloseTo(2.6);
+  it("cota do eixo por instalação, com as medidas do empreendimento", () => {
+    const s = DEFAULT_INSTALL_SETTINGS;
+    expect(conduitElevation({ mode: "piso" }, 0, 2.9, 25, s)).toBeCloseTo(-0.05);
+    expect(conduitElevation({ mode: "canaleta" }, 0, 2.9, 25, s)).toBeCloseTo(-0.04);
+    expect(conduitElevation({ mode: "canaleta" }, 0, 2.9, 25, { ...s, canaleta: { ...s.canaleta, local: "parede" } })).toBeCloseTo(0.3);
+    expect(conduitElevation({ mode: "alvenaria" }, 0, 2.9, 25, { ...s, alvenaria: { altura: 2200, profundidade: 30 } })).toBeCloseTo(2.2);
+    expect(conduitElevation({ mode: "alvenaria-aparente" }, 0, 2.9, 25, s)).toBeCloseTo(0.3);
+    expect(conduitElevation({ mode: "entreforro" }, 0, 2.9, 40, s)).toBeCloseTo(2.75);
+    expect(conduitElevation({ mode: "entreforro" }, 0, 2.9, 40, { ...s, entreforro: { referencia: "forro", distancia: 100, forroAltura: 2600 } })).toBeCloseTo(2.7);
+    expect(conduitElevation({ mode: "laje-aparente" }, 0, 2.9, 40, s)).toBeCloseTo(2.87);
+    expect(conduitElevation({ mode: "laje" }, 0, 2.9, 25, s)).toBeCloseTo(2.95);
+  });
+
+  it("parede: embutido fica dentro da parede; aparente e canaleta perimetral, fora", () => {
+    const s = DEFAULT_INSTALL_SETTINGS;
+    expect(wallOffset({ mode: "alvenaria" }, 25, s)).toBeCloseTo(-0.03);
+    expect(wallOffset({ mode: "alvenaria-aparente" }, 25, s)).toBeCloseTo(0.0175);
+    expect(wallOffset({ mode: "laje" }, 25, s)).toBeNull();
+  });
+
+  it("lê instalações de arquivos antigos", () => {
+    expect(normalizeInstall({ mode: "aparente", apparentRef: "entreforro" })?.mode).toBe("entreforro");
+    expect(normalizeInstall({ mode: "aparente" })?.mode).toBe("laje-aparente");
+    expect(normalizeInstall({ mode: "piso", external: true })).toEqual({ mode: "piso", external: true });
+    expect(withInstallDefaults({ piso: { profundidade: 80 } }).piso.profundidade).toBe(80);
+    expect(withInstallDefaults({}).laje.profundidade).toBe(50);
+  });
+
+  it("caixa embutida na alvenaria: PVC de embutir", () => {
+    expect(boxSpec([{ size: size("eletroduto-pvc", "Ø25"), type: T("eletroduto-pvc") }], { mode: "alvenaria" }).kind).toBe("pvc-embutir");
   });
 
   it("flexível não leva curva em mudança de direção na horizontal, só na subida", () => {
@@ -154,9 +185,9 @@ describe("instalação", () => {
 
 describe("caixas do projeto", () => {
   it("une eletrodutos paralelos na mesma caixa e cria caixa na derivação", () => {
-    const a = conduit([[0, 3, 0], [20, 3, 0]], "eletroduto-pvc", "Ø25", { mode: "aparente" });
-    const b = conduit([[0, 3, 0.1], [20, 3, 0.1]], "eletroduto-pvc", "Ø32", { mode: "aparente" });
-    const ramal = conduit([[5, 3, 4], [5, 3, 0]], "eletroduto-pvc", "Ø25", { mode: "aparente" });
+    const a = conduit([[0, 3, 0], [20, 3, 0]], "eletroduto-pvc", "Ø25", { mode: "laje-aparente" });
+    const b = conduit([[0, 3, 0.1], [20, 3, 0.1]], "eletroduto-pvc", "Ø32", { mode: "laje-aparente" });
+    const ramal = conduit([[5, 3, 4], [5, 3, 0]], "eletroduto-pvc", "Ø25", { mode: "laje-aparente" });
     const boxes = pullBoxes([a, b, ramal], []);
     const at15 = boxes.find((x) => Math.abs(x.position[0] - 15) < 0.01)!;
     expect(at15.runIds.sort()).toEqual([a.id, b.id].sort());
@@ -175,7 +206,7 @@ describe("exportação IFC das caixas", () => {
     const api = new IfcAPI();
     await api.Init();
     const cs = new CoordinateSystem([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
-    const r = conduit([[0, 2.9, 0], [20, 2.9, 0]], "eletroduto-pvc", "Ø25", { mode: "aparente" });
+    const r = conduit([[0, 2.9, 0], [20, 2.9, 0]], "eletroduto-pvc", "Ø25", { mode: "laje-aparente" });
     const text = exportPointsIfc([], { modelName: "t.ifc", storeys: [{ name: "Térreo", level: 0 }], cs, runs: [r] });
     expect(text).toContain("IFCJUNCTIONBOX(");
     const m = loadIfc(api, new TextEncoder().encode(text));
@@ -183,5 +214,22 @@ describe("exportação IFC das caixas", () => {
     expect(boxes.length).toBe(3); // 2 pontas livres + 1 aos 15 m
     expect(m.elements.some((e) => e.ifcType === "IFCCABLECARRIERSEGMENT")).toBe(true);
     m.close();
+  });
+});
+
+describe("arquivo do projeto", async () => {
+  const { serializeProject, deserializeProject } = await import("../src/core/project");
+  const { CoordinateSystem } = await import("../src/core/math");
+  it("grava a instalação de cada eletroduto e as medidas do empreendimento", () => {
+    const cs = new CoordinateSystem();
+    const r = conduit([[0, 0.3, 0], [3, 0.3, 0]], "eletroduto-pvc", "Ø25", { mode: "alvenaria" });
+    const settings = { ...DEFAULT_INSTALL_SETTINGS, alvenaria: { altura: 2200, profundidade: 40 } };
+    const file = JSON.parse(JSON.stringify(serializeProject({ points: [], runs: [r], circuits: [], installSettings: settings }, cs, "m.ifc")));
+    const back = deserializeProject(file, cs);
+    expect(back.runs[0].install?.mode).toBe("alvenaria");
+    expect(back.installSettings?.alvenaria).toEqual({ altura: 2200, profundidade: 40 });
+    // Arquivo antigo: "aparente" no entreforro vira a nova forma.
+    file.trechos[0].instalacao = { mode: "aparente", apparentRef: "entreforro" };
+    expect(deserializeProject(file, cs).runs[0].install?.mode).toBe("entreforro");
   });
 });
