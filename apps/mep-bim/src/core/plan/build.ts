@@ -198,7 +198,12 @@ export function buildPlan(input: PlanInput): PlanDrawing {
     // Itens de parede: símbolo apoiado na face da parede, voltado para o ambiente.
     const origin: P2 = wall ? [center[0] - (f[0] * size[1]) / 2000, center[1] - (f[1] * size[1]) / 2000] : center;
 
-    if (sym.footprint) {
+    // Família com símbolo de planta próprio (linhas simbólicas do Revit): desenhado em tamanho real.
+    const own = def.planLines?.length ? def.planLines : null;
+    if (own) {
+      const at = ([x, z]: [number, number]): P2 => [center[0] + (r[0] * x + f[0] * z) / 1000, center[1] + (r[1] * x + f[1] * z) / 1000];
+      for (const l of own) prims.push({ t: "poly", pts: l.map(at), closed: false, weight: PEN.simbolo, layer: `${prefix}-PONTOS`, color, id: p.id });
+    } else if (sym.footprint) {
       const [w, d] = [def.size[0] / 1000, def.size[1] / 1000];
       if (def.shape === "cilindro") {
         prims.push({ t: "circle", c: center, r: w / 2, weight: PEN.simbolo, layer: `${prefix}-PONTOS`, color, id: p.id });
@@ -211,7 +216,7 @@ export function buildPlan(input: PlanInput): PlanDrawing {
         }
       }
     }
-    pushSymbol(sym.prims, sym.footprint ? center : origin, r, f, `${prefix}-PONTOS`, color, p.id);
+    if (!own) pushSymbol(sym.prims, sym.footprint ? center : origin, r, f, `${prefix}-PONTOS`, color, p.id);
 
     const parts: string[] = [];
     if (labels.tags) parts.push(p.tag);
@@ -240,7 +245,9 @@ export function buildPlan(input: PlanInput): PlanDrawing {
     }
 
     const legendKey = p.assembly ? `${def.id}|${assemblyKey(p.assembly)}|${sym.description}` : def.id;
-    if (!legend.has(legendKey)) {
+    if (!legend.has(legendKey) && own) {
+      legend.set(legendKey, { key: legendKey, label: def.label, color, prims: fitLegendLines(own) });
+    } else if (!legend.has(legendKey)) {
       const lp: SymbolPrim[] = sym.footprint ? [{ t: "poly", pts: [[-3, -2], [3, -2], [3, 2], [-3, 2]], closed: true }, ...sym.prims] : sym.prims.map((s) => shiftSymbol(s, wall ? -1.5 : 0));
       legend.set(legendKey, { key: legendKey, label: sym.description, color, prims: lp });
     }
@@ -382,6 +389,17 @@ export function buildPlan(input: PlanInput): PlanDrawing {
   prims.sort((a, b) => rank(a.layer) - rank(b.layer));
 
   return { prims, bounds: boundsOf(prims), legend: sortLegend([...legend.values()]), scale, storey, cutHeight: input.cutHeight };
+}
+
+/** Linhas da família reduzidas para caber no quadro da legenda (≈ 8 × 6 mm). */
+function fitLegendLines(lines: [number, number][][]): SymbolPrim[] {
+  const all = lines.flat();
+  const [x0, x1] = [Math.min(...all.map((q) => q[0])), Math.max(...all.map((q) => q[0]))];
+  const [z0, z1] = [Math.min(...all.map((q) => q[1])), Math.max(...all.map((q) => q[1]))];
+  const k = Math.min(8 / Math.max(x1 - x0, 1e-6), 6 / Math.max(z1 - z0, 1e-6));
+  const cx = (x0 + x1) / 2;
+  const cz = (z0 + z1) / 2;
+  return lines.map((l) => ({ t: "poly", pts: l.map(([x, z]): P2 => [(x - cx) * k, (z - cz) * k]), closed: false }));
 }
 
 function shiftSymbol(s: SymbolPrim, dy: number): SymbolPrim {

@@ -27,6 +27,11 @@ namespace SmartEasyBIM.Revit
         public double[] Min = { double.MaxValue, double.MaxValue, double.MaxValue };
         public double[] Max = { double.MinValue, double.MinValue, double.MinValue };
         public bool Truncated;
+        /// <summary>Cor de cada triângulo (índice na paleta), pelo material da face.</summary>
+        public List<int> Colors = new List<int>();
+        public List<string> Palette = new List<string>();
+        /// <summary>Linhas simbólicas visíveis em planta (polilinhas x, y em mm), como o Revit desenha a família.</summary>
+        public List<List<double>> PlanLines = new List<List<double>>();
     }
 
     internal sealed class ExportedConnector
@@ -58,7 +63,7 @@ namespace SmartEasyBIM.Revit
     internal static class FamilyExporter
     {
         private const double FeetToMm = 304.8;
-        private const int MaxTrianglesPerType = 60000;
+        private const int MaxTrianglesPerType = 150000;
 
         public static long IdValue(ElementId id)
         {
@@ -159,18 +164,21 @@ namespace SmartEasyBIM.Revit
                     }
                 }
             }
-            ReadGeometry(fam, et, 0.4);
-            if (et.Truncated)
+            // Triangulação fina (curvas suaves); se passar do limite, tenta mais grossa.
+            foreach (var lod in new[] { 0.85, 0.5, 0.0 })
             {
-                // Geometria muito detalhada: tenta de novo com triangulação mais grossa.
                 et.Positions.Clear();
                 et.Indices.Clear();
+                et.Colors.Clear();
+                et.Palette.Clear();
                 et.Min = new[] { double.MaxValue, double.MaxValue, double.MaxValue };
                 et.Max = new[] { double.MinValue, double.MinValue, double.MinValue };
                 et.Truncated = false;
-                ReadGeometry(fam, et, 0.0);
-                if (et.Truncated) family.Warnings.Add($"Tipo {name}: geometria simplificada (mais de {MaxTrianglesPerType} triângulos).");
+                ReadGeometry(fam, et, lod);
+                if (!et.Truncated) break;
             }
+            if (et.Truncated) family.Warnings.Add($"Tipo {name}: geometria simplificada (mais de {MaxTrianglesPerType} triângulos).");
+            ReadPlanLines(fam, et);
             if (et.Indices.Count == 0) family.Warnings.Add($"Tipo {name}: nenhuma geometria 3D encontrada.");
             return et;
         }
@@ -249,7 +257,20 @@ namespace SmartEasyBIM.Revit
         {
             private readonly ExportedType _t;
             private readonly Dictionary<(long, long, long), int> _index = new Dictionary<(long, long, long), int>();
-            public MeshBuilder(ExportedType t) { _t = t; }
+            private readonly Dictionary<string, int> _palette = new Dictionary<string, int>();
+            private int _color;
+            public MeshBuilder(ExportedType t) { _t = t; SetColor(DefaultColor); }
+
+            /// <summary>Cor (#rrggbb) dos próximos triângulos.</summary>
+            public void SetColor(string hex)
+            {
+                if (!_palette.TryGetValue(hex, out _color))
+                {
+                    _color = _t.Palette.Count;
+                    _t.Palette.Add(hex);
+                    _palette[hex] = _color;
+                }
+            }
 
             public int Vertex(XYZ p)
             {
@@ -278,6 +299,7 @@ namespace SmartEasyBIM.Revit
                 _t.Indices.Add(ia);
                 _t.Indices.Add(ib);
                 _t.Indices.Add(ic);
+                _t.Colors.Add(_color);
                 return true;
             }
 
@@ -306,34 +328,105 @@ namespace SmartEasyBIM.Revit
                 try { g = e.get_Geometry(opt); }
                 catch { continue; }
                 if (g == null) continue;
-                Walk(g, mesh, levelOfDetail);
+                Walk(fam, g, mesh, levelOfDetail, ElementColor(fam, e));
                 if (et.Truncated) return;
             }
         }
 
-        private static void Walk(GeometryElement g, MeshBuilder mesh, double lod)
+        private static void Walk(Document fam, GeometryElement g, MeshBuilder mesh, double lod, string fallback)
         {
             foreach (var obj in g)
             {
                 switch (obj)
                 {
                     case Solid s when s.Faces.Size > 0 && s.Volume > 1e-9:
+                        var solidColor = StyleColor(fam, obj.GraphicsStyleId) ?? fallback;
                         foreach (Face f in s.Faces)
                         {
                             Mesh m;
                             try { m = f.Triangulate(lod); }
                             catch { continue; }
-                            if (m != null) mesh.Add(m);
+                            if (m == null) continue;
+                            mesh.SetColor(MaterialColor(fam, f.MaterialElementId) ?? solidColor);
+                            mesh.Add(m);
                         }
                         break;
                     case Mesh m:
+                        mesh.SetColor(MaterialColor(fam, m.MaterialElementId) ?? StyleColor(fam, obj.GraphicsStyleId) ?? fallback);
                         mesh.Add(m);
                         break;
                     case GeometryInstance gi:
                         var inner = gi.GetInstanceGeometry();
-                        if (inner != null) Walk(inner, mesh, lod);
+                        if (inner != null) Walk(fam, inner, mesh, lod, StyleColor(fam, obj.GraphicsStyleId) ?? fallback);
                         break;
                 }
+            }
+        }
+
+        // ---- Cores (materiais) -----------------------------------------------------------------
+
+        private const string DefaultColor = "#a8adb5";
+
+        private static string Hex(Color c) => c != null && c.IsValid ? $"#{c.Red:x2}{c.Green:x2}{c.Blue:x2}" : null;
+
+        private static string MaterialColor(Document fam, ElementId id)
+        {
+            if (id == null || id == ElementId.InvalidElementId) return null;
+            return fam.GetElement(id) is Material mat ? Hex(mat.Color) : null;
+        }
+
+        /// <summary>Cor pela subcategoria (estilo gráfico) do objeto: o material da subcategoria.</summary>
+        private static string StyleColor(Document fam, ElementId styleId)
+        {
+            if (styleId == null || styleId == ElementId.InvalidElementId) return null;
+            if (!(fam.GetElement(styleId) is GraphicsStyle gs) || gs.GraphicsStyleCategory == null) return null;
+            return MaterialColor(fam, gs.GraphicsStyleCategory.Material?.Id);
+        }
+
+        /// <summary>Cor padrão de um elemento da família: material do parâmetro "Material", senão da subcategoria/categoria.</summary>
+        private static string ElementColor(Document fam, Element e)
+        {
+            try
+            {
+                var p = e.get_Parameter(BuiltInParameter.MATERIAL_ID_PARAM);
+                var byParam = p != null ? MaterialColor(fam, p.AsElementId()) : null;
+                if (byParam != null) return byParam;
+                if (e.Category?.Material != null) return Hex(e.Category.Material.Color) ?? DefaultColor;
+                if (e.Category?.Parent?.Material != null) return Hex(e.Category.Parent.Material.Color) ?? DefaultColor;
+            }
+            catch { /* sem material */ }
+            return DefaultColor;
+        }
+
+        // ---- Símbolo em planta -------------------------------------------------------------------
+
+        private const int MaxPlanPoints = 20000;
+
+        /// <summary>Linhas simbólicas visíveis em planta (vista superior), como o Revit desenha a família na planta.</summary>
+        private static void ReadPlanLines(Document fam, ExportedType et)
+        {
+            int count = 0;
+            foreach (var sc in new FilteredElementCollector(fam).OfClass(typeof(SymbolicCurve)).Cast<SymbolicCurve>())
+            {
+                try
+                {
+                    var vis = sc.GetVisibility();
+                    if (vis != null && !vis.IsShownInTopBottom) continue;
+                    var normal = sc.SketchPlane?.GetPlane()?.Normal;
+                    if (normal != null && Math.Abs(normal.Z) < 0.99) continue; // só linhas no plano horizontal
+                    var pts = sc.GeometryCurve?.Tessellate();
+                    if (pts == null || pts.Count < 2) continue;
+                    var line = new List<double>(pts.Count * 2);
+                    foreach (var q in pts)
+                    {
+                        line.Add(q.X * FeetToMm);
+                        line.Add(q.Y * FeetToMm);
+                    }
+                    et.PlanLines.Add(line);
+                    count += pts.Count;
+                    if (count > MaxPlanPoints) break;
+                }
+                catch { /* linha sem visibilidade/geometria */ }
             }
         }
 

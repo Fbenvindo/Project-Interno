@@ -80,9 +80,22 @@ namespace SmartEasyBIM.Revit
                     w.Name("malha").BeginObject();
                     w.Numbers("posicoes", t.Positions, 1);
                     w.Integers("indices", t.Indices);
+                    if (t.Palette.Count > 1 || (t.Palette.Count == 1 && t.Palette[0] != "#a8adb5"))
+                    {
+                        w.Name("paleta").BeginArray();
+                        foreach (var c in t.Palette) w.Value(c);
+                        w.EndArray();
+                        w.Integers("cores", t.Colors);
+                    }
                     w.EndObject();
                     w.Numbers("min", t.Min, 1);
                     w.Numbers("max", t.Max, 1);
+                }
+                if (t.PlanLines.Count > 0)
+                {
+                    w.Name("planta").BeginArray();
+                    foreach (var l in t.PlanLines) w.Numbers(null, l, 1);
+                    w.EndArray();
                 }
                 w.EndObject();
             }

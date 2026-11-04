@@ -122,6 +122,14 @@ Na aba **Planta 2D**, escolha o pavimento, a altura de corte (padrão 1,20 m aci
 
 A simbologia é um ponto de partida: confira com o padrão gráfico do escritório antes de emitir pranchas.
 
+### Detalhe das famílias do Revit
+
+- **3D:** a peça mantém as **arestas vivas** (só as superfícies curvas são suavizadas) e é desenhada com o **contorno das arestas**, como a vista sombreada com arestas do Revit.
+  - No modo **Cores** (Modelo › Cores), aparecem as **cores dos materiais** da família.
+  - No modo por disciplina, a peça fica na cor da disciplina.
+- **Planta:** se a família tem **linhas simbólicas visíveis em planta** (o símbolo que o Revit desenha na planta), o app usa essas linhas, em tamanho real, na planta, na prancha, no DXF e na legenda. Sem elas, usa o símbolo padrão da categoria.
+- **Plugin:** exporta a geometria no nível de detalhe **Fino**, com triangulação mais fina das curvas (até 150 mil triângulos por tipo), a cor do material de cada face e as linhas simbólicas de planta. Os pacotes `.sebfam` antigos continuam válidos; para ter cores e símbolo de planta, exporte de novo com o plugin atualizado.
+
 ### Projeto (.seb) e IFCs de terceiros
 
 O **projeto** é o arquivo do usuário, com extensão **`.seb`** (SmartEasyBIM; por dentro é JSON). Ele guarda:

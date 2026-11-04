@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { ComponentMesh, Shape } from "../../../core/library";
 import type { SurfaceHit } from "../../../core/placement";
 import { segmentBasis, type Profile } from "../../../core/runs";
@@ -81,7 +82,10 @@ export class Viewer {
   private materialCache = new Map<string, THREE.Material>();
   private geometryCache = new Map<string, THREE.BufferGeometry>();
   /** Geometria das famílias importadas (mm → m), por malha. */
-  private meshGeometry = new WeakMap<ComponentMesh, THREE.BufferGeometry>();
+  private meshGeometry = new WeakMap<ComponentMesh, { geometry: THREE.BufferGeometry; edges: THREE.BufferGeometry }>();
+  /** Famílias com cores dos materiais (modo de cor "IFC"/original). */
+  private vertexColorMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  private edgeMaterial = new THREE.LineBasicMaterial({ color: 0x2b2f36, transparent: true, opacity: 0.55 });
   private selectionMaterial = new THREE.MeshLambertMaterial({ color: 0x00e5ff, emissive: 0x004455, side: THREE.DoubleSide });
   private highlightMaterial = new THREE.MeshLambertMaterial({ color: 0xff2d55, emissive: 0x440011, side: THREE.DoubleSide });
   private ghostMaterial = new THREE.MeshLambertMaterial({ color: 0x9aa4b2, transparent: true, opacity: 0.08, depthWrite: false });
@@ -279,7 +283,10 @@ export class Viewer {
       const mesh = this.buildMesh(p, mat);
       mesh.userData.expressID = p.id;
       group.add(mesh);
-      this.entries.set(p.id, { mesh, ifcMaterial: mat, disciplineMaterial: mat, layer });
+      // Famílias com materiais: no modo de cor original, as cores do Revit/IFC.
+      const original = "mesh" in p && p.mesh?.triColors ? this.vertexColorMaterial : mat;
+      if (original !== mat && this.colorMode === "ifc") mesh.material = original;
+      this.entries.set(p.id, { mesh, ifcMaterial: original, disciplineMaterial: mat, layer });
     }
     this.setVisible(this.visible);
   }
@@ -678,17 +685,40 @@ export class Viewer {
     }
     const [w, d, h] = v.size;
     if (v.mesh) {
-      let g = this.meshGeometry.get(v.mesh);
-      if (!g) {
-        g = new THREE.BufferGeometry();
-        g.setAttribute("position", new THREE.BufferAttribute(v.mesh.positions.map((c) => c / 1000), 3));
-        g.setIndex(new THREE.BufferAttribute(v.mesh.indices, 1));
-        g.computeVertexNormals();
+      let cached = this.meshGeometry.get(v.mesh);
+      if (!cached) {
+        // Triângulos soltos (não compartilham vértices entre faces) e normais com quinas: as
+        // arestas vivas da família ficam nítidas e só as superfícies curvas são suavizadas.
+        const { positions, indices, triColors } = v.mesh;
+        const n = indices.length;
+        const pos = new Float32Array(n * 3);
+        const col = triColors ? new Float32Array(n * 3) : null;
+        for (let i = 0; i < n; i++) {
+          const vi = indices[i] * 3;
+          pos[i * 3] = positions[vi] / 1000;
+          pos[i * 3 + 1] = positions[vi + 1] / 1000;
+          pos[i * 3 + 2] = positions[vi + 2] / 1000;
+          if (col && triColors) {
+            const t = Math.floor(i / 3) * 3;
+            col[i * 3] = triColors[t] / 255;
+            col[i * 3 + 1] = triColors[t + 1] / 255;
+            col[i * 3 + 2] = triColors[t + 2] / 255;
+          }
+        }
+        let g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        if (col) g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+        g = toCreasedNormals(g, Math.PI / 6);
         g.computeBoundingBox();
         g.computeBoundingSphere();
-        this.meshGeometry.set(v.mesh, g);
+        cached = { geometry: g, edges: new THREE.EdgesGeometry(g, 30) };
+        this.meshGeometry.set(v.mesh, cached);
       }
-      const mesh = new THREE.Mesh(g, material);
+      const mesh = new THREE.Mesh(cached.geometry, material);
+      // Contorno das arestas (como a vista sombreada com arestas do Revit).
+      const edges = new THREE.LineSegments(cached.edges, this.edgeMaterial);
+      edges.raycast = () => {};
+      mesh.add(edges);
       mesh.position.set(...v.position);
       mesh.rotation.y = v.rotation;
       mesh.updateMatrixWorld();

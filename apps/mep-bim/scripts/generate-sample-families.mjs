@@ -9,10 +9,22 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 function mesh() {
   const posicoes = [];
   const indices = [];
+  // Cor (material) de cada triângulo, como o plugin exporta.
+  const paleta = [];
+  const cores = [];
+  let cor = 0;
+  const color = (hex) => {
+    cor = paleta.indexOf(hex);
+    if (cor < 0) cor = paleta.push(hex) - 1;
+  };
+  const tag = () => {
+    while (cores.length < indices.length / 3) cores.push(cor);
+  };
   const box = (x0, y0, z0, x1, y1, z1) => {
     const b = posicoes.length / 3;
     for (const [x, y, z] of [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]]) posicoes.push(x, y, z);
     for (const f of [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]]) indices.push(...f.map((i) => b + i));
+    tag();
   };
   const cyl = (cx, cy, z0, z1, r, n = 24) => {
     const b = posicoes.length / 3;
@@ -26,13 +38,16 @@ function mesh() {
       const j = (i + 1) % n;
       indices.push(b + 2 * i, b + 2 * j, b + 2 * j + 1, b + 2 * i, b + 2 * j + 1, b + 2 * i + 1, c0, b + 2 * j, b + 2 * i, c0 + 1, b + 2 * i + 1, b + 2 * j + 1);
     }
+    tag();
   };
   const done = () => {
     const min = [0, 1, 2].map((k) => Math.min(...posicoes.filter((_, i) => i % 3 === k)));
     const max = [0, 1, 2].map((k) => Math.max(...posicoes.filter((_, i) => i % 3 === k)));
-    return { malha: { posicoes: posicoes.map((v) => Math.round(v * 10) / 10), indices }, min, max };
+    const malha = { posicoes: posicoes.map((v) => Math.round(v * 10) / 10), indices };
+    if (paleta.length) Object.assign(malha, { paleta, cores });
+    return { malha, min, max };
   };
-  return { box, cyl, done };
+  return { box, cyl, done, color };
 }
 
 const p = (nome, valor, extra = {}) => ({ nome, instancia: false, valor, ...extra });
@@ -41,9 +56,14 @@ const p = (nome, valor, extra = {}) => ({ nome, instancia: false, valor, ...extr
 const lum = (lado, potencia, fluxo) => {
   const m = mesh();
   const h = lado / 2;
+  m.color("#e9ebee"); // moldura (alumínio pintado)
   m.box(-h, -h, -70, h, h, 0);
+  m.color("#fff6d8"); // difusor
   m.box(-h + 40, -h + 40, -78, h - 40, h - 40, -70);
-  return { nome: `${lado}x${lado} - ${potencia}W`, parametros: [p("Potência", potencia, { nativo: "FBX_LIGHT_WATTAGE", texto: `${potencia} W`, unidade: "W" }), p("Fluxo luminoso", fluxo, { nativo: "FBX_LIGHT_LIMUNOUS_FLUX", unidade: "lm" }), p("Tensão", 220, { nativo: "RBS_ELEC_VOLTAGE", unidade: "V" }), p("Fabricante", "Exemplo Iluminação"), p("Modelo", `LX-${lado}`), p("Altura", 70, { nativo: "GENERIC_HEIGHT", unidade: "mm" })], ...m.done() };
+  // Símbolo de planta como no Revit: contorno, difusor e diagonais.
+  const sq = (a) => [-a, -a, a, -a, a, a, -a, a, -a, -a];
+  const planta = [sq(h), sq(h - 40), [-h + 40, -h + 40, h - 40, h - 40], [-h + 40, h - 40, h - 40, -h + 40]];
+  return { nome: `${lado}x${lado} - ${potencia}W`, planta, parametros: [p("Potência", potencia, { nativo: "FBX_LIGHT_WATTAGE", texto: `${potencia} W`, unidade: "W" }), p("Fluxo luminoso", fluxo, { nativo: "FBX_LIGHT_LIMUNOUS_FLUX", unidade: "lm" }), p("Tensão", 220, { nativo: "RBS_ELEC_VOLTAGE", unidade: "V" }), p("Fabricante", "Exemplo Iluminação"), p("Modelo", `LX-${lado}`), p("Altura", 70, { nativo: "GENERIC_HEIGHT", unidade: "mm" })], ...m.done() };
 };
 
 // Tomada hospedada na parede: placa e caixa avançando para +Y a partir da face da parede.
@@ -59,9 +79,12 @@ const tomada = (nome, alt) => {
 // Quadro sem hospedeiro: frente voltada para −Y (vista Frontal do Revit).
 const quadro = (nome, w, h, d, disj) => {
   const m = mesh();
+  m.color("#c9cdd2");
   m.box(-w / 2, 0, 0, w / 2, d, h);
+  m.color("#e3e6ea"); // porta
   m.box(-w / 2 + 20, -6, 20, w / 2 - 20, 0, h - 20);
-  return { nome, parametros: [p("Tensão", 220, { nativo: "RBS_ELEC_VOLTAGE", unidade: "V" }), p("Disjuntores", disj), p("Grau de proteção", "IP40")], ...m.done() };
+  const planta = [[-w / 2, -6, w / 2, -6, w / 2, d, -w / 2, d, -w / 2, -6], [-w / 2, d, w / 2, -6]];
+  return { nome, planta, parametros: [p("Tensão", 220, { nativo: "RBS_ELEC_VOLTAGE", unidade: "V" }), p("Disjuntores", disj), p("Grau de proteção", "IP40")], ...m.done() };
 };
 
 const pkg = {

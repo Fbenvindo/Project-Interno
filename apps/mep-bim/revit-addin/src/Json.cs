@@ -66,9 +66,10 @@ namespace SmartEasyBIM.Revit
         public JsonWriter Prop(string name, bool v) => Name(name).Value(v);
 
         /// <summary>Lista de números (coordenadas, índices) sem espaços.</summary>
+        /// <remarks>Sem nome (null): elemento de uma lista.</remarks>
         public JsonWriter Numbers(string name, IList<double> values, int decimals)
         {
-            Name(name);
+            if (name != null) Name(name);
             Separator();
             _w.Write('[');
             var fmt = decimals <= 0 ? "0" : "0." + new string('#', decimals);

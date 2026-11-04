@@ -13,6 +13,8 @@ export type Shape = "caixa" | "cilindro" | "malha";
 export interface ComponentMesh {
   positions: Float32Array;
   indices: Uint32Array;
+  /** Cor de cada triângulo (r, g, b 0–255), pelo material de origem. */
+  triColors?: Uint8Array;
 }
 
 export interface ComponentParam {
@@ -47,6 +49,8 @@ export interface ComponentDef {
   mesh?: ComponentMesh;
   /** Componente cujo símbolo de planta é reaproveitado. */
   symbolOf?: string;
+  /** Símbolo de planta da própria família (linhas simbólicas do Revit): polilinhas em mm, eixos X e Z do app, centradas como a malha. */
+  planLines?: [number, number][][];
   /** Origem externa: famílias do Revit (.sebfam) ou elementos lidos de um IFC. */
   source?: { kind: "revit" | "ifc"; packageId: string; familyUid: string; family: string; type: string; file?: string };
   /** Função/equivalência: elementos com a mesma função são alternativas entre si (ex.: marcas). */

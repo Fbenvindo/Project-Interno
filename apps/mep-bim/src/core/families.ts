@@ -18,7 +18,10 @@ export interface RevitParam {
 export interface RevitType {
   nome: string;
   parametros: RevitParam[];
-  malha?: { posicoes: number[]; indices: number[] };
+  /** paleta/cores: cor (#rrggbb) de cada triângulo, pelo material da face. */
+  malha?: { posicoes: number[]; indices: number[]; paleta?: string[]; cores?: number[] };
+  /** Linhas simbólicas visíveis em planta: polilinhas [x0, y0, x1, y1, …] em mm, coordenadas da família. */
+  planta?: number[][];
   min?: [number, number, number];
   max?: [number, number, number];
 }
@@ -219,7 +222,13 @@ export function appBasis(out: OutAxis, mounting: Mounting): { x: V3; y: V3; z: V
 }
 
 /** Malha nos eixos do app, centrada na caixa envolvente; devolve também o tamanho [L, P, A] em mm. */
-export function orientMesh(positions: number[], indices: number[], out: OutAxis, mounting: Mounting): { mesh: ComponentMesh; size: [number, number, number] } {
+export function orientMesh(
+  positions: number[],
+  indices: number[],
+  out: OutAxis,
+  mounting: Mounting,
+  colors?: { paleta?: string[]; cores?: number[] },
+): { mesh: ComponentMesh; size: [number, number, number]; toApp: (v: V3) => V3 } {
   const { x, y, z } = appBasis(out, mounting);
   const n = positions.length / 3;
   const p = new Float32Array(positions.length);
@@ -237,7 +246,30 @@ export function orientMesh(positions: number[], indices: number[], out: OutAxis,
   const c = [0, 1, 2].map((k) => (min[k] + max[k]) / 2);
   for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) p[3 * i + k] -= c[k];
   const ext = [0, 1, 2].map((k) => Math.max(1, Math.round(max[k] - min[k])));
-  return { mesh: { positions: p, indices: Uint32Array.from(indices) }, size: [ext[0], ext[2], ext[1]] };
+  let triColors: Uint8Array | undefined;
+  if (colors?.paleta?.length && colors.cores?.length) {
+    const rgb = colors.paleta.map((h) => [1, 3, 5].map((o) => parseInt(h.slice(o, o + 2), 16) || 0));
+    const nt = indices.length / 3;
+    triColors = new Uint8Array(nt * 3);
+    for (let t = 0; t < nt; t++) triColors.set(rgb[colors.cores[t] ?? 0] ?? [168, 173, 181], t * 3);
+  }
+  const toApp = (v: V3): V3 => [dot(v, x) - c[0], dot(v, y) - c[1], dot(v, z) - c[2]];
+  return { mesh: { positions: p, indices: Uint32Array.from(indices), triColors }, size: [ext[0], ext[2], ext[1]], toApp };
+}
+
+/** Linhas de planta da família nos eixos do app (X e Z, mm), centradas como a malha. */
+export function orientPlanLines(lines: number[][] | undefined, toApp: ((v: V3) => V3) | undefined): [number, number][][] | undefined {
+  if (!lines?.length || !toApp) return undefined;
+  const out: [number, number][][] = [];
+  for (const l of lines) {
+    const pts: [number, number][] = [];
+    for (let i = 0; i + 1 < l.length; i += 2) {
+      const q = toApp([l[i], l[i + 1], 0]);
+      pts.push([Math.round(q[0] * 10) / 10, Math.round(q[2] * 10) / 10]);
+    }
+    if (pts.length >= 2) out.push(pts);
+  }
+  return out.length ? out : undefined;
 }
 
 // ---- Parâmetros ----------------------------------------------------------------------------------
@@ -299,7 +331,7 @@ export function familyComponents(packageId: string, f: RevitFamily, ov: FamilyOv
   const like = profile.like ? COMPONENT_BY_ID[profile.like] : undefined;
   const sameMounting = like && like.mounting === mounting;
   return f.tipos.map((t) => {
-    const oriented = t.malha && t.malha.indices.length ? orientMesh(t.malha.posicoes, t.malha.indices, out, mounting) : null;
+    const oriented = t.malha && t.malha.indices.length ? orientMesh(t.malha.posicoes, t.malha.indices, out, mounting, t.malha) : null;
     const label = t.nome === f.nome ? f.nome : `${f.nome} : ${t.nome}`;
     const found = brandModelOf(t.parametros.map((p) => ({ name: p.nome, value: p.texto ?? (p.valor as string | number | null) })));
     return {
@@ -322,6 +354,7 @@ export function familyComponents(packageId: string, f: RevitFamily, ov: FamilyOv
       tagPrefix: like?.tagPrefix ?? "RV",
       params: componentParams(t, like),
       symbolOf: like?.id,
+      planLines: orientPlanLines(t.planta, oriented?.toApp),
       source: { kind: "revit", packageId, familyUid: f.uid, family: f.nome, type: t.nome },
     };
   });

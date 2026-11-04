@@ -106,3 +106,43 @@ describe("exportação IFC de família importada", () => {
     registerComponents("pkg-ifc", []);
   });
 });
+
+describe("detalhe das famílias: materiais e símbolo de planta", async () => {
+  const { buildPlan } = await import("../src/core/plan/build");
+  const { CoordinateSystem } = await import("../src/core/math");
+  it("cores por triângulo e linhas de planta vêm para o componente", () => {
+    const [lum] = familyComponents("p1", fam("OST_LightingFixtures"));
+    expect(lum.mesh!.triColors!.length).toBe(lum.mesh!.indices.length);
+    expect([...lum.mesh!.triColors!.slice(0, 3)]).toEqual([0xe9, 0xeb, 0xee]);
+    expect(lum.planLines).toHaveLength(4);
+    // Linhas centradas como a malha: o contorno de 600 mm vai de −300 a +300.
+    const xs = lum.planLines!.flat().map((q) => q[0]);
+    expect(Math.min(...xs)).toBeCloseTo(-300);
+    expect(Math.max(...xs)).toBeCloseTo(300);
+  });
+
+  it("na planta, a família é desenhada com as próprias linhas, em tamanho real", () => {
+    const [lum] = familyComponents("p1", fam("OST_LightingFixtures"));
+    registerComponents("p-test", [lum]);
+    const point = { id: -50, guid: "g", componentId: lum.id, tag: "L1", position: [2, 2.9, -2] as [number, number, number], rotation: 0, height: 0, refLevel: 2.9, storey: "T", system: "", params: {} };
+    const d = buildPlan({
+      elements: [],
+      meshes: new Map(),
+      cs: new CoordinateSystem(),
+      storeyLevels: [{ name: "T", level: 0 }],
+      storey: "T",
+      cutHeight: 1.2,
+      points: [point],
+      runs: [],
+      scale: 50,
+      disciplines: new Set(["eletrica"]),
+      labels: { tags: false, circuits: false, power: false, sizes: false },
+    });
+    const own = d.prims.filter((p) => p.id === -50 && p.t === "poly");
+    expect(own).toHaveLength(4);
+    const xs = own.flatMap((p) => (p as { pts: [number, number][] }).pts.map((q) => q[0]));
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(0.6);
+    expect(d.legend.find((l) => l.label === lum.label)?.prims).toHaveLength(4);
+    registerComponents("p-test", []);
+  });
+});
