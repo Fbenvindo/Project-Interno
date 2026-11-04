@@ -40,6 +40,7 @@ import type { Vec3 } from "../../../core/types";
 import type { CoordinateSystem } from "../../../core/math";
 import type { PointsStore } from "../locacao/usePointsStore";
 import type { ClickInfo, PlanTool, ToolQuestion } from "../planta/planTool";
+import { labelPoint, measureText, type Measure } from "../../../core/measure";
 
 export type DraftCmd =
   | "linha"
@@ -65,7 +66,10 @@ export type DraftCmd =
   | "corte-selecao"
   | "corte-linha"
   | "ampliacao"
-  | "vista-3d";
+  | "vista-3d"
+  | "medir-distancia"
+  | "medir-area"
+  | "medir-angulo";
 
 export const CMD_LABEL: Record<DraftCmd, string> = {
   linha: "Linha",
@@ -91,12 +95,16 @@ export const CMD_LABEL: Record<DraftCmd, string> = {
   "corte-selecao": "Corte pela seleção",
   "corte-linha": "Corte por linha",
   ampliacao: "Ampliação",
+  "medir-distancia": "Medir distância",
+  "medir-area": "Medir área",
+  "medir-angulo": "Medir ângulo",
   "vista-3d": "Vista 3D no local",
 };
 
 /** Comandos que começam por uma seleção. */
 export const NEEDS_SELECTION = new Set<DraftCmd>(["copiar", "mover", "recortar", "apagar", "estender", "conectar", "corte-selecao"]);
-export const isCreateCmd = (c: DraftCmd) => !NEEDS_SELECTION.has(c) && c !== "colar" && c !== "corte-linha" && c !== "vista-3d" && c !== "ampliacao";
+export const isMeasureCmd = (c: DraftCmd) => c === "medir-distancia" || c === "medir-area" || c === "medir-angulo";
+export const isCreateCmd = (c: DraftCmd) => !NEEDS_SELECTION.has(c) && c !== "colar" && c !== "corte-linha" && c !== "vista-3d" && c !== "ampliacao" && !isMeasureCmd(c);
 
 /** Fases de um comando com seleção. */
 export type Phase = "selecionar" | "confirmar" | "remover" | "executar";
@@ -168,6 +176,8 @@ export function useDraftTool(a: Args) {
   const [pending, setPending] = useState<ViewDef | null>(null);
   /** Comando Texto: posição onde o texto está sendo digitado. */
   const [textAt, setTextAt] = useState<P2 | null>(null);
+  /** Medições feitas (ficam na tela enquanto o comando de medir está ativo). */
+  const [measures, setMeasures] = useState<Measure[]>([]);
   const argsRef = useRef(a);
   argsRef.current = a;
 
@@ -189,6 +199,7 @@ export function useDraftTool(a: Args) {
     setPhase("selecionar");
     setPending(null);
     setTextAt(null);
+    if (!isMeasureCmd(cmd)) setMeasures([]);
     if (NEEDS_SELECTION.has(cmd)) argsRef.current.setSelection(editable(argsRef.current.selection));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmd, n]);
@@ -586,6 +597,12 @@ export function useDraftTool(a: Args) {
     anchor: pts[pts.length - 1] ?? null,
     preview(cursor) {
       const out: Prim[] = [];
+      if (isMeasureCmd(cmd)) {
+        const kind: Measure["kind"] = cmd === "medir-area" ? "area" : cmd === "medir-angulo" ? "angulo" : "distancia";
+        const live = cursor && pts.length ? [{ kind, pts: [...pts, cursor] }] : [];
+        for (const m of [...measures, ...live]) out.push(...measurePrims(m));
+        return out;
+      }
       if (cmd === "texto" && textAt) return out;
       if (isCreateCmd(cmd)) {
         const p = cursor ? [...pts, cursor] : pts;
@@ -641,6 +658,17 @@ export function useDraftTool(a: Args) {
     click(p, info) {
       if (pending) return;
       setMessage(null);
+      if (isMeasureCmd(cmd)) {
+        const last = pts[pts.length - 1];
+        if (last && Math.hypot(last[0] - p[0], last[1] - p[1]) < 1e-6) return; // duplo clique
+        const next = [...pts, p];
+        // Ângulo: 3 pontos fecham a medição; área e distância continuam até Enter/duplo clique.
+        if (cmd === "medir-angulo" && next.length === 3) {
+          setMeasures((m) => [...m, { kind: "angulo", pts: next }]);
+          return setPts([]);
+        }
+        return setPts(next);
+      }
       if (isCreateCmd(cmd)) return onCreateClick(p);
       if (NEEDS_SELECTION.has(cmd) && (phase === "selecionar" || phase === "remover")) {
         if (info.id == null) return;
@@ -660,6 +688,11 @@ export function useDraftTool(a: Args) {
       } else a.setSelection([...new Set([...cur, ...valid])]);
     },
     finish() {
+      if (isMeasureCmd(cmd)) {
+        if (cmd === "medir-distancia" && pts.length >= 2) setMeasures((m) => [...m, { kind: "distancia", pts }]);
+        if (cmd === "medir-area" && pts.length >= 3) setMeasures((m) => [...m, { kind: "area", pts }]);
+        return setPts([]);
+      }
       if (isCreateCmd(cmd)) {
         if (cmd === "poligonal" && pts.length >= 2) {
           const e = build(pts);
@@ -698,6 +731,10 @@ export function useDraftTool(a: Args) {
     execute,
     clipboard: clipVersion >= 0 ? clipboard : null,
     angleDeg,
+    measures,
+    setMeasures,
+    /** Grava uma medição como texto na vista (anotação permanente). */
+    measureToText: (m: Measure) => addDraft({ id: newDraftId(), ...base, kind: "texto", p: labelPoint(m), text: measureText(m), size: 2.5, rot: 0 } as DraftEntity),
   };
 }
 
@@ -757,7 +794,25 @@ function promptFor(cmd: DraftCmd, phase: Phase, k: number, count: number): strin
     "corte-linha": ["primeiro ponto da linha de corte", "segundo ponto", "clique do lado que deve ficar visível"],
     "vista-3d": ["posição do observador", "direção para onde olhar"],
     ampliacao: ["primeiro canto da área a ampliar", "canto oposto"],
+    "medir-distancia": ["primeiro ponto", "próximo ponto (Enter ou duplo clique encerra; vários pontos somam os trechos)"],
+    "medir-area": ["primeiro vértice", "próximo vértice", "próximo vértice (Enter ou duplo clique fecha a área)"],
+    "medir-angulo": ["ponto na primeira direção", "vértice do ângulo", "ponto na segunda direção"],
   };
   const s = steps[cmd] ?? [];
   return `${CMD_LABEL[cmd]}: ${s[Math.min(k, s.length - 1)] ?? ""} · Esc cancela`;
+}
+
+/** Desenho de uma medição: linhas tracejadas em magenta e o valor junto. */
+const MEASURE = "#db2777";
+function measurePrims(m: Measure): Prim[] {
+  const base = { color: MEASURE, layer: "PREVIEW" };
+  const out: Prim[] = [];
+  if (m.pts.length >= 2) out.push({ t: "poly", pts: m.pts, closed: m.kind === "area" && m.pts.length >= 3, weight: 0.3, dashed: true, ...base, fill: null });
+  for (const q of m.pts) out.push({ t: "circle", c: q, r: 0.04, weight: 0.3, fill: MEASURE, ...base });
+  const ok = m.kind === "distancia" ? m.pts.length >= 2 : m.kind === "area" ? m.pts.length >= 3 : m.pts.length >= 3;
+  if (ok) {
+    const at = labelPoint(m);
+    out.push({ t: "text", p: [at[0], at[1] + 0.15], text: measureText(m), height: 0.14, anchor: "middle", ...base });
+  }
+  return out;
 }

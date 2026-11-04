@@ -56,3 +56,15 @@ describe("entidades de desenho", () => {
     expect((u.add[0] as { pts: unknown[] }).pts).toHaveLength(4);
   });
 });
+
+describe("medições", async () => {
+  const { chainLength, polygonMeasure, angleAt, measureText } = await import("../src/core/measure");
+  it("distância em cadeia, área e perímetro, ângulo", () => {
+    expect(chainLength([[0, 0], [3, 4], [3, 10]]).total).toBeCloseTo(11);
+    expect(polygonMeasure([[0, 0], [4, 0], [4, 3], [0, 3]])).toEqual({ area: 12, perimeter: 14 });
+    expect(angleAt([1, 0], [0, 0], [0, 1])).toBeCloseTo(90);
+    expect(measureText({ kind: "distancia", pts: [[0, 0], [3, 4]] })).toBe("5,000 m (Δx 3,000 · Δy 4,000)");
+    expect(measureText({ kind: "area", pts: [[0, 0], [4, 0], [4, 3], [0, 3]] })).toBe("12,00 m² · perímetro 14,000 m");
+    expect(measureText({ kind: "angulo", pts: [[1, 0], [0, 0], [1, 1]] })).toBe("45,0° (replemento 315,0°)");
+  });
+});

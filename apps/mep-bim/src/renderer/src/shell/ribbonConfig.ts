@@ -210,6 +210,10 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
       label: "Vistas",
       buttons: [draw("ampliacao", "Ampliação", "gAmpliacao"), draw("vista-3d", "Vista 3D no local", "gVista3d")],
     },
+    {
+      label: "Medir",
+      buttons: [draw("medir-distancia", "Distância", "gMedDist"), draw("medir-area", "Área", "gMedArea"), draw("medir-angulo", "Ângulo", "gMedAng")],
+    },
   ],
   modelo: [
     {

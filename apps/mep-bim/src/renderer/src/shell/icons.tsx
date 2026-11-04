@@ -455,6 +455,25 @@ const P: Record<string, ReactNode> = {
       <path d="M4 4 L20 20" />
     </>
   ),
+  gMedDist: (
+    <>
+      <path d="M3 15 L21 15 M3 12 V18 M21 12 V18" />
+      <path d="M6 15 L8 13 M6 15 L8 17 M18 15 L16 13 M18 15 L16 17" />
+      <path d="M8 8 H16" strokeDasharray="2 2" />
+    </>
+  ),
+  gMedArea: (
+    <>
+      <path d="M4 18 L7 5 L19 8 L17 19 Z" />
+      <path d="M9 14 H13 M11 12 V16" />
+    </>
+  ),
+  gMedAng: (
+    <>
+      <path d="M4 19 H20 M4 19 L15 5" />
+      <path d="M11 19 A7 7 0 0 0 8.5 14" />
+    </>
+  ),
   gAmpliacao: (
     <>
       <rect x="3" y="3" width="11" height="9" strokeDasharray="2 2" />

@@ -2,7 +2,8 @@
 import { DRAFT_LABEL } from "../../../core/draft";
 import { runIdOfElement } from "../../../core/runs";
 import type { PointsStore } from "../locacao/usePointsStore";
-import { CMD_LABEL, isCreateCmd, NEEDS_SELECTION, type DraftCmd, type DraftController } from "./useDraftTool";
+import { CMD_LABEL, isCreateCmd, isMeasureCmd, NEEDS_SELECTION, type DraftCmd, type DraftController } from "./useDraftTool";
+import { measureText } from "../../../core/measure";
 
 interface Props {
   cmd: DraftCmd;
@@ -185,9 +186,41 @@ export function DesenhoPanel({ cmd, ctl, store, selection, setSelection, hasClip
         </>
       )}
 
+      {isMeasureCmd(cmd) && (
+        <section className="card">
+          <div className="panel-head">
+            <h3>Medições ({ctl.measures.length})</h3>
+            {ctl.measures.length > 0 && (
+              <button className="link" onClick={() => ctl.setMeasures([])}>
+                limpar
+              </button>
+            )}
+          </div>
+          {ctl.measures.length === 0 ? (
+            <p className="muted small">Clique nos pontos na planta (ou no corte). As medidas ficam na tela até você sair do comando (Esc).</p>
+          ) : (
+            <ul className="sel-list">
+              {ctl.measures.map((m, i) => (
+                <li key={i}>
+                  <span className="grow">
+                    <b>{m.kind === "distancia" ? "Distância" : m.kind === "area" ? "Área" : "Ângulo"}:</b> {measureText(m)}
+                  </span>
+                  <button className="link" title="Gravar o valor como texto na vista" onClick={() => ctl.measureToText(m)}>
+                    texto
+                  </button>
+                  <button className="link danger-link" title="Apagar esta medição" onClick={() => ctl.setMeasures((l) => l.filter((_, j) => j !== i))}>
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="muted small">Troque entre distância, área e ângulo sem perder as medidas. Shift trava na horizontal/vertical; o encaixe pega pontas, meios, cantos e pontos locados.</p>
+        </section>
+      )}
       {ctl.message && <div className="info-text small">{ctl.message}</div>}
 
-      {(isCreateCmd(cmd) || phase === "executar" || cmd === "colar" || cmd === "corte-linha" || cmd === "vista-3d") && (
+      {(isCreateCmd(cmd) || phase === "executar" || cmd === "colar" || cmd === "corte-linha" || cmd === "vista-3d") && !isMeasureCmd(cmd) && (
         <p className="muted small">
           Encaixe automático em extremidades, meios, centros e vértices (quadrado laranja). Shift: ortogonal ao último ponto. Enter, duplo clique ou botão direito
           termina; Esc cancela. Os desenhos ficam no pavimento atual, entram na prancha e no DXF (camadas ANOT-*).
