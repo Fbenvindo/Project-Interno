@@ -112,6 +112,14 @@ export class Viewer {
   /** Janela de seleção (arrastar com o botão esquerdo fora dos comandos de locação/traçado). */
   onPickMany: (ids: number[], additive: boolean) => void = () => {};
   private boxStart: { x: number; y: number } | null = null;
+  // ---- Mover arrastando com o botão direito (em Selecionar) ----
+  /** Elementos que podem ser arrastados (pontos e trechos do projeto). */
+  canMove: (id: number) => boolean = () => false;
+  /** Deslocamento final do arraste (cena, metros). */
+  onMoveBy: (d: Vec3) => void = () => {};
+  private moveDrag: { start: THREE.Vector3; d: Vec3 } | null = null;
+  private moveLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0x7c3aed, dashSize: 0.08, gapSize: 0.05, depthTest: false, transparent: true }));
+  private moveLabel: HTMLDivElement;
   // ---- Medição no 3D ----
   private measureMode: { onClick: (p: Vec3) => void; onFinish: () => void } | null = null;
   private measureGroup = new THREE.Group();
@@ -161,6 +169,44 @@ export class Viewer {
     this.boxEl.className = "viewer-box";
     this.boxEl.hidden = true;
     container.appendChild(this.boxEl);
+    // Botão direito sobre um ponto ou trecho: arrasta para mover (antes do OrbitControls, que giraria).
+    this.moveLine.renderOrder = 1000;
+    this.moveLine.visible = false;
+    this.scene.add(this.moveLine);
+    this.moveLabel = document.createElement("div");
+    this.moveLabel.className = "measure-label move-label";
+    this.moveLabel.hidden = true;
+    container.appendChild(this.moveLabel);
+    container.addEventListener(
+      "pointerdown",
+      (e) => {
+        if (e.button !== 2 || e.target !== canvas || this.placement || this.measureMode) return;
+        this.raycaster.setFromCamera(this.ndc(e.clientX, e.clientY), this.camera);
+        // O primeiro objeto visível sob o cursor tem de ser o ponto/trecho (não algo atrás de uma laje).
+        const targets = [...this.pointsGroup.children, ...this.runsGroup.children, ...this.modelGroup.children].filter(
+          (o) => o.visible && (o as THREE.Mesh).material !== this.ghostMaterial,
+        );
+        const hit = this.raycaster.intersectObjects(targets, false).find((h) => !this.clipped(h.point));
+        const id = hit && hit.object.parent !== this.modelGroup ? (hit.object.userData.expressID as number) : null;
+        if (!hit || id == null || !this.canMove(id)) return;
+        e.stopPropagation();
+        e.preventDefault();
+        if (!this.selected.has(id)) this.onPick(id, false);
+        this.moveDrag = { start: hit.point.clone(), d: [0, 0, 0] };
+        canvas.setPointerCapture(e.pointerId);
+      },
+      { capture: true },
+    );
+    canvas.addEventListener("pointermove", (e) => {
+      const m = this.moveDrag;
+      if (!m) return;
+      if (!(e.buttons & 2)) return this.endMoveDrag(false);
+      m.d = this.moveDelta(m.start, e);
+      this.showMoveDrag();
+    });
+    canvas.addEventListener("pointerup", (e) => {
+      if (this.moveDrag && e.button === 2) this.endMoveDrag(true);
+    });
     canvas.addEventListener("pointerdown", (e) => {
       this.pointerDown = { x: e.clientX, y: e.clientY };
       this.boxStart = e.button === 0 && !this.placement && !this.measureMode ? { x: e.clientX, y: e.clientY } : null;
@@ -609,6 +655,57 @@ export class Viewer {
     this.controls.target.set(...target);
     this.controls.update();
     this.requestRender();
+  }
+
+  /**
+   * Deslocamento do arraste: no plano horizontal do ponto pego; com Alt ou Ctrl, só na vertical
+   * (num plano de frente para a câmera). Shift trava no eixo dominante. Arredonda a 10 mm.
+   */
+  private moveDelta(start: THREE.Vector3, e: PointerEvent): Vec3 {
+    this.raycaster.setFromCamera(this.ndc(e.clientX, e.clientY), this.camera);
+    const ray = this.raycaster.ray;
+    const r = (v: number) => Math.round(v * 100) / 100;
+    if (e.altKey || e.ctrlKey || e.metaKey) {
+      const n = new THREE.Vector3().subVectors(this.camera.position, start).setY(0);
+      if (n.lengthSq() < 1e-9) n.set(0, 0, 1);
+      const q = ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(n.normalize(), start), new THREE.Vector3());
+      return q ? [0, r(q.y - start.y), 0] : [0, 0, 0];
+    }
+    const q = ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -start.y), new THREE.Vector3());
+    if (!q) return [0, 0, 0];
+    let dx = q.x - start.x;
+    let dz = q.z - start.z;
+    // Limite: com a câmera quase rasante, o plano foge para longe.
+    const far = 200;
+    if (Math.hypot(dx, dz) > far) return [0, 0, 0];
+    if (e.shiftKey) Math.abs(dx) >= Math.abs(dz) ? (dz = 0) : (dx = 0);
+    return [r(dx), 0, r(dz)];
+  }
+
+  private showMoveDrag() {
+    const m = this.moveDrag;
+    if (!m) return;
+    const b = m.start.clone().add(new THREE.Vector3(...m.d));
+    this.moveLine.geometry.setFromPoints([m.start, b]);
+    this.moveLine.computeLineDistances();
+    this.moveLine.visible = true;
+    const len = Math.hypot(...m.d);
+    const sp = this.toScreen([b.x, b.y, b.z]);
+    const rect = this.container.getBoundingClientRect();
+    Object.assign(this.moveLabel.style, { left: `${sp.x - rect.left}px`, top: `${sp.y - rect.top}px` });
+    const fmt = (v: number) => v.toFixed(2).replace(".", ",");
+    this.moveLabel.textContent = m.d[1] ? `${m.d[1] > 0 ? "↑" : "↓"} ${fmt(Math.abs(m.d[1]))} m` : `${fmt(len)} m`;
+    this.moveLabel.hidden = false;
+    this.requestRender();
+  }
+
+  private endMoveDrag(apply: boolean) {
+    const m = this.moveDrag;
+    this.moveDrag = null;
+    this.moveLine.visible = false;
+    this.moveLabel.hidden = true;
+    this.requestRender();
+    if (apply && m && Math.hypot(...m.d) >= 0.005) this.onMoveBy(m.d);
   }
 
   /** Posição na tela (px, coordenadas do cliente) de um ponto da cena. */

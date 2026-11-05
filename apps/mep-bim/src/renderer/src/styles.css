@@ -2142,3 +2142,9 @@ h3 {
   font-weight: 600;
   white-space: nowrap;
 }
+.measure-label.move-label {
+  border-color: #7c3aed;
+  color: #5b21b6;
+  pointer-events: none;
+  z-index: 3;
+}

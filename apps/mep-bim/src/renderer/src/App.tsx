@@ -86,7 +86,7 @@ function viewDirectionFor(points: PlacedPoint[]): Vec3 | undefined {
 }
 
 const TOOL_HINT: Record<ToolSpec["kind"], string> = {
-  propriedades: "Clique: selecionar (Ctrl soma) · arrastar →: só o que fica inteiro na janela · arrastar ←: tudo o que ela toca · botão do meio: mover · 3D: botão direito gira · duplo clique em texto: editar · Esc: limpar",
+  propriedades: "Clique: selecionar (Ctrl soma) · arrastar →: só o que fica inteiro na janela · arrastar ←: tudo o que ela toca · botão do meio: deslocar a vista · botão direito sobre ponto ou trecho: arrastar para mover (setas também; no 3D, Alt = vertical) · 3D: botão direito no vazio gira · duplo clique em texto: editar · Esc: limpar",
   locacao: "Clique na planta para locar · Esc cancela",
   tracado: "Clique para inserir vértices · duplo clique ou Enter termina · Esc cancela",
   circuitos: "Selecione pontos na vista e atribua ao circuito",
@@ -1126,6 +1126,18 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [planDeltaToScene]);
+  // 3D: arrastar com o botão direito sobre um ponto ou trecho (em Selecionar) move a seleção.
+  const move3dAllowed = useRef(false);
+  move3dAllowed.current = tool.kind === "propriedades" && view === "3d";
+  useEffect(() => {
+    const v = viewerRef.current;
+    if (!v) return;
+    v.canMove = (id) => move3dAllowed.current && (segmentIndexOf(id) != null || (id < 0 && id > -800000));
+    v.onMoveBy = (d) => {
+      const fmt = (x: number) => x.toFixed(2).replace(".", ",");
+      moveRef.current(d, d[1] ? `${fmt(Math.abs(d[1]))} m ${d[1] > 0 ? "para cima" : "para baixo"}` : `${fmt(Math.hypot(d[0], d[2]))} m`);
+    };
+  }, []);
   const pickMany = useCallback((ids: number[], additive: boolean) => setSelection((cur) => (additive ? [...new Set([...cur, ...ids])] : ids)), []);
 
   const disc = toolDisc ? DISCIPLINE_TABS[toolDisc] : null;

@@ -255,7 +255,7 @@ Comandos de desenho e edição na planta do pavimento, no estilo dos programas d
   - segmento vertical;
   - pontos próximos demais para as curvas escolhidas;
   - uma derivação (tê) no meio do intervalo.
-- **Mover com o que está ligado** (sem comando, em Selecionar): selecione pontos ou trechos e use as **setas** (planta: ±X/±Y do projeto; **PageUp/PageDown** sobe ou desce). O passo é 50 mm; Shift dá 10 mm e Ctrl dá 500 mm. Também dá para **segurar o botão direito** sobre o elemento e arrastar: a linha roxa mostra o deslocamento, arredondado a 10 mm, e Shift trava na horizontal/vertical. Junto com o elemento movem:
+- **Mover com o que está ligado** (sem comando, em Selecionar): selecione pontos ou trechos e use as **setas** (planta: ±X/±Y do projeto; **PageUp/PageDown** sobe ou desce). O passo é 50 mm; Shift dá 10 mm e Ctrl dá 500 mm. Também dá para **segurar o botão direito** sobre o elemento e arrastar, na planta ou **no 3D**: a linha roxa mostra o deslocamento, arredondado a 10 mm, e Shift trava na horizontal/vertical. No 3D, o arraste corre no plano horizontal do ponto pego, e com **Alt** (ou Ctrl) só na vertical. As setas também funcionam no 3D. Só se move o que está visível sob o cursor: botão direito no vazio, ou num elemento do IFC, continua girando a vista. Junto com o elemento movem:
   - os trechos que saem de um ponto movido;
   - o ponto na ponta de um trecho movido;
   - os trechos que se encontram no mesmo vértice.
