@@ -57,7 +57,8 @@ export type ActionId =
   | "exportarIfcDisciplinas"
   | "novaFolha"
   | "folhasPlantas"
-  | "propriedades";
+  | "propriedades"
+  | "novoElemento";
 
 export interface RibbonButton {
   key: string;
@@ -148,7 +149,10 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
     },
     {
       label: "Biblioteca",
-      buttons: [{ key: "familias", label: "Importar elementos em IFC", icon: "familia", tool: { kind: "biblioteca" } }],
+      buttons: [
+        { key: "familias", label: "Importar elementos em IFC", icon: "familia", tool: { kind: "biblioteca" } },
+        { key: "novo-elemento-arq", label: "Novo elemento", icon: "elNovo", action: "novoElemento" },
+      ],
     },
     {
       label: "Fundo",
@@ -185,6 +189,13 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
         draw("cota-inclinada", "Cota inclinada", "dCotaInclinada"),
         draw("cota-angular", "Cota angular", "dCotaAngular"),
         draw("coordenada", "Indicar coordenada", "gIndicar"),
+      ],
+    },
+    {
+      label: "Elemento",
+      buttons: [
+        { key: "novo-elemento", label: "Novo elemento", icon: "elNovo", action: "novoElemento" },
+        { key: "biblioteca-elementos", label: "Biblioteca", icon: "familia", tool: { kind: "biblioteca" } },
       ],
     },
   ],

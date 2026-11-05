@@ -173,6 +173,25 @@ Os projetos antigos em `.json` continuam abrindo.
 
 **Abas:** Planta, 3D e Prancha podem ser fechadas pelo **×**. O botão **+** ao lado das abas reabre uma aba fechada; abrir uma vista ou folha pelo navegador também reabre a aba correspondente.
 
+### Criar elementos (editor de elementos)
+
+Em **Criar › Novo elemento**, ou na Biblioteca, abre-se o editor de elementos em tela cheia. O elemento criado fica na biblioteca e é locado como os de fábrica e os importados.
+
+- **Geometria:** desenhe sólidos de extrusão em três vistas. Na **Planta (de cima)** a profundidade é a altura (Y); na **Frente**, a profundidade é para fora da parede (Z); na **Lateral**, a profundidade é a largura (X).
+  - **Formas:** retângulo (dois cantos), círculo (centro e raio) ou polígono (Enter, duplo clique ou clique no primeiro ponto fecha).
+  - **Profundidade e cor:** a profundidade inicial e a cor vêm da barra. Depois, cada sólido tem "de/até", coordenadas exatas e cor no painel da direita.
+  - **Encaixe:** na grade (1 a 100 mm) e nos vértices dos outros sólidos (quadrado laranja).
+  - **Outras vistas:** os sólidos desenhados nelas aparecem tracejados, com a silhueta real.
+  - **Selecionar:** clique e arraste para mover; as setas movem pelo passo da grade e Delete apaga.
+  - **Navegar:** botão direito ou do meio desloca a vista, e a roda dá zoom.
+  - **Guias e prévia:** nos elementos de parede, a face da parede aparece hachurada. A prévia 3D gira com o mouse.
+- **Identificação e parâmetros:**
+  - **Basear em:** copia de um elemento de fábrica a classificação IFC, o sistema, a fixação, a altura e os parâmetros.
+  - **Campos editáveis:** nome, grupo, disciplina, fixação (parede/teto/piso), altura padrão, prefixo da etiqueta, função (equivalentes), fabricante e modelo. Também a entidade IFC, o tipo predefinido, o sistema e o tipo de sistema.
+  - **Parâmetros livres:** nome, unidade e valor padrão, com atalhos para potência, tensão, corrente, circuito, vazão, diâmetro, capacidade e grau de proteção.
+- **Salvar:** *Salvar* grava na biblioteca e *Salvar e locar* já abre a locação. O app avisa o que falta: nome, ao menos um sólido, perfis sem área, extrusões sem espessura ou parâmetros repetidos. O símbolo de planta é o contorno visto de cima, e no 3D e no IFC entra a malha desenhada.
+- **Na biblioteca** (seção *Elementos criados no app*): locar, editar, duplicar e apagar (pede para excluir antes os pontos que usam o elemento). Para levar os elementos para outro computador, use *Exportar/Importar (.sebel)*.
+
 ### Importar elementos em IFC (biblioteca)
 
 Em **Arquivo › Importar elementos em IFC**. Neste app, *elemento* = família.

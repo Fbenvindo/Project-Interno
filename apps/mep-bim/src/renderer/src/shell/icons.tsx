@@ -455,6 +455,13 @@ const P: Record<string, ReactNode> = {
       <path d="M4 4 L20 20" />
     </>
   ),
+  elNovo: (
+    <>
+      <path d="M11 3 L18 7 V15 L11 19 L4 15 V7 Z" />
+      <path d="M4 7 L11 11 L18 7 M11 11 V19" />
+      <path d="M19 15 V21 M16 18 H22" />
+    </>
+  ),
   mDesvio: (
     <>
       <path d="M2 16 H7 V8 H17 V16 H22" />

@@ -52,7 +52,7 @@ export interface ComponentDef {
   /** Símbolo de planta da própria família (linhas simbólicas do Revit): polilinhas em mm, eixos X e Z do app, centradas como a malha. */
   planLines?: [number, number][][];
   /** Origem externa: famílias do Revit (.sebfam) ou elementos lidos de um IFC. */
-  source?: { kind: "revit" | "ifc"; packageId: string; familyUid: string; family: string; type: string; file?: string };
+  source?: { kind: "revit" | "ifc" | "proprio"; packageId: string; familyUid: string; family: string; type: string; file?: string };
   /** Função/equivalência: elementos com a mesma função são alternativas entre si (ex.: marcas). */
   funcao?: string;
   /** Fabricante e modelo. */

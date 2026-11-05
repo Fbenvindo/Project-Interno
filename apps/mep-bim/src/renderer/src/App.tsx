@@ -45,7 +45,9 @@ import { VinculosPanel } from "./links/VinculosPanel";
 import { CoordenadasPanel } from "./coords/CoordenadasPanel";
 import { useCursor } from "./coords/cursor";
 import { EMPTY_GEOREF, effectiveGeoref, fmtCoord, toMap, type Georef } from "../../core/georef";
-import { loadFamilyLibrary } from "./library/familyLibrary";
+import { loadFamilyLibrary, newDesignUid, saveDesign } from "./library/familyLibrary";
+import { ElementEditor } from "./library/ElementEditor";
+import { designComponentId, newDesign, type ElementDesign } from "../../core/elementDesign";
 import { useDraftTool, CMD_LABEL, isCreateCmd, isMeasureCmd } from "./desenho/useDraftTool";
 import { DesenhoPanel } from "./desenho/DesenhoPanel";
 import { CoordinateSystem } from "../../core/math";
@@ -196,6 +198,8 @@ export function App() {
   }, [hostModel, store.links, linkData, georef]);
   const [hostPath, setHostPath] = useState<string | null>(null);
   const files = useProjectFiles(store, model, fileName, () => setSelection([]), hostPath);
+  /** Editor de elementos aberto (novo ou edição de um elemento criado no app). */
+  const [designing, setDesigning] = useState<ElementDesign | null>(null);
   const pointElements = useMemo(() => store.points.map(pointToElement), [store.points]);
   const runElementList = useMemo(() => (model ? runElements(store.runs, model.storeyLevels) : []), [store.runs, model]);
   const boxes = useMemo(() => pullBoxes(store.runs, store.points), [store.runs, store.points]);
@@ -752,6 +756,8 @@ export function App() {
           return void handleSample();
         case "exemploApartamento":
           return void handleSample("exemplo-apartamento.ifc");
+        case "novoElemento":
+          return setDesigning(newDesign(undefined, newDesignUid()));
         case "vincularIfc":
           chooseTool({ kind: "vinculos" });
           return void addLinks();
@@ -1157,6 +1163,7 @@ export function App() {
           points={store.points}
           choices={store.choices}
           onChoices={store.setChoices}
+          onEditDesign={(d) => setDesigning(d ?? newDesign(undefined, newDesignUid()))}
           onPlace={(componentId) => {
             if (!model) {
               window.alert("Abra um modelo IFC para locar a família.");
@@ -1731,6 +1738,22 @@ export function App() {
         <span className="sep" />
         <span>Fundo {theme === "claro" ? "branco" : "preto"}</span>
       </footer>
+      {designing && (
+        <ElementEditor
+          key={designing.uid}
+          initial={designing}
+          onCancel={() => setDesigning(null)}
+          onSave={(d, place) => {
+            void saveDesign(d);
+            setDesigning(null);
+            const id = designComponentId(d.uid);
+            if (place && model) {
+              chooseTool({ kind: "locacao", componentId: id }, null);
+              files.setMessage(`Elemento "${d.label}" salvo na biblioteca: clique no modelo para locar.`);
+            } else files.setMessage(`Elemento "${d.label}" salvo na biblioteca${place ? " (abra um modelo para locar)" : ""}.`);
+          }}
+        />
+      )}
     </div>
   );
 }

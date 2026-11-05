@@ -10,8 +10,13 @@ import { COMPONENT_BY_ID, COMPONENT_GROUPS, COMPONENTS, MOUNTING_LABEL, type Com
 import { DISCIPLINE_BY_ID } from "../../../core/disciplines";
 import type { PlacedPoint } from "../../../core/points";
 import { loadIfc } from "../../../ifc/loadIfc";
-import { getIfcApi, openIfc } from "../platform";
+import { designComponentId, type ElementDesign } from "../../../core/elementDesign";
+import { getIfcApi, openIfc, openTextFile, saveFile } from "../platform";
 import {
+  deleteDesign,
+  exportDesigns,
+  importDesigns,
+  newDesignUid,
   importFamilyPackage,
   importIfcElements,
   removeFamilyPackage,
@@ -29,6 +34,8 @@ interface Props {
   /** Escolhas do projeto: marca de referência por grupo e elemento entre equivalentes. */
   choices: ProjectChoices;
   onChoices: (fn: (c: ProjectChoices) => ProjectChoices) => void;
+  /** Abre o editor de elementos (novo: sem argumento). */
+  onEditDesign: (d?: ElementDesign) => void;
 }
 
 const AXIS_HINT: Record<OutAxis, string> = {
@@ -55,7 +62,7 @@ interface Review {
   decisions: Record<string, ImportDecision>;
 }
 
-export function BibliotecaPanel({ points, onPlace, choices, onChoices }: Props) {
+export function BibliotecaPanel({ points, onPlace, choices, onChoices, onEditDesign }: Props) {
   const entries = useFamilyLibrary();
   const input = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -228,7 +235,15 @@ export function BibliotecaPanel({ points, onPlace, choices, onChoices }: Props) 
         </section>
       )}
 
-      {entries.map((e) => (
+      <OwnDesigns
+        designs={entries.find((e) => e.kind === "proprio")?.designs ?? []}
+        points={points}
+        onEdit={onEditDesign}
+        onPlace={onPlace}
+        onMessage={setMessage}
+      />
+
+      {entries.filter((e) => e.kind !== "proprio").map((e) => (
         <section key={e.id} className="card lib-package">
           <div className="panel-head">
             <h3>
@@ -572,5 +587,96 @@ function RevitFamilyRow({ entry: e, f, open: expanded, onToggle, onPlace }: { en
         </div>
       )}
     </div>
+  );
+}
+
+/** Elementos criados no app: locar, editar, duplicar, excluir, levar para outro computador. */
+function OwnDesigns({
+  designs,
+  points,
+  onEdit,
+  onPlace,
+  onMessage,
+}: {
+  designs: ElementDesign[];
+  points: PlacedPoint[];
+  onEdit: (d?: ElementDesign) => void;
+  onPlace: (componentId: string) => void;
+  onMessage: (m: string) => void;
+}) {
+  const used = (d: ElementDesign) => points.filter((p) => p.componentId === designComponentId(d.uid)).length;
+  return (
+    <section className="card lib-package">
+      <div className="panel-head">
+        <h3>
+          Elementos criados no app <span className="tag-revit">próprio</span>
+        </h3>
+        <button className="btn primary small-btn" onClick={() => onEdit()}>
+          Novo elemento
+        </button>
+      </div>
+      {designs.length === 0 ? (
+        <p className="muted small">
+          Desenhe a geometria (vistas de planta, frente e lateral) e defina a classificação IFC e os parâmetros. O elemento fica nesta biblioteca e é locado
+          como os demais.
+        </p>
+      ) : (
+        <ul className="sel-list">
+          {designs.map((d) => (
+            <li key={d.uid}>
+              <span className="grow">
+                {d.label}{" "}
+                <span className="muted small">
+                  · {d.group} · {MOUNTING_LABEL[d.mounting]}
+                  {used(d) ? ` · ${used(d)} locado(s)` : ""}
+                </span>
+              </span>
+              <button className="link" onClick={() => onPlace(designComponentId(d.uid))}>
+                locar
+              </button>
+              <button className="link" onClick={() => onEdit(d)}>
+                editar
+              </button>
+              <button className="link" onClick={() => onEdit({ ...structuredClone(d), uid: newDesignUid(), label: `${d.label} (cópia)` })}>
+                duplicar
+              </button>
+              <button
+                className="link danger-link"
+                title="Apagar o elemento"
+                onClick={() => {
+                  if (used(d)) return onMessage(`${used(d)} ponto(s) locado(s) usam "${d.label}": exclua-os antes de apagar o elemento.`);
+                  if (window.confirm(`Apagar o elemento "${d.label}"?`)) void deleteDesign(d.uid);
+                }}
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="btn-row wrap tight">
+        <button
+          className="btn small-btn"
+          disabled={!designs.length}
+          onClick={() => void saveFile({ defaultName: "elementos.sebel", content: exportDesigns(designs), filters: [{ name: "Elementos SmartEasyBIM", extensions: ["sebel"] }] })}
+        >
+          Exportar (.sebel)
+        </button>
+        <button
+          className="btn small-btn"
+          onClick={async () => {
+            const f = await openTextFile([{ name: "Elementos SmartEasyBIM", extensions: ["sebel", "json"] }]);
+            if (!f) return;
+            try {
+              onMessage(`${await importDesigns(f.content)} elemento(s) importado(s) de ${f.name}.`);
+            } catch (err) {
+              onMessage(`Não foi possível importar: ${err instanceof Error ? err.message : err}`);
+            }
+          }}
+        >
+          Importar (.sebel)
+        </button>
+      </div>
+    </section>
   );
 }

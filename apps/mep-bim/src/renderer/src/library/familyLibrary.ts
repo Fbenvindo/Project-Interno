@@ -5,6 +5,7 @@
 import { useSyncExternalStore } from "react";
 import { packageComponents, parseFamilyPackage, type FamilyOverride, type FamilyPackage } from "../../../core/families";
 import { ifcComponentId, ifcElementComponent, type IfcElementDef, type IfcElementOverride } from "../../../core/ifcElements";
+import { designComponent, OWN_PACKAGE_ID, type ElementDesign } from "../../../core/elementDesign";
 import { COMPONENT_BY_ID, registerComponents } from "../../../core/library";
 
 export interface LibraryEntry {
@@ -12,7 +13,9 @@ export interface LibraryEntry {
   /** Nome do arquivo importado (.sebfam ou .ifc). */
   name: string;
   importedAt: string;
-  kind?: "sebfam" | "ifc";
+  kind?: "sebfam" | "ifc" | "proprio";
+  /** Elementos criados no app (editor de elementos). */
+  designs?: ElementDesign[];
   /** .sebfam */
   pkg?: FamilyPackage;
   overrides: Record<string, FamilyOverride>;
@@ -58,6 +61,7 @@ const emit = () => listeners.forEach((l) => l());
 /** Componentes de uma entrada (sem os substituídos). */
 export function entryComponents(e: LibraryEntry) {
   const hidden = new Set(e.hidden ?? []);
+  if (e.kind === "proprio") return (e.designs ?? []).map(designComponent);
   if (e.kind === "ifc")
     return (e.elements ?? [])
       .map((el) => ifcElementComponent(e.id, el, e.ifcOverrides?.[el.uid], e.replaces?.[el.uid] ?? ifcComponentId(e.id, el.uid), e.name))
@@ -194,4 +198,41 @@ export async function removeFamilyPackage(entryId: string): Promise<void> {
   } catch (err) {
     console.warn(err);
   }
+}
+
+// ---- Elementos criados no app ---------------------------------------------------------------------
+
+export const newDesignUid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+function ownEntry(): LibraryEntry {
+  return entries.find((e) => e.id === OWN_PACKAGE_ID) ?? { id: OWN_PACKAGE_ID, name: "Elementos criados no app", importedAt: new Date().toISOString(), kind: "proprio", overrides: {}, designs: [] };
+}
+
+/** Grava (novo ou editado) um elemento criado no app. */
+export async function saveDesign(d: ElementDesign): Promise<void> {
+  const e = ownEntry();
+  const next = { ...d, updatedAt: new Date().toISOString() };
+  const designs = e.designs ?? [];
+  update({ ...e, designs: designs.some((x) => x.uid === d.uid) ? designs.map((x) => (x.uid === d.uid ? next : x)) : [...designs, next] });
+}
+
+export async function deleteDesign(uid: string): Promise<void> {
+  const e = ownEntry();
+  update({ ...e, designs: (e.designs ?? []).filter((x) => x.uid !== uid) });
+}
+
+/** Arquivo para levar elementos criados para outro computador (.sebel, JSON). */
+export function exportDesigns(designs: ElementDesign[]): string {
+  return JSON.stringify({ formato: "smarteasybim-elementos", versao: 1, elementos: designs }, null, 1);
+}
+
+/** Importa um .sebel; elementos com o mesmo identificador são atualizados. */
+export async function importDesigns(text: string): Promise<number> {
+  const data = JSON.parse(text);
+  if (data?.formato !== "smarteasybim-elementos" || !Array.isArray(data.elementos)) throw new Error("arquivo não é de elementos do SmartEasyBIM (.sebel)");
+  const e = ownEntry();
+  const map = new Map((e.designs ?? []).map((x) => [x.uid, x]));
+  for (const d of data.elementos as ElementDesign[]) if (d?.uid && Array.isArray(d.solids)) map.set(d.uid, d);
+  update({ ...e, designs: [...map.values()] });
+  return data.elementos.length;
 }
