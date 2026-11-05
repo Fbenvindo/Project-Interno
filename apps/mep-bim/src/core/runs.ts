@@ -127,6 +127,12 @@ const FITTING_OFFSET = 500;
 
 export const segmentElementId = (runId: number, i: number) => -(RUN_BASE + runId * 1000 + i);
 export const fittingElementId = (runId: number, j: number) => -(RUN_BASE + runId * 1000 + FITTING_OFFSET + j);
+/** Índice do segmento de um id de elemento de segmento (null para conexões ou outros ids). */
+export function segmentIndexOf(id: number): number | null {
+  if (id > -RUN_BASE) return null;
+  const k = (-id - RUN_BASE) % 1000;
+  return k < FITTING_OFFSET ? k : null;
+}
 
 /** Trecho dono de um id de elemento da cena, ou null. */
 export function runIdOfElement(id: number): number | null {

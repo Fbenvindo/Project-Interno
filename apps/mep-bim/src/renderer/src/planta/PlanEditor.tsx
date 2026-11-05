@@ -46,6 +46,8 @@ interface Props {
   projectDisciplines?: Discipline[];
   /** Vigas em projeção (piso/teto) e seus textos. */
   beams?: BeamOptions;
+  /** Arrastar com o botão direito sobre um elemento: mover a seleção (deslocamento em planta, m). */
+  onMoveBy?: (d: P2) => void;
 }
 
 type ViewBox = { x: number; y: number; w: number; h: number };
@@ -77,7 +79,7 @@ function primsToSvg(prims: Prim[]): string {
     .join("");
 }
 
-export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick, onPickMany, dark, fitSignal, planTool, viewDef = null, projectDisciplines = [], beams }: Props) {
+export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick, onPickMany, dark, fitSignal, planTool, viewDef = null, projectDisciplines = [], beams, onMoveBy }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const cs = model.coordinates;
   const level = model.storeyLevels.find((s) => s.name === storey)?.level ?? 0;
@@ -168,13 +170,17 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitSignal]);
 
+  // O SVG encaixa o viewBox centralizado (preserveAspectRatio "meet"): quando a área muda de
+  // tamanho (um painel abre), sobram faixas e a escala é a menor das duas.
+  const pxScale = (r: { width: number; height: number }) => Math.min(r.width / vb.w, r.height / vb.h) || 1;
   const toModel = (clientX: number, clientY: number): P2 => {
     const r = host.current!.getBoundingClientRect();
-    const x = vb.x + ((clientX - r.left) / r.width) * vb.w;
-    const y = vb.y + ((clientY - r.top) / r.height) * vb.h;
+    const k = pxScale(r);
+    const x = vb.x + vb.w / 2 + (clientX - r.left - r.width / 2) / k;
+    const y = vb.y + vb.h / 2 + (clientY - r.top - r.height / 2) / k;
     return [x, -y];
   };
-  const metersPerPx = () => vb.w / Math.max(host.current?.clientWidth ?? 1, 1);
+  const metersPerPx = () => 1 / pxScale(host.current?.getBoundingClientRect() ?? { width: 1, height: 1 });
 
   // ---- Conversões planta ⇄ cena ------------------------------------------------------------
   const planToWorld = useCallback((p: P2, y: number): Vec3 => cs.ifcToWorld([p[0], p[1], cs.worldToIfc([0, y, 0])[2]]), [cs]);
@@ -347,6 +353,19 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     return best ? { p: best, snapped: true } : { p, snapped: false };
   };
 
+  /** Ponto do cursor com encaixe (para o arraste de mover, fora dos comandos). */
+  const resolvePointSelect = (clientX: number, clientY: number): P2 => {
+    const p = toModel(clientX, clientY);
+    const tol = SNAP_PX * 0.6 * metersPerPx();
+    let best: P2 | null = null;
+    let bd = tol;
+    for (const q of snapPts) {
+      const d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      if (d < bd) ((bd = d), (best = q));
+    }
+    return best ?? p;
+  };
+
   const hitAt = (clientX: number, clientY: number, p: P2): number | null => {
     const el = document.elementFromPoint(clientX, clientY)?.closest("[data-id]");
     const raw = el ? Number(el.getAttribute("data-id")) : NaN;
@@ -362,6 +381,18 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       const q = toPlan(pt.position);
       const k = Math.hypot(q[0] - p[0], q[1] - p[1]);
       if (k <= tol * 1.5 && (!best || k < best.d)) best = { id: pt.id, d: k };
+    }
+    // Trechos (linhas finas): tolerância em volta do eixo, para não exigir o pixel exato.
+    const segD = (a: P2, b: P2) => {
+      const { t } = closestOnSegment([p[0], p[1], 0], [a[0], a[1], 0], [b[0], b[1], 0]);
+      return Math.hypot(a[0] + (b[0] - a[0]) * t - p[0], a[1] + (b[1] - a[1]) * t - p[1]);
+    };
+    for (const q of mep.prims) {
+      if (q.id == null || q.id > -1000000) continue;
+      let k = Infinity;
+      if (q.t === "line") k = segD(q.a, q.b);
+      else if (q.t === "poly") for (let i = 0; i + 1 < q.pts.length; i++) k = Math.min(k, segD(q.pts[i], q.pts[i + 1]));
+      if (k <= tol && (!best || k < best.d)) best = { id: q.id, d: k };
     }
     return best?.id ?? null;
   };
@@ -414,8 +445,26 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   // Selecionar (sem comando): clique seleciona, arrastar desenha a janela de seleção.
   // Botão do meio (ou, durante comandos de desenho/locação, o esquerdo) arrasta a vista.
   const selectMode = !planTool && !handler;
+  // Botão direito sobre um elemento (em Selecionar): arrasta a seleção para movê-la.
+  const [moveDrag, setMoveDrag] = useState<{ a: P2; b: P2 } | null>(null);
+  const moveDragRef = useRef<{ a: P2 } | null>(null);
+  const moveDelta = (a: P2, b: P2, shift: boolean): P2 => {
+    let d: P2 = [Math.round((b[0] - a[0]) * 100) / 100, Math.round((b[1] - a[1]) * 100) / 100];
+    if (shift) d = Math.abs(d[0]) >= Math.abs(d[1]) ? [d[0], 0] : [0, d[1]];
+    return d;
+  };
   const onPointerDown = (e: PointerEvent) => {
     if (edit) return;
+    if (e.button === 2 && selectMode && onMoveBy && !isSection) {
+      const pm = toModel(e.clientX, e.clientY);
+      const id = hitAt(e.clientX, e.clientY, pm);
+      if (id != null) {
+        if (!selection.includes(id)) onPick(id, false);
+        moveDragRef.current = { a: resolvePointSelect(e.clientX, e.clientY) };
+        host.current?.setPointerCapture?.(e.pointerId);
+        return;
+      }
+    }
     if (e.button === 1) e.preventDefault();
     const box = e.button === 0 && (planTool ? planTool.selecting : selectMode);
     drag.current = { x: e.clientX, y: e.clientY, vb, moved: false, box, start: toModel(e.clientX, e.clientY) };
@@ -426,6 +475,12 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     // Coordenadas do projeto do cursor (para a barra de status), na cota do piso do pavimento.
     const pm = toModel(e.clientX, e.clientY);
     setCursor(isSection ? null : [pm[0], pm[1], cs.worldToIfc([0, level, 0])[2]]);
+    if (moveDragRef.current && e.buttons & 2) {
+      const b = resolvePointSelect(e.clientX, e.clientY);
+      const dd = moveDelta(moveDragRef.current.a, b, e.shiftKey);
+      setMoveDrag({ a: moveDragRef.current.a, b: [moveDragRef.current.a[0] + dd[0], moveDragRef.current.a[1] + dd[1]] });
+      return;
+    }
     const d = drag.current;
     if (d && (e.buttons & 1 || e.buttons & 4)) {
       const r = host.current!.getBoundingClientRect();
@@ -436,7 +491,10 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
         if (e.buttons & 1) setBoxRect({ a: d.start, b: pm });
         return;
       }
-      else if (d.moved) setVb({ ...d.vb, x: d.vb.x - (dx / r.width) * d.vb.w, y: d.vb.y - (dy / r.height) * d.vb.h });
+      else if (d.moved) {
+        const k = Math.min(r.width / d.vb.w, r.height / d.vb.h) || 1;
+        setVb({ ...d.vb, x: d.vb.x - dx / k, y: d.vb.y - dy / k });
+      }
       return;
     }
     if (planTool) {
@@ -450,6 +508,14 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     raf.current = requestAnimationFrame(updateHover);
   };
   const onPointerUp = (e: PointerEvent) => {
+    if (moveDragRef.current) {
+      const a = moveDragRef.current.a;
+      moveDragRef.current = null;
+      setMoveDrag(null);
+      const dd = moveDelta(a, resolvePointSelect(e.clientX, e.clientY), e.shiftKey);
+      if (Math.hypot(dd[0], dd[1]) >= 0.005) onMoveBy?.(dd);
+      return;
+    }
     const d = drag.current;
     drag.current = null;
     if (planTool) {
@@ -499,7 +565,10 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   const toScreen = (p: P2) => {
     const el = host.current;
     if (!el) return { left: 0, top: 0 };
-    return { left: ((p[0] - vb.x) / vb.w) * el.clientWidth, top: ((-p[1] - vb.y) / vb.h) * el.clientHeight };
+    const W = el.clientWidth;
+    const H = el.clientHeight;
+    const k = pxScale({ width: W, height: H });
+    return { left: W / 2 + (p[0] - vb.x - vb.w / 2) * k, top: H / 2 + (-p[1] - vb.y - vb.h / 2) * k };
   };
   const onWheel = (e: WheelEvent) => {
     const [mx, my] = toModel(e.clientX, e.clientY);
@@ -587,7 +656,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       onPointerUp={onPointerUp}
       onPointerLeave={() => ((lastPointer.current = null), setHover(null), setCursor(null), setToolCursor(null))}
       onWheel={onWheel}
-      onContextMenu={(e) => planTool && e.preventDefault()}
+      onContextMenu={(e) => (planTool || selectMode) && e.preventDefault()}
       onDoubleClick={(e) => {
         if (planTool) return planTool.finish();
         if (handler) return handler.doubleClick?.();
@@ -611,6 +680,15 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
           />
         )}
         <g pointerEvents="none" dangerouslySetInnerHTML={{ __html: toolSvg }} />
+        {moveDrag && (
+          <g pointerEvents="none">
+            <line x1={moveDrag.a[0]} y1={-moveDrag.a[1]} x2={moveDrag.b[0]} y2={-moveDrag.b[1]} stroke="#7c3aed" strokeWidth={2} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
+            <circle cx={moveDrag.b[0]} cy={-moveDrag.b[1]} r={5 * metersPerPx()} fill="#7c3aed" />
+            <text x={moveDrag.b[0] + 8 * metersPerPx()} y={-moveDrag.b[1] - 8 * metersPerPx()} fontSize={13 * metersPerPx()} fill="#5b21b6" fontFamily="Arial">
+              {`Δx ${(moveDrag.b[0] - moveDrag.a[0]).toFixed(2).replace(".", ",")} · Δy ${(moveDrag.b[1] - moveDrag.a[1]).toFixed(2).replace(".", ",")} m`}
+            </text>
+          </g>
+        )}
         {boxRect &&
           (() => {
             const crossing = boxRect.b[0] < boxRect.a[0];

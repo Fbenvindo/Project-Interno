@@ -26,10 +26,11 @@ import { newSheetId, viewDrawing, viewSubtitle, viewTitle, type ModelContext, ty
 import { sectionFrame } from "../../core/plan/elevation";
 import { VistasBrowser } from "./shell/VistasBrowser";
 import { VistaPanel } from "./shell/VistaPanel";
-import { connectedPairs, runElements, runFittings, runIdOfElement, runProperties, runSegments, RUN_TYPE_BY_ID, segmentElementId, fittingElementId } from "../../core/runs";
+import { connectedPairs, runElements, runFittings, runIdOfElement, segmentIndexOf, runProperties, runSegments, RUN_TYPE_BY_ID, segmentElementId, fittingElementId } from "../../core/runs";
 import { usePointsStore } from "./locacao/usePointsStore";
 import { alignKey, DEFAULT_ALIGN, federate, prepareLink, type LinkData, type LinkMeta } from "../../ifc/federate";
 import { openIfcMany, readIfcPath } from "./platform";
+import { moveNetwork, type MoveSelection } from "../../core/runEdit";
 import { applyInstall, boxElements, boxIndexOf, boxProperties, DEFAULT_INSTALL, isConduitRun, pullBoxes, runFloorProbeY, type InstallMode } from "../../core/conduits";
 import { storeyAt } from "../../core/points";
 import { InstalacoesPanel } from "./tracado/InstalacoesPanel";
@@ -1010,6 +1011,7 @@ export function App() {
     draftView,
     cutHeight: activeViewDef?.cutHeight ?? editorCut,
     onDone: () => chooseTool({ kind: "propriedades" }),
+    isSection: activeViewDef?.kind === "corte",
   });
   const planTool = tool.kind === "desenho" ? draft.tool : null;
 
@@ -1055,6 +1057,75 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  // ---- Mover a seleção junto com o que está ligado a ela (setas do teclado e botão direito) ----------
+  const moveKeyBlocked = useRef(true);
+  moveKeyBlocked.current = tool.kind !== "propriedades" || !(view === "planta" || view === "3d") || selection.length === 0;
+  const moveRef = useRef<(d: Vec3, label: string) => void>(() => {});
+  moveRef.current = (d, label) => {
+    const pointIds = new Set(store.points.map((p) => p.id));
+    const sel: MoveSelection = { points: [], segments: [] };
+    const seen = new Set<string>();
+    for (const id of selection) {
+      if (pointIds.has(id)) sel.points.push(id);
+      const runId = runIdOfElement(id);
+      const index = segmentIndexOf(id);
+      if (runId != null && index != null && !seen.has(`${runId}:${index}`)) {
+        seen.add(`${runId}:${index}`);
+        sel.segments.push({ runId, index });
+      }
+    }
+    if (!sel.points.length && !sel.segments.length) {
+      files.setMessage("Selecione pontos locados ou trechos para mover (os elementos dos IFCs de referência não podem ser movidos).");
+      return;
+    }
+    const res = moveNetwork(store.runs, store.points, sel, d);
+    if (!res.ok) {
+      files.setMessage(res.reason);
+      return;
+    }
+    store.mutate((cur) => ({
+      ...cur,
+      points: cur.points.map((p) => {
+        const np = res.points.get(p.id);
+        if (!np) return p;
+        // Altura do ponto acompanha o movimento vertical (teto: afastamento abaixo do teto).
+        const dyMm = Math.round(d[1] * 1000);
+        const teto = COMPONENT_BY_ID[p.componentId]?.mounting === "teto";
+        return { ...p, position: np, ...(dyMm ? { height: p.height + (teto ? -dyMm : dyMm) } : {}) };
+      }),
+      runs: cur.runs.map((r) => (res.runs.has(r.id) ? { ...r, vertices: res.runs.get(r.id)! } : r)),
+    }));
+    files.setMessage(`Movido ${label}: ${res.movedPoints} ponto(s) e ${res.movedRuns} trecho(s), com o que está ligado a eles.`);
+  };
+  /** Deslocamento em planta (coordenadas do projeto) convertido para a cena. */
+  const planDeltaToScene = useCallback(
+    (dx: number, dy: number): Vec3 => {
+      const cs = model?.coordinates;
+      if (!cs) return [dx, 0, -dy];
+      const o = cs.ifcToWorld([0, 0, 0]);
+      const b = cs.ifcToWorld([dx, dy, 0]);
+      return [b[0] - o[0], 0, b[2] - o[2]];
+    },
+    [model],
+  );
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      const keys: Record<string, [number, number, number]> = { ArrowRight: [1, 0, 0], ArrowLeft: [-1, 0, 0], ArrowUp: [0, 1, 0], ArrowDown: [0, -1, 0], PageUp: [0, 0, 1], PageDown: [0, 0, -1] };
+      const k = keys[e.key];
+      if (!k || moveKeyBlocked.current) return;
+      e.preventDefault();
+      // Passo: 50 mm; Shift = 10 mm (fino); Ctrl = 500 mm.
+      const step = e.shiftKey ? 0.01 : e.ctrlKey || e.metaKey ? 0.5 : 0.05;
+      const d = planDeltaToScene(k[0] * step, k[1] * step);
+      d[1] = k[2] * step;
+      const dir = k[2] ? (k[2] > 0 ? "para cima" : "para baixo") : e.key === "ArrowRight" ? "para +X" : e.key === "ArrowLeft" ? "para −X" : e.key === "ArrowUp" ? "para +Y" : "para −Y";
+      moveRef.current(d, `${Math.round(step * 1000)} mm ${dir}`);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [planDeltaToScene]);
   const pickMany = useCallback((ids: number[], additive: boolean) => setSelection((cur) => (additive ? [...new Set([...cur, ...ids])] : ids)), []);
 
   const disc = toolDisc ? DISCIPLINE_TABS[toolDisc] : null;
@@ -1540,6 +1611,7 @@ export function App() {
                 viewDef={activeViewDef}
                 projectDisciplines={store.disciplines}
                 beams={beamOptions(activeViewDef ?? workDisplay)}
+                onMoveBy={(d) => moveRef.current(planDeltaToScene(d[0], d[1]), `${Math.hypot(d[0], d[1]).toFixed(2).replace(".", ",")} m`)}
               />
             )}
             {view === "3d" && model && (

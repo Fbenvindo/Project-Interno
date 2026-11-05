@@ -195,7 +195,7 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
     },
     {
       label: "Modificar",
-      buttons: [draw("mover", "Mover", "mMover"), draw("apagar", "Apagar", "mApagar"), draw("estender", "Estender", "mEstender"), draw("conectar", "Conectar", "mConectar")],
+      buttons: [draw("mover", "Mover", "mMover"), draw("apagar", "Apagar", "mApagar"), draw("estender", "Estender", "mEstender"), draw("conectar", "Conectar", "mConectar"), draw("desvio", "Desvio", "mDesvio")],
     },
   ],
   geral: [

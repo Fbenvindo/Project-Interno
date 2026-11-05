@@ -41,6 +41,8 @@ import type { CoordinateSystem } from "../../../core/math";
 import type { PointsStore } from "../locacao/usePointsStore";
 import type { ClickInfo, PlanTool, ToolQuestion } from "../planta/planTool";
 import { labelPoint, measureText, type Measure, type Measure3 } from "../../../core/measure";
+import { applyOffset } from "../../../core/runEdit";
+import { runIdOfElement, segmentIndexOf } from "../../../core/runs";
 
 export type DraftCmd =
   | "linha"
@@ -69,7 +71,8 @@ export type DraftCmd =
   | "vista-3d"
   | "medir-distancia"
   | "medir-area"
-  | "medir-angulo";
+  | "medir-angulo"
+  | "desvio";
 
 export const CMD_LABEL: Record<DraftCmd, string> = {
   linha: "Linha",
@@ -98,13 +101,14 @@ export const CMD_LABEL: Record<DraftCmd, string> = {
   "medir-distancia": "Medir distância",
   "medir-area": "Medir área",
   "medir-angulo": "Medir ângulo",
+  desvio: "Desvio",
   "vista-3d": "Vista 3D no local",
 };
 
 /** Comandos que começam por uma seleção. */
 export const NEEDS_SELECTION = new Set<DraftCmd>(["copiar", "mover", "recortar", "apagar", "estender", "conectar", "corte-selecao"]);
 export const isMeasureCmd = (c: DraftCmd) => c === "medir-distancia" || c === "medir-area" || c === "medir-angulo";
-export const isCreateCmd = (c: DraftCmd) => !NEEDS_SELECTION.has(c) && c !== "colar" && c !== "corte-linha" && c !== "vista-3d" && c !== "ampliacao" && !isMeasureCmd(c);
+export const isCreateCmd = (c: DraftCmd) => !NEEDS_SELECTION.has(c) && c !== "colar" && c !== "corte-linha" && c !== "vista-3d" && c !== "ampliacao" && c !== "desvio" && !isMeasureCmd(c);
 
 /** Fases de um comando com seleção. */
 export type Phase = "selecionar" | "confirmar" | "remover" | "executar";
@@ -143,6 +147,8 @@ interface Args {
   draftView: string | null;
   /** Altura de corte da planta ativa (ampliações herdam). */
   cutHeight: number;
+  /** Vista aberta é um corte (o desvio é feito na planta). */
+  isSection?: boolean;
   /** Comando terminado: voltar a Selecionar. */
   onDone: () => void;
 }
@@ -154,6 +160,10 @@ export interface DraftOptions {
   closed: boolean;
   eyeHeight: number;
   repeat: boolean;
+  /** Desvio: altura (mm), sobe ou desce, ângulo das curvas. */
+  desvioAltura: number;
+  desvioSobe: boolean;
+  desvioAngulo: 90 | 45;
 }
 
 const PREVIEW = "#0ea5e9";
@@ -170,10 +180,12 @@ export function useDraftTool(a: Args) {
   const [pts, setPts] = useState<P2[]>([]);
   const [phase, setPhase] = useState<Phase>("selecionar");
   const [message, setMessage] = useState<string | null>(null);
-  const [opts, setOpts] = useState<DraftOptions>({ text: "Texto", textSize: 2.5, textRot: 0, closed: false, eyeHeight: 1.6, repeat: true });
+  const [opts, setOpts] = useState<DraftOptions>({ text: "Texto", textSize: 2.5, textRot: 0, closed: false, eyeHeight: 1.6, repeat: true, desvioAltura: 300, desvioSobe: true, desvioAngulo: 90 });
   const [clipVersion, setClipVersion] = useState(0);
   /** Vista aguardando a escolha da seção (Trabalho ou Documentação). */
   const [pending, setPending] = useState<ViewDef | null>(null);
+  /** Desvio: primeiro ponto (trecho, segmento e posição ao longo dele). */
+  const [desvioStart, setDesvioStart] = useState<{ runId: number; index: number; t: number } | null>(null);
   /** Comando Texto: posição onde o texto está sendo digitado. */
   const [textAt, setTextAt] = useState<P2 | null>(null);
   /** Medições feitas (ficam na tela enquanto o comando de medir está ativo). */
@@ -203,6 +215,7 @@ export function useDraftTool(a: Args) {
     setPending(null);
     setTextAt(null);
     setPending3d([]);
+    setDesvioStart(null);
     if (!isMeasureCmd(cmd)) (setMeasures([]), setMeasures3d([]));
     if (NEEDS_SELECTION.has(cmd)) argsRef.current.setSelection(editable(argsRef.current.selection));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -576,8 +589,40 @@ export function useDraftTool(a: Args) {
     }
   };
 
+  // ---- Desvio ------------------------------------------------------------------------------
+  /** Posição (0–1) do clique ao longo do segmento, pela projeção em planta. */
+  const segParam = (runId: number, index: number, p: P2): number | null => {
+    const r = store.runs.find((x) => x.id === runId);
+    if (!r || !r.vertices[index + 1]) return null;
+    const a0 = toPlan(r.vertices[index]);
+    const b0 = toPlan(r.vertices[index + 1]);
+    const ab: P2 = [b0[0] - a0[0], b0[1] - a0[1]];
+    const l2 = ab[0] ** 2 + ab[1] ** 2;
+    if (l2 < 1e-10) return null;
+    return Math.max(0, Math.min(1, ((p[0] - a0[0]) * ab[0] + (p[1] - a0[1]) * ab[1]) / l2));
+  };
+  const onDesvioClick = (p: P2, info: ClickInfo) => {
+    if (a.isSection) return setMessage("Faça o desvio na planta: clique nos dois pontos do trecho.");
+    if (!desvioStart) {
+      const runId = info.id != null ? runIdOfElement(info.id) : null;
+      const index = info.id != null ? segmentIndexOf(info.id) : null;
+      if (runId == null || index == null) return setMessage("Clique sobre um segmento de tubulação, eletroduto rígido, eletrocalha ou duto.");
+      const t = segParam(runId, index, p);
+      if (t == null) return setMessage("Segmento vertical: clique num trecho horizontal.");
+      return setDesvioStart({ runId, index, t });
+    }
+    const t = segParam(desvioStart.runId, desvioStart.index, p);
+    const r = store.runs.find((x) => x.id === desvioStart.runId);
+    if (t == null || !r) return setDesvioStart(null);
+    const res = applyOffset(r, desvioStart.index, desvioStart.t, t, { height: opts.desvioAltura / 1000, up: opts.desvioSobe, angle: opts.desvioAngulo }, store.runs);
+    setDesvioStart(null);
+    if (!res.ok) return setMessage(res.reason);
+    store.updateRuns([r.id], () => ({ vertices: res.vertices }));
+    setMessage(`Desvio de ${opts.desvioAltura} mm ${opts.desvioSobe ? "para cima" : "para baixo"} no trecho ${r.tag}. Clique em outro trecho para mais um desvio, ou Esc.`);
+  };
+
   const tool: PlanTool = {
-    prompt: textAt ? "Texto: digite e tecle Enter para gravar · Esc cancela" : promptFor(cmd, phase, Math.max(pts.length, pending3d.length), count),
+    prompt: textAt ? "Texto: digite e tecle Enter para gravar · Esc cancela" : promptFor(cmd, phase, cmd === "desvio" ? (desvioStart ? 1 : 0) : Math.max(pts.length, pending3d.length), count),
     question,
     textInput: textAt
       ? {
@@ -601,6 +646,25 @@ export function useDraftTool(a: Args) {
     anchor: pts[pts.length - 1] ?? null,
     preview(cursor) {
       const out: Prim[] = [];
+      if (cmd === "desvio") {
+        const r = desvioStart ? store.runs.find((x) => x.id === desvioStart.runId) : undefined;
+        if (r && desvioStart) {
+          const a0 = toPlan(r.vertices[desvioStart.index]);
+          const b0 = toPlan(r.vertices[desvioStart.index + 1]);
+          const at = (t: number): P2 => [a0[0] + (b0[0] - a0[0]) * t, a0[1] + (b0[1] - a0[1]) * t];
+          const s0 = at(desvioStart.t);
+          out.push({ t: "circle", c: s0, r: 0.06, weight: 0.3, fill: PREVIEW, color: PREVIEW, layer: "PREVIEW" });
+          if (cursor) {
+            const t1 = segParam(desvioStart.runId, desvioStart.index, cursor) ?? desvioStart.t;
+            const e0 = at(t1);
+            out.push({ t: "line", a: s0, b: e0, weight: 0.6, color: PREVIEW, layer: "PREVIEW" });
+            out.push({ t: "circle", c: e0, r: 0.06, weight: 0.3, fill: PREVIEW, color: PREVIEW, layer: "PREVIEW" });
+            const len = Math.hypot(e0[0] - s0[0], e0[1] - s0[1]);
+            out.push({ t: "text", p: [(s0[0] + e0[0]) / 2, (s0[1] + e0[1]) / 2 + 0.15], text: `desvio ${opts.desvioSobe ? "↑" : "↓"} ${opts.desvioAltura} mm · ${len.toFixed(2).replace(".", ",")} m`, height: 0.13, anchor: "middle", color: PREVIEW, layer: "PREVIEW" });
+          }
+        }
+        return out;
+      }
       if (isMeasureCmd(cmd)) {
         const kind: Measure["kind"] = cmd === "medir-area" ? "area" : cmd === "medir-angulo" ? "angulo" : "distancia";
         const live = cursor && pts.length ? [{ kind, pts: [...pts, cursor] }] : [];
@@ -662,6 +726,7 @@ export function useDraftTool(a: Args) {
     click(p, info) {
       if (pending) return;
       setMessage(null);
+      if (cmd === "desvio") return onDesvioClick(p, info);
       if (isMeasureCmd(cmd)) {
         const last = pts[pts.length - 1];
         if (last && Math.hypot(last[0] - p[0], last[1] - p[1]) < 1e-6) return; // duplo clique
@@ -821,6 +886,7 @@ function promptFor(cmd: DraftCmd, phase: Phase, k: number, count: number): strin
     "medir-distancia": ["primeiro ponto", "próximo ponto (Enter ou duplo clique encerra; vários pontos somam os trechos)"],
     "medir-area": ["primeiro vértice", "próximo vértice", "próximo vértice (Enter ou duplo clique fecha a área)"],
     "medir-angulo": ["ponto na primeira direção", "vértice do ângulo", "ponto na segunda direção"],
+    desvio: ["clique no início do desvio, sobre o trecho", "clique no fim do desvio (no mesmo trecho)"],
   };
   const s = steps[cmd] ?? [];
   return `${CMD_LABEL[cmd]}: ${s[Math.min(k, s.length - 1)] ?? ""} · Esc cancela`;

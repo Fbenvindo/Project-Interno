@@ -143,6 +143,35 @@ export function DesenhoPanel({ cmd, ctl, store, selection, setSelection, hasClip
           </label>
         </div>
       )}
+      {cmd === "desvio" && (
+        <>
+          <div className="form-grid">
+            <label>
+              Altura do desvio (mm)
+              <input type="number" step={10} min={10} value={opts.desvioAltura} onChange={(e) => setOpts({ ...opts, desvioAltura: Math.max(10, Number(e.target.value) || 300) })} />
+            </label>
+            <label>
+              Curvas
+              <select value={opts.desvioAngulo} onChange={(e) => setOpts({ ...opts, desvioAngulo: Number(e.target.value) as 90 | 45 })}>
+                <option value={90}>90° (sobe/desce na vertical)</option>
+                <option value={45}>45° (em diagonal)</option>
+              </select>
+            </label>
+          </div>
+          <div className="segmented small">
+            <button className={opts.desvioSobe ? "on" : ""} onClick={() => setOpts({ ...opts, desvioSobe: true })}>
+              ↑ Sobe (passa por cima)
+            </button>
+            <button className={!opts.desvioSobe ? "on" : ""} onClick={() => setOpts({ ...opts, desvioSobe: false })}>
+              ↓ Desce (passa por baixo)
+            </button>
+          </div>
+          <p className="muted small">
+            Na planta, clique no início e no fim do desvio sobre o mesmo segmento da tubulação, eletroduto rígido, eletrocalha ou duto. O trecho sai da
+            linha, sobe ou desce a altura informada e volta; as curvas aparecem nos quantitativos e no IFC. Eletroduto flexível não precisa de desvio.
+          </p>
+        </>
+      )}
       {cmd === "poligonal" && (
         <label className="inline-check">
           <input type="checkbox" checked={opts.closed} onChange={(e) => setOpts({ ...opts, closed: e.target.checked })} /> Fechar ao terminar (Enter)

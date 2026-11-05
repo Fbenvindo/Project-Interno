@@ -455,6 +455,13 @@ const P: Record<string, ReactNode> = {
       <path d="M4 4 L20 20" />
     </>
   ),
+  mDesvio: (
+    <>
+      <path d="M2 16 H7 V8 H17 V16 H22" />
+      <path d="M10 12 h4" strokeDasharray="1.5 1.5" />
+      <rect x="10" y="14" width="4" height="5" />
+    </>
+  ),
   gInstal: (
     <>
       <path d="M3 20 H21 M3 4 H21 M4 4 V20" />
