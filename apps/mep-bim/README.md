@@ -267,7 +267,20 @@ Fora de qualquer comando, o app está sempre em **Selecionar**, em todas as vist
 Comandos de desenho e edição na planta do pavimento, no estilo dos programas de CAD. A barra sobre a planta mostra o que o comando espera, e o painel da direita traz as opções.
 
 - **Criar:** Linha (encadeada), Arco (3 pontos), Círculo (centro e raio), Elipse (centro, eixo e segundo eixo), Quadrado (pelo lado), Retângulo (cantos opostos), Triângulo, Poligonal (Enter termina; clicar no primeiro ponto fecha), Texto (texto, altura em mm de papel e rotação no painel), **Cotas** ortogonal (horizontal ou vertical conforme a posição da linha de cota), inclinada (alinhada aos dois pontos) e angular.
-- **Encaixe:** extremidades, meios, centros e vértices do desenho, cantos das paredes cortadas e pontos locados (quadrado laranja). **Shift** trava na horizontal/vertical a partir do último ponto. Enter, duplo clique ou botão direito terminam; Esc cancela.
+- **Ortogonal (botão ORTO na barra de status, F8):** alterna entre movimentos **livres** e só nos eixos (horizontal/vertical a partir do último ponto na planta; X, Y ou Z no 3D). Vale para:
+  - os comandos de criar e modificar;
+  - o arraste com o botão direito na planta e no 3D;
+  - o editor de elementos.
+
+  **Shift** inverte o modo enquanto estiver pressionado. O retângulo por cantos opostos não é afetado. Com o ortogonal ligado, um encaixe dá a posição ao longo do eixo: uma linha tracejada laranja mostra o alinhamento com o ponto encaixado, e "ao longo" acha onde o eixo cruza o elemento.
+- **Encaixe a objetos (botão ENCAIXE, F3, e menu ▾ ao lado):** escolha os encaixes ativos. A escolha fica salva neste computador.
+  - **Encaixes disponíveis:** ponto final, ponto médio, centro, quadrante, interseção, perpendicular, tangente, ao longo (mais próximo) e inserção (pontos locados, textos e cotas).
+  - **Perpendicular e tangente** partem do ponto anterior do comando.
+  - **Arcos:** os quadrantes só contam dentro do arco, e as pontas e o meio do arco também encaixam.
+  - **Geometria considerada:** os encaixes valem sobre paredes, pilares, trechos, símbolos e os desenhos (arcos e círculos exatos).
+  - **Marcador:** cada encaixe tem forma própria (□ final, △ médio, ○ centro, ◇ quadrante, ✕ interseção, ⊥ perpendicular, tangente, ⧗ ao longo), com o nome ao lado.
+  - **Prioridade:** "ao longo" só vale quando nenhum outro encaixe está perto.
+- Enter, duplo clique ou botão direito terminam; Esc cancela.
 - **Modificar:** Copiar (vários destinos), Mover, Recortar, Colar (também em outro pavimento: a cota acompanha o piso), Apagar, Estender (até outra linha/forma ou até a face de uma parede) e Conectar (duas linhas viram um canto; linhas e poligonais que se tocam viram uma poligonal só). Valem para desenhos, pontos locados e trechos. Cópias recebem ids, GUIDs e etiquetas novos e saem sem circuito.
 - **Desvio** (Modificar): para tubulações rígidas, eletrodutos rígidos, eletrocalhas e dutos que precisam fugir de uma interferência. No painel, escolha a altura do desvio (mm), se ele **sobe** (passa por cima) ou **desce** (passa por baixo) e as curvas: 90° (sobe na vertical) ou 45° (em diagonal). Na planta, clique no início e no fim do desvio sobre o mesmo segmento. O trecho sai da linha, sobe ou desce e volta, e as curvas entram nos quantitativos e no IFC. O comando recusa, com aviso:
   - eletroduto flexível (ele já faz curvas livres);

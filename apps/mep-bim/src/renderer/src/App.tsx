@@ -38,6 +38,8 @@ import { defaultTitleBlockId, titleBlockById, useTitleBlocks } from "./planta/ti
 import { setHostLoader, setProjectFile, useProjectFile, useProjectFiles } from "./locacao/useProjectFiles";
 import { EMPTY_FILTERS, Navigator, NO_STOREY, type Filters } from "./shell/Navigator";
 import { Ribbon } from "./shell/Ribbon";
+import { DrawAidsBar, useDrawAidsKeys } from "./shell/DrawAidsBar";
+import { useDrawAids } from "./desenho/drawAids";
 import { ParamsPanel } from "./shell/ParamsPanel";
 import { BibliotecaPanel } from "./library/BibliotecaPanel";
 import { ProgramaPanel, ProgramaTiposOnly } from "./programa/ProgramaPanel";
@@ -1132,6 +1134,12 @@ export function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [planDeltaToScene]);
+  // Ortogonal (botão ORTO / F8) e encaixes (F3): valem para a planta, o 3D e o editor de elementos.
+  useDrawAidsKeys();
+  const drawAids = useDrawAids();
+  useEffect(() => {
+    if (viewerRef.current) viewerRef.current.ortho = drawAids.ortho;
+  }, [drawAids.ortho]);
   // 3D: arrastar com o botão direito sobre um ponto ou trecho (em Selecionar) move a seleção.
   const move3dAllowed = useRef(false);
   move3dAllowed.current = tool.kind === "propriedades" && view === "3d";
@@ -1728,6 +1736,12 @@ export function App() {
           </>
         )}
         {model && <CursorReadout georef={georef} />}
+        {model && (
+          <>
+            <span className="sep" />
+            <DrawAidsBar />
+          </>
+        )}
         <div className="spacer" />
         {model && (
           <span className="num">

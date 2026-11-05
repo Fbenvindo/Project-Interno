@@ -643,7 +643,8 @@ export function useDraftTool(a: Args) {
       : null,
     selecting: !pending && NEEDS_SELECTION.has(cmd) && phase !== "executar" && phase !== "confirmar",
     snap: !(NEEDS_SELECTION.has(cmd) && phase !== "executar") && !(cmd === "estender"),
-    anchor: pts[pts.length - 1] ?? null,
+    // Retângulo por cantos opostos: o ortogonal deixaria o segundo canto sem área.
+    anchor: cmd === "retangulo" ? null : (pts[pts.length - 1] ?? null),
     preview(cursor) {
       const out: Prim[] = [];
       if (cmd === "desvio") {

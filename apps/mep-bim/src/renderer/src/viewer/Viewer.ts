@@ -118,6 +118,8 @@ export class Viewer {
   /** Deslocamento final do arraste (cena, metros). */
   onMoveBy: (d: Vec3) => void = () => {};
   private moveDrag: { start: THREE.Vector3; d: Vec3 } | null = null;
+  /** Ortogonal (botão ORTO): o arraste fica preso ao eixo dominante; Shift inverte. */
+  ortho = false;
   private moveLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0x7c3aed, dashSize: 0.08, gapSize: 0.05, depthTest: false, transparent: true }));
   private moveLabel: HTMLDivElement;
   // ---- Medição no 3D ----
@@ -659,7 +661,7 @@ export class Viewer {
 
   /**
    * Deslocamento do arraste: no plano horizontal do ponto pego; com Alt ou Ctrl, só na vertical
-   * (num plano de frente para a câmera). Shift trava no eixo dominante. Arredonda a 10 mm.
+   * (num plano de frente para a câmera). Com o ortogonal (ORTO, ou Shift), fica no eixo dominante. Arredonda a 10 mm.
    */
   private moveDelta(start: THREE.Vector3, e: PointerEvent): Vec3 {
     this.raycaster.setFromCamera(this.ndc(e.clientX, e.clientY), this.camera);
@@ -678,7 +680,7 @@ export class Viewer {
     // Limite: com a câmera quase rasante, o plano foge para longe.
     const far = 200;
     if (Math.hypot(dx, dz) > far) return [0, 0, 0];
-    if (e.shiftKey) Math.abs(dx) >= Math.abs(dz) ? (dz = 0) : (dx = 0);
+    if (this.ortho !== e.shiftKey) Math.abs(dx) >= Math.abs(dz) ? (dz = 0) : (dx = 0);
     return [r(dx), 0, r(dz)];
   }
 

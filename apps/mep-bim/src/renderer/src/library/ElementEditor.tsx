@@ -20,6 +20,9 @@ import {
 } from "../../../core/elementDesign";
 import { BUILTIN_COUNT, COMPONENTS, MOUNTING_LABEL, type ComponentParam, type Mounting } from "../../../core/library";
 import { DISCIPLINES } from "../../../core/disciplines";
+import { findSnap, orthoPoint, orthoSnap, SNAP_LABEL, type SnapGeometry, type SnapMode } from "../../../core/osnap";
+import { activeSnaps, useDrawAids } from "../desenho/drawAids";
+import { DrawAidsBar } from "../shell/DrawAidsBar";
 import type { Discipline } from "../../../core/types";
 
 type P2 = [number, number];
@@ -95,7 +98,8 @@ export function ElementEditor({ initial, onCancel, onSave }: Props) {
   const [color, setColor] = useState(COLORS[0]);
   const [sel, setSel] = useState<string | null>(null);
   const [pts, setPts] = useState<P2[]>([]);
-  const [cursor, setCursor] = useState<{ p: P2; snapped: boolean } | null>(null);
+  const [cursor, setCursor] = useState<{ p: P2; snapped: boolean; kind?: SnapMode } | null>(null);
+  const aids = useDrawAids();
   const [vb, setVb] = useState({ x: -250, y: -250, w: 500, h: 500 });
   const [tried, setTried] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -120,17 +124,32 @@ export function ElementEditor({ initial, onCancel, onSave }: Props) {
     const m = svgRef.current?.getScreenCTM();
     return m ? 1 / m.a : 1;
   };
-  const resolve = (clientX: number, clientY: number): { p: P2; snapped: boolean } => {
+  // Encaixe a objetos e ortogonal (os mesmos da barra de status); sem encaixe, a grade.
+  const snapGeom = useMemo((): SnapGeometry => {
+    const g: SnapGeometry = { segs: [], circles: [], points: [[0, 0]], centers: [], quads: [] };
+    for (const { s, poly } of silhouettes) {
+      if (s.perfil.t === "circ" && s.vista === view) {
+        g.circles.push({ c: [s.perfil.cx, s.perfil.cy], r: s.perfil.r });
+        continue;
+      }
+      poly.forEach((q, i) => g.segs.push([q, poly[(i + 1) % poly.length]]));
+    }
+    return g;
+  }, [silhouettes, view]);
+  const resolve = (clientX: number, clientY: number, shift = false): { p: P2; snapped: boolean; kind?: SnapMode } => {
     const raw = toModel(clientX, clientY);
     const tol = 8 * pxToMm();
-    let best: { p: P2; d: number } | null = null;
-    const cands: P2[] = [[0, 0], ...silhouettes.flatMap((x) => (x.s.perfil.t === "circ" && x.s.vista === view ? [[x.s.perfil.cx, x.s.perfil.cy] as P2] : x.poly)), ...pts];
-    for (const c of cands) {
-      const k = Math.hypot(c[0] - raw[0], c[1] - raw[1]);
-      if (k <= tol && (!best || k < best.d)) best = { p: c, d: k };
+    const modes = activeSnaps(aids);
+    // Retângulo por cantos opostos fica fora do ortogonal (o segundo canto ficaria sem área).
+    const anchor = tool === "ret" ? undefined : pts[pts.length - 1];
+    const g: SnapGeometry = { ...snapGeom, points: [...snapGeom.points, ...pts], segs: [...snapGeom.segs, ...pts.slice(1).map((q, i): [P2, P2] => [pts[i], q])] };
+    const grid2 = (q: P2): P2 => [snapTo(q[0], grid), snapTo(q[1], grid)];
+    if (anchor && aids.ortho !== shift) {
+      const r = orthoSnap(raw, anchor, g, modes, tol);
+      return r.snap ? { p: r.p, snapped: true, kind: r.snap.kind } : { p: orthoPoint(grid2(raw), anchor).p, snapped: false };
     }
-    if (best) return { p: best.p, snapped: true };
-    return { p: [snapTo(raw[0], grid), snapTo(raw[1], grid)], snapped: false };
+    const sn = findSnap(raw, g, modes, tol, anchor);
+    return sn ? { p: sn.p, snapped: true, kind: sn.kind } : { p: grid2(raw), snapped: false };
   };
   const hitSolid = (p: P2): string | null => {
     // Os desenhados nesta vista têm prioridade sobre as silhuetas dos outros.
@@ -178,7 +197,7 @@ export function ElementEditor({ initial, onCancel, onSave }: Props) {
       else drag.current = { kind: "pan", start: raw, client: [e.clientX, e.clientY], vb, moved: false };
       return;
     }
-    const { p } = resolve(e.clientX, e.clientY);
+    const { p } = resolve(e.clientX, e.clientY, e.shiftKey);
     if (tool === "ret" || tool === "circ") {
       if (!pts.length) return setPts([p]);
       const a = pts[0];
@@ -201,14 +220,15 @@ export function ElementEditor({ initial, onCancel, onSave }: Props) {
         setVb({ ...g.vb, x: g.vb.x - (e.clientX - g.client[0]) * k, y: g.vb.y - (e.clientY - g.client[1]) * k });
       } else {
         const raw = toModel(e.clientX, e.clientY);
-        const du = snapTo(raw[0] - g.start[0], grid);
-        const dv = snapTo(raw[1] - g.start[1], grid);
+        let du = snapTo(raw[0] - g.start[0], grid);
+        let dv = snapTo(raw[1] - g.start[1], grid);
+        if (aids.ortho !== e.shiftKey) Math.abs(du) >= Math.abs(dv) ? (dv = 0) : (du = 0);
         const dd = viewToElement(view, du, dv, 0);
         setD((cur) => ({ ...cur, solids: g.solids!.map((s) => (s.id === sel ? moveSolid(s, dd) : s)) }));
       }
       return;
     }
-    setCursor(tool === "sel" ? null : resolve(e.clientX, e.clientY));
+    setCursor(tool === "sel" ? null : resolve(e.clientX, e.clientY, e.shiftKey));
   };
   const onUp = () => {
     drag.current = null;
@@ -518,6 +538,7 @@ export function ElementEditor({ initial, onCancel, onSave }: Props) {
             <button className="btn small-btn" onClick={fit}>
               Enquadrar
             </button>
+            <DrawAidsBar up={false} />
           </div>
           <div className="ee-canvas">
             <svg
@@ -585,6 +606,11 @@ export function ElementEditor({ initial, onCancel, onSave }: Props) {
                   stroke={cursor.snapped ? "#f59e0b" : "#7c3aed"}
                   strokeWidth={sw}
                 />
+              )}
+              {cursor?.kind && (
+                <text x={toSvg(cursor.p)[0] + 8 * tolPx} y={toSvg(cursor.p)[1] + 18 * tolPx} fontSize={11 * tolPx} fill="#b45309" stroke="#fff" strokeWidth={3 * tolPx} paintOrder="stroke">
+                  {SNAP_LABEL[cursor.kind]}
+                </text>
               )}
             </svg>
             <div className="ee-hint muted small">

@@ -1,6 +1,8 @@
 // Editor em planta 2D: mostra o pavimento cortado (IFC + pontos + trechos) e
 // alimenta o mesmo modo de edição usado na vista 3D (locação e traçado), com
 // encaixe em faces de parede e cota real de teto/piso obtida por raio no modelo.
+import { findSnap, orthoSnap, snapGeometry, SNAP_LABEL, type SnapMode } from "../../../core/osnap";
+import { activeSnaps, useDrawAids } from "../desenho/drawAids";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from "react";
 import { pullBoxes } from "../../../core/conduits";
 import { setCursor } from "../coords/cursor";
@@ -16,7 +18,7 @@ import type { ElementInfo, Vec3 } from "../../../core/types";
 import type { LoadedModel } from "../../../ifc/loadIfc";
 import type { PointsStore } from "../locacao/usePointsStore";
 import type { PointerContext, PreviewItem, Viewer } from "../viewer/Viewer";
-import { draftDistance, draftSnapPoints } from "../../../core/draft";
+import { draftDistance, isDraftId } from "../../../core/draft";
 import type { PlanTool } from "./planTool";
 import { applyHalftone, viewFilter, viewMarkers, type ViewDef } from "../../../core/views";
 import { buildSection } from "../../../core/plan/elevation";
@@ -57,6 +59,52 @@ const LABELS = { tags: true, circuits: true, power: true, sizes: true };
 const CEILING_TYPES = new Set(["IFCSLAB", "IFCCOVERING", "IFCROOF", "IFCBEAM", "IFCPLATE"]);
 const FLOOR_TYPES = new Set(["IFCSLAB", "IFCCOVERING", "IFCRAMP", "IFCSTAIRFLIGHT"]);
 const SNAP_PX = 22;
+
+/** Marcador do encaixe (formas como no CAD) com o nome, e linha de alinhamento no ortogonal. */
+function snapMarkerSvg(kind: SnapMode, p: P2, ref: P2 | undefined, px: number): string {
+  const [x, y0] = p;
+  const y = -y0;
+  const k = 6 * px;
+  const st = `fill="none" stroke="#f59e0b" stroke-width="2" vector-effect="non-scaling-stroke"`;
+  const n = (v: number) => v.toFixed(4);
+  let m = "";
+  switch (kind) {
+    case "fim":
+      m = `<rect x="${n(x - k)}" y="${n(y - k)}" width="${n(2 * k)}" height="${n(2 * k)}" ${st}/>`;
+      break;
+    case "meio":
+      m = `<polygon points="${n(x - k)},${n(y + k)} ${n(x + k)},${n(y + k)} ${n(x)},${n(y - k)}" ${st}/>`;
+      break;
+    case "centro":
+      m = `<circle cx="${n(x)}" cy="${n(y)}" r="${n(k)}" ${st}/>`;
+      break;
+    case "quadrante":
+      m = `<polygon points="${n(x)},${n(y - k)} ${n(x + k)},${n(y)} ${n(x)},${n(y + k)} ${n(x - k)},${n(y)}" ${st}/>`;
+      break;
+    case "intersecao":
+      m = `<path d="M${n(x - k)} ${n(y - k)} L${n(x + k)} ${n(y + k)} M${n(x - k)} ${n(y + k)} L${n(x + k)} ${n(y - k)}" ${st}/>`;
+      break;
+    case "perpendicular":
+      m = `<path d="M${n(x - k)} ${n(y - k)} V${n(y + k)} H${n(x + k)} M${n(x - k)} ${n(y)} H${n(x)} V${n(y + k)}" ${st}/>`;
+      break;
+    case "tangente":
+      m = `<circle cx="${n(x)}" cy="${n(y)}" r="${n(k * 0.8)}" ${st}/><path d="M${n(x - k * 1.3)} ${n(y - k * 0.8)} H${n(x + k * 1.3)}" ${st}/>`;
+      break;
+    case "proximo":
+      m = `<path d="M${n(x - k)} ${n(y - k)} H${n(x + k)} L${n(x - k)} ${n(y + k)} H${n(x + k)} Z" ${st}/>`;
+      break;
+    case "insercao":
+      m = `<rect x="${n(x - k)}" y="${n(y - k)}" width="${n(2 * k)}" height="${n(2 * k)}" ${st}/><path d="M${n(x - k)} ${n(y)} H${n(x + k)} M${n(x)} ${n(y - k)} V${n(y + k)}" ${st}/>`;
+      break;
+  }
+  if (ref) {
+    m += `<line x1="${n(ref[0])}" y1="${n(-ref[1])}" x2="${n(x)}" y2="${n(y)}" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>`;
+    m += `<circle cx="${n(ref[0])}" cy="${n(-ref[1])}" r="${n(k * 0.5)}" ${st}/>`;
+  }
+  const fs = 11 * px;
+  m += `<text x="${n(x + k * 1.6)}" y="${n(y + k * 2.6)}" font-size="${n(fs)}" font-family="Arial, sans-serif" fill="#b45309" stroke="#fff" stroke-width="3" paint-order="stroke" vector-effect="non-scaling-stroke">${SNAP_LABEL[kind]}${ref ? " (alinhado)" : ""}</text>`;
+  return m;
+}
 const f3 = (v: number) => (Math.round(v * 1000) / 1000).toString();
 
 /** Primitivas em coordenadas de modelo (Y invertido para o SVG); traços em px. */
@@ -297,18 +345,6 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     () => store.drafts.filter((d) => (d.view ?? null) === draftView && (isSection || d.storey === storey)),
     [store.drafts, storey, draftView, isSection],
   );
-  /** Pontos de encaixe: vértices do desenho, das paredes cortadas e dos pontos locados. */
-  const snapPts = useMemo(() => {
-    const out: P2[] = [];
-    for (const d of storeyDrafts) out.push(...draftSnapPoints(d));
-    for (const p of base.prims) {
-      if (p.t === "line") out.push(p.a, p.b);
-      else if (p.t === "poly" && p.pts.length <= 64) out.push(...p.pts);
-      else if (p.t === "circle") out.push(p.c);
-    }
-    if (!isSection) for (const pt of store.points) if (pt.storey === storey) out.push(toPlan(pt.position));
-    return out;
-  }, [storeyDrafts, base, store.points, storey, toPlan, isSection]);
   /** Extensão em planta de cada elemento (para a seleção por janela). */
   const idBounds = useMemo(() => {
     const m = new Map<number, [number, number, number, number]>();
@@ -332,39 +368,47 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     return m;
   }, [base, mep]);
 
-  const [toolCursor, setToolCursor] = useState<{ p: P2; snapped: boolean } | null>(null);
+  type Resolved = { p: P2; snapped: boolean; kind?: SnapMode; ref?: P2 };
+  const [toolCursor, setToolCursor] = useState<Resolved | null>(null);
   const [boxRect, setBoxRect] = useState<{ a: P2; b: P2 } | null>(null);
 
-  const resolvePoint = (clientX: number, clientY: number, shift: boolean): { p: P2; snapped: boolean } => {
+  // ---- Encaixe a objetos e ortogonal (barra de status: ORTO / Encaixe) -----------------------
+  const aids = useDrawAids();
+  const aidsRef = useRef(aids);
+  aidsRef.current = aids;
+  const snapGeom = useMemo(
+    () =>
+      snapGeometry(
+        [...base.prims, ...mep.prims],
+        storeyDrafts,
+        isSection ? [] : store.points.filter((pt) => pt.storey === storey).map((pt) => toPlan(pt.position)),
+        // Os desenhos entram pela entidade (arcos e círculos exatos), não pelas linhas geradas.
+        (q) => q.id != null && isDraftId(q.id),
+      ),
+    [base, mep, storeyDrafts, store.points, storey, toPlan, isSection],
+  );
+  /** Ponto com encaixe e ortogonal; `anchor` é o ponto anterior do comando (base do ortogonal). */
+  const resolveWith = (clientX: number, clientY: number, anchor: P2 | null | undefined, shift: boolean): Resolved => {
     const p = toModel(clientX, clientY);
-    const t = toolRef.current;
-    if (!t?.snap) return { p, snapped: false };
-    if (shift && t.anchor) {
-      const a = t.anchor;
-      return Math.abs(p[0] - a[0]) >= Math.abs(p[1] - a[1]) ? { p: [p[0], a[1]], snapped: false } : { p: [a[0], p[1]], snapped: false };
-    }
+    const a = aidsRef.current;
+    const modes = activeSnaps(a);
     const tol = SNAP_PX * 0.6 * metersPerPx();
-    let best: P2 | null = null;
-    let bd = tol;
-    for (const q of snapPts) {
-      const d = Math.hypot(q[0] - p[0], q[1] - p[1]);
-      if (d < bd) ((bd = d), (best = q));
+    // Shift inverte o ortogonal enquanto está pressionado.
+    if (anchor && a.ortho !== shift) {
+      const r = orthoSnap(p, anchor, snapGeom, modes, tol);
+      return { p: r.p, snapped: !!r.snap, kind: r.snap?.kind, ref: r.snap && (r.snap.p[0] !== r.p[0] || r.snap.p[1] !== r.p[1]) ? r.snap.p : undefined };
     }
-    return best ? { p: best, snapped: true } : { p, snapped: false };
+    const sn = findSnap(p, snapGeom, modes, tol, anchor);
+    return sn ? { p: sn.p, snapped: true, kind: sn.kind } : { p, snapped: false };
+  };
+  const resolvePoint = (clientX: number, clientY: number, shift: boolean): Resolved => {
+    const t = toolRef.current;
+    if (!t?.snap) return { p: toModel(clientX, clientY), snapped: false };
+    return resolveWith(clientX, clientY, t.anchor, shift);
   };
 
   /** Ponto do cursor com encaixe (para o arraste de mover, fora dos comandos). */
-  const resolvePointSelect = (clientX: number, clientY: number): P2 => {
-    const p = toModel(clientX, clientY);
-    const tol = SNAP_PX * 0.6 * metersPerPx();
-    let best: P2 | null = null;
-    let bd = tol;
-    for (const q of snapPts) {
-      const d = Math.hypot(q[0] - p[0], q[1] - p[1]);
-      if (d < bd) ((bd = d), (best = q));
-    }
-    return best ?? p;
-  };
+  const resolvePointSelect = (clientX: number, clientY: number, anchor?: P2, shift = false): P2 => resolveWith(clientX, clientY, anchor, shift).p;
 
   const hitAt = (clientX: number, clientY: number, p: P2): number | null => {
     const el = document.elementFromPoint(clientX, clientY)?.closest("[data-id]");
@@ -448,11 +492,8 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   // Botão direito sobre um elemento (em Selecionar): arrasta a seleção para movê-la.
   const [moveDrag, setMoveDrag] = useState<{ a: P2; b: P2 } | null>(null);
   const moveDragRef = useRef<{ a: P2 } | null>(null);
-  const moveDelta = (a: P2, b: P2, shift: boolean): P2 => {
-    let d: P2 = [Math.round((b[0] - a[0]) * 100) / 100, Math.round((b[1] - a[1]) * 100) / 100];
-    if (shift) d = Math.abs(d[0]) >= Math.abs(d[1]) ? [d[0], 0] : [0, d[1]];
-    return d;
-  };
+  // O ortogonal (botão ORTO, Shift inverte) já vem do encaixe; aqui só arredonda a 10 mm.
+  const moveDelta = (a: P2, b: P2): P2 => [Math.round((b[0] - a[0]) * 100) / 100, Math.round((b[1] - a[1]) * 100) / 100];
   const onPointerDown = (e: PointerEvent) => {
     if (edit) return;
     if (e.button === 2 && selectMode && onMoveBy && !isSection) {
@@ -476,8 +517,8 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     const pm = toModel(e.clientX, e.clientY);
     setCursor(isSection ? null : [pm[0], pm[1], cs.worldToIfc([0, level, 0])[2]]);
     if (moveDragRef.current && e.buttons & 2) {
-      const b = resolvePointSelect(e.clientX, e.clientY);
-      const dd = moveDelta(moveDragRef.current.a, b, e.shiftKey);
+      const b = resolvePointSelect(e.clientX, e.clientY, moveDragRef.current.a, e.shiftKey);
+      const dd = moveDelta(moveDragRef.current.a, b);
       setMoveDrag({ a: moveDragRef.current.a, b: [moveDragRef.current.a[0] + dd[0], moveDragRef.current.a[1] + dd[1]] });
       return;
     }
@@ -512,7 +553,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       const a = moveDragRef.current.a;
       moveDragRef.current = null;
       setMoveDrag(null);
-      const dd = moveDelta(a, resolvePointSelect(e.clientX, e.clientY), e.shiftKey);
+      const dd = moveDelta(a, resolvePointSelect(e.clientX, e.clientY, a, e.shiftKey));
       if (Math.hypot(dd[0], dd[1]) >= 0.005) onMoveBy?.(dd);
       return;
     }
@@ -633,11 +674,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     ? (() => {
         const px = metersPerPx();
         let out = primsToSvg(planTool.preview(toolCursor?.p ?? null));
-        if (toolCursor?.snapped) {
-          const [x, y] = toolCursor.p;
-          const k = 6 * px;
-          out += `<rect x="${f3(x - k)}" y="${f3(-y - k)}" width="${f3(2 * k)}" height="${f3(2 * k)}" fill="none" stroke="#f59e0b" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
-        }
+        if (toolCursor?.snapped && toolCursor.kind) out += snapMarkerSvg(toolCursor.kind, toolCursor.p, toolCursor.ref, px);
         if (toolCursor && planTool.snap) {
           const [x, y] = toolCursor.p;
           const k = 14 * px;

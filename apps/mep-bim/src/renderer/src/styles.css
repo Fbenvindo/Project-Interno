@@ -2290,3 +2290,79 @@ h3 {
 .ee-head .btn:not(.primary):hover {
   background: rgba(255, 255, 255, 0.12);
 }
+
+/* ---- Ortogonal e encaixes (barra de status) ---- */
+.draw-aids {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.aid-btn {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 1px 7px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.aid-btn.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.aid-btn.caret {
+  font-weight: 400;
+  color: var(--text);
+}
+.aid-menu {
+  position: fixed;
+  z-index: 80;
+  width: 260px;
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(15, 23, 42, 0.2);
+}
+.status-bar .aid-btn {
+  color: #cbd5e1;
+  border-color: #334766;
+}
+.status-bar .aid-btn.on {
+  background: var(--cyan);
+  border-color: var(--cyan);
+  color: var(--navy);
+}
+.status-bar .aid-btn.caret {
+  color: #fbbf24;
+}
+.aid-menu label {
+  white-space: normal;
+}
+.aid-menu-head {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.aid-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  cursor: pointer;
+}
+.aid-ico {
+  width: 16px;
+  text-align: center;
+  color: #d97706;
+}
+.aid-menu-foot {
+  display: flex;
+  gap: 12px;
+  margin: 4px 0;
+}

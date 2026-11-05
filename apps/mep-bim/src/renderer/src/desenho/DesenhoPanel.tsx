@@ -263,14 +263,14 @@ export function DesenhoPanel({ cmd, ctl, store, selection, setSelection, hasClip
               ))}
             </ul>
           )}
-          <p className="muted small">Troque entre distância, área e ângulo sem perder as medidas. Shift trava na horizontal/vertical; o encaixe pega pontas, meios, cantos e pontos locados.</p>
+          <p className="muted small">Troque entre distância, área e ângulo sem perder as medidas. ORTO (F8, na barra de status) trava na horizontal/vertical, e Shift inverte enquanto pressionado. Os encaixes (F3) escolhem-se no menu ao lado.</p>
         </section>
       )}
       {ctl.message && <div className="info-text small">{ctl.message}</div>}
 
       {(isCreateCmd(cmd) || phase === "executar" || cmd === "colar" || cmd === "corte-linha" || cmd === "vista-3d") && !isMeasureCmd(cmd) && (
         <p className="muted small">
-          Encaixe automático em extremidades, meios, centros e vértices (quadrado laranja). Shift: ortogonal ao último ponto. Enter, duplo clique ou botão direito
+          Encaixe a objetos (F3): ponto final, médio, centro, quadrante, interseção, perpendicular, tangente, ao longo e inserção, com marcador e nome em laranja; escolha-os no menu da barra de status. ORTO (F8): só na horizontal/vertical a partir do último ponto; Shift inverte. Enter, duplo clique ou botão direito
           termina; Esc cancela. Os desenhos ficam no pavimento atual, entram na prancha e no DXF (camadas ANOT-*).
         </p>
       )}
