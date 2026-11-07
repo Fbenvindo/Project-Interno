@@ -940,7 +940,7 @@ function FlowSettings({
           <label title="Tamanho na folha">
             Escala na prancha
             <select value={view.scale} onChange={(e) => onScale(Number(e.target.value))}>
-              {[25, 50, 75, 100, 200].map((k) => (
+              {[25, 50, 75, 100, 125, 150, 200, 250].map((k) => (
                 <option key={k} value={k}>
                   1:{k}
                 </option>

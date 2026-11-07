@@ -19,7 +19,8 @@ import { PlanView } from "./planta/PlanView";
 import { PlanEditor } from "./planta/PlanEditor";
 import { NO_SECTION, SectionTools, sectionToPlanes, type SectionState } from "./viewer/SectionTools";
 import { FolhaPanel } from "./planta/FolhaPanel";
-import { renderSheetViews, type SheetViewport } from "../../core/plan/sheet";
+import { renderSheetViews, type SheetFormat, type SheetViewport } from "../../core/plan/sheet";
+import { boundsOf } from "../../core/plan/build";
 import type { PlanDrawing } from "../../core/plan/drawing";
 import { beamOptions, docPlanOf, viewFilter, type ViewDef } from "../../core/views";
 import { newSheetId, viewDrawing, viewSubtitle, viewTitle, type ModelContext, type SheetDef } from "../../core/viewDrawing";
@@ -41,7 +42,7 @@ import { Ribbon } from "./shell/Ribbon";
 import { DrawAidsBar, useDrawAidsKeys } from "./shell/DrawAidsBar";
 import { useDrawAids } from "./desenho/drawAids";
 import { FlowCanvas, FlowPanel, FlowSidebar, type FlowMode, type FlowSel } from "./fluxo/FlowEditor";
-import { applyProfile, blockStorey as blockStoreyOf, checkFlow, flowSystem, newFlow, newFlowId, type FlowContext, type FlowData, type FlowSystem } from "../../core/flow";
+import { applyProfile, blockStorey as blockStoreyOf, checkFlow, flowPrims, flowSystem, newFlow, newFlowId, type FlowContext, type FlowData, type FlowSystem } from "../../core/flow";
 import { PerfilPanel } from "./shell/PerfilPanel";
 import { exampleTwoTowersBusway, exampleTwoTowersWater } from "../../core/flowExamples";
 import { pointPowerVA } from "../../core/circuits";
@@ -891,12 +892,12 @@ export function App() {
     [open3D, model],
   );
   const newSheet = useCallback(
-    (viewIds: string[] = []): SheetDef => {
+    (viewIds: string[] = [], format: SheetFormat = "A1"): SheetDef => {
       const n = store.sheets.length + 1;
       const s: SheetDef = {
         id: newSheetId(),
         name: `Folha ${String(n).padStart(2, "0")}`,
-        format: "A1",
+        format,
         titleBlockId: titleBlockById(defaultTitleBlockId())?.id ?? null,
         info: { projeto: (fileName ?? "").replace(/\.ifc$/i, ""), conteudo: "", responsavel: "", data: new Date().toLocaleDateString("pt-BR"), revisao: "R00", folha: String(n).padStart(2, "0") },
         viewports: viewIds.map((viewId) => ({ viewId })),
@@ -1297,7 +1298,28 @@ export function App() {
       updateView({ ...flowDef, section: "documentacao" });
       files.setMessage(`"${flowDef.name}" passou para Documentação (só as vistas de documentação vão para as folhas).`);
     }
-    addToSheet(flowDef.id, sheetId ?? store.sheets[0]?.id ?? null);
+    // Escala que cabe na folha (área útil aproximada de cada formato, em mm); folha nova vai para A0 se precisar.
+    const AREA: Record<SheetFormat, [number, number]> = { A0: [915, 745], A1: [585, 510], A2: [350, 350], A3: [350, 185], A4: [235, 105] };
+    const bb = boundsOf(flowPrims(flowDef.flow!, { legend: true }));
+    const w = bb ? bb.max[0] - bb.min[0] : 0;
+    const h = bb ? bb.max[1] - bb.min[1] : 0;
+    const SCALES = [25, 50, 75, 100, 125, 150, 200, 250];
+    const fit = (fmt: SheetFormat) => SCALES.find((k) => (w * 1000) / k <= AREA[fmt][0] && (h * 1000) / k <= AREA[fmt][1]) ?? 250;
+    const target = sheetId ?? store.sheets[0]?.id ?? null;
+    const fmt: SheetFormat = target ? (store.sheets.find((x) => x.id === target)?.format ?? "A1") : "A1";
+    let scale = Math.max(flowDef.scale, fit(fmt));
+    if (!target && scale > 100 && fit("A0") <= 100) {
+      scale = Math.max(flowDef.scale, fit("A0"));
+      updateView({ ...flowDef, section: "documentacao", scale });
+      const sh = newSheet([flowDef.id], "A0");
+      files.setMessage(`"${flowDef.name}" foi para uma folha A0 em 1:${scale}, para caber inteiro.`);
+      return openSheet(sh.id);
+    }
+    if (scale !== flowDef.scale) {
+      updateView({ ...flowDef, section: "documentacao", scale });
+      files.setMessage(`"${flowDef.name}" em 1:${scale} para caber na folha ${fmt}.`);
+    }
+    addToSheet(flowDef.id, target);
   };
 
   const rightPanel = () => {
