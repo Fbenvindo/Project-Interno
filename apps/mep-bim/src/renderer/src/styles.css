@@ -2587,3 +2587,15 @@ h3 {
   margin: 6px 0;
   padding-left: 16px;
 }
+.flow-canvas svg.band-resize {
+  cursor: row-resize;
+}
+.flow-panel input.flow-bandh {
+  width: 54px;
+  flex: none;
+  padding: 3px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text);
+}

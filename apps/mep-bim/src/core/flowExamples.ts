@@ -1,6 +1,6 @@
 // Exemplos prontos de fluxograma (para conhecer a ferramenta e partir de um modelo).
 import { newBuildingId, type BuildingFloor, type BuildingProfile } from "./building";
-import { applyProfile, blockRect, FLOW_BLOCK_BY_ID, HEADER_H, newFlowId, type FlowBlock, type FlowData, type FlowLink, type FlowLinkKind } from "./flow";
+import { applyProfile, bandHeight, bandTop, blockRect, FLOW_BLOCK_BY_ID, newFlowId, type FlowBlock, type FlowData, type FlowLink, type FlowLinkKind } from "./flow";
 
 /**
  * Edifício com 2 torres (A: 1º ao 12º; B: 1º ao 16º), 2º subsolo, 1º subsolo e térreo comuns,
@@ -20,16 +20,18 @@ export function exampleTwoTowersBusway(): { profile: BuildingProfile; flow: Flow
 
   const base: FlowData = { discipline: "eletrica", layout: "pavimentos", storeys: [], bandH: 3, towers: [], blocks: [], links: [] };
   let flow = applyProfile(base, profile);
-  flow = { ...flow, towers: flow.towers.map((t) => ({ ...t, width: 18 })) };
+  // Mais espaço nas faixas com mais blocos (térreo e 1º subsolo).
+  flow = { ...flow, towers: flow.towers.map((t) => ({ ...t, width: 18 })), bandHs: flow.storeys.map((s) => (s === "Térreo" || s === "1º Subsolo" ? 4.5 : null)) };
 
   const blocks: FlowBlock[] = [];
   const links: FlowLink[] = [];
   const band = (name: string) => flow.storeys.indexOf(name);
-  const top = (name: string) => HEADER_H + band(name) * flow.bandH;
+  const top = (name: string) => bandTop(flow, band(name));
+  const height = (name: string) => bandHeight(flow, band(name));
   const add = (kind: string, tag: string, x: number, storey: string, params: Record<string, string | number> = {}, extra: Partial<FlowBlock> = {}): FlowBlock => {
     const d = FLOW_BLOCK_BY_ID[kind];
     const b: FlowBlock = { id: newFlowId("b"), kind, tag, x, y: 0, params: { ...Object.fromEntries(d.params.map((p) => [p.key, p.default])), ...params }, ...extra };
-    b.y = Math.round((top(storey) + (flow.bandH - blockRect(b).h) / 2) * 100) / 100;
+    b.y = Math.round((top(storey) + (height(storey) - blockRect(b).h) / 2) * 100) / 100;
     blocks.push(b);
     return b;
   };
@@ -51,7 +53,7 @@ export function exampleTwoTowersBusway(): { profile: BuildingProfile; flow: Flow
   for (const t of towers) {
     const busX = x0 + 1.5;
     const y0 = top(`${t.floors}º Pavimento`) + 0.3;
-    const y1 = top("1º Subsolo") + flow.bandH - 0.3;
+    const y1 = top("1º Subsolo") + height("1º Subsolo") - 0.3;
     const bus = add("barramento", `BB-${t.name.slice(-1)}`, busX, "1º Subsolo", { corrente: t.floors > 12 ? 800 : 630, material: "alumínio" });
     bus.y = Math.round(y0 * 100) / 100;
     bus.h = Math.round((y1 - y0) * 100) / 100;

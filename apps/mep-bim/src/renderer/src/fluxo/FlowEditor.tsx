@@ -4,6 +4,9 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import {
   autoArrange,
+  bandHeight,
+  bandsBottom,
+  bandTop,
   blockRect,
   blockStorey,
   blockTower,
@@ -16,7 +19,9 @@ import {
   flowPrims,
   HEADER_H,
   isBus,
+  LABEL_W,
   LINK_LABEL,
+  MIN_BAND_H,
   LINK_STYLE,
   linkPath,
   newFlowId,
@@ -27,6 +32,7 @@ import {
   type FlowIssue,
   type FlowLink,
   type FlowLinkKind,
+  withBandHeights,
 } from "../../../core/flow";
 import type { Prim } from "../../../core/plan/drawing";
 import type { P2 } from "../../../core/plan/section";
@@ -87,6 +93,7 @@ export function FlowCanvas({ view, flow, update, sel, setSel, mode, setMode, iss
     | { kind: "pan"; client: P2; vb: typeof vb; moved: boolean }
     | { kind: "move"; id: string; start: P2; orig: { x: number; y: number }; moved: boolean }
     | { kind: "resize"; id: string; edge: "top" | "bottom"; start: P2; orig: { y: number; h: number } }
+    | { kind: "band"; i: number; start: P2; orig: number; base: FlowData }
     | null
   >(null);
 
@@ -129,6 +136,14 @@ export function FlowCanvas({ view, flow, update, sel, setSel, mode, setMode, iss
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(fit, [view.id]);
 
+  /** Linha da base de uma faixa sob o cursor, na coluna dos nomes (para arrastar a altura). */
+  const bandEdgeAt = (p: P2): number => {
+    if (flow.layout !== "pavimentos" || p[0] > LABEL_W) return -1;
+    const tol = 5 * pxToU();
+    for (let i = 0; i < flow.storeys.length; i++) if (Math.abs(p[1] - (bandTop(flow, i) + bandHeight(flow, i))) < tol) return i;
+    return -1;
+  };
+  const [bandHover, setBandHover] = useState(-1);
   const hitBlock = (p: P2): FlowBlock | null => {
     const pad = 4 * pxToU();
     for (let i = flow.blocks.length - 1; i >= 0; i--) {
@@ -163,7 +178,7 @@ export function FlowCanvas({ view, flow, update, sel, setSel, mode, setMode, iss
   const addBlock = (kind: string, at: P2) => {
     const d = FLOW_BLOCK_BY_ID[kind];
     if (!d) return;
-    const h = d.symbol === "barramento" && flow.layout === "pavimentos" ? Math.max(3, flow.storeys.length * flow.bandH - 0.4) : undefined;
+    const h = d.symbol === "barramento" && flow.layout === "pavimentos" ? Math.max(3, bandsBottom(flow) - HEADER_H - 0.4) : undefined;
     const b: FlowBlock = {
       id: newFlowId("b"),
       kind,
@@ -191,6 +206,13 @@ export function FlowCanvas({ view, flow, update, sel, setSel, mode, setMode, iss
       addBlock(mode.block, p);
       if (!e.shiftKey) setMode({ kind: "sel" });
       return;
+    }
+    if (mode.kind === "sel") {
+      const bi = bandEdgeAt(p);
+      if (bi >= 0) {
+        drag.current = { kind: "band", i: bi, start: p, orig: bandHeight(flow, bi), base: flow };
+        return;
+      }
     }
     const b = hitBlock(p);
     if (mode.kind === "link") {
@@ -226,7 +248,19 @@ export function FlowCanvas({ view, flow, update, sel, setSel, mode, setMode, iss
     const p = toModel(e.clientX, e.clientY);
     setCursor(p);
     const g = drag.current;
-    if (!g || !e.buttons) return;
+    if (!g || !e.buttons) {
+      const bi = mode.kind === "sel" ? bandEdgeAt(p) : -1;
+      if (bi !== bandHover) setBandHover(bi);
+      return;
+    }
+    if (g.kind === "band") {
+      const h = Math.max(MIN_BAND_H, Math.round((g.orig + p[1] - g.start[1]) * 10) / 10);
+      const hs = g.base.storeys.map((_, j) => g.base.bandHs?.[j] ?? null);
+      hs[g.i] = h;
+      // Sempre a partir do fluxograma do início do arraste: os blocos não "escorregam".
+      update(() => withBandHeights(g.base, { bandHs: hs }), `faixa:${g.i}`);
+      return;
+    }
     if (g.kind === "pan") {
       const k = pxToU();
       if (Math.hypot(e.clientX - g.client[0], e.clientY - g.client[1]) > 3) g.moved = true;
@@ -317,6 +351,11 @@ export function FlowCanvas({ view, flow, update, sel, setSel, mode, setMode, iss
       if (cursor) overlay.push(<line key="rub" x1={r.x + r.w / 2} y1={r.y + r.h / 2} x2={cursor[0]} y2={cursor[1]} stroke="#7c3aed" strokeDasharray="5 4" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />);
     }
   }
+  if (bandHover >= 0 || drag.current?.kind === "band") {
+    const i = drag.current?.kind === "band" ? drag.current.i : bandHover;
+    const y = bandTop(flow, i) + bandHeight(flow, i);
+    overlay.push(<line key="band" x1={vb.x - vb.w} y1={y} x2={vb.x + vb.w * 2} y2={y} stroke="#06b6d4" strokeWidth={2.5} vectorEffect="non-scaling-stroke" />);
+  }
   for (const [id, lvl] of issueOf) {
     const b = byId.get(id);
     if (!b) continue;
@@ -336,7 +375,9 @@ export function FlowCanvas({ view, flow, update, sel, setSel, mode, setMode, iss
         ? mode.from
           ? "Clique no bloco que recebe a energia (segue ligando a partir dele) · Esc encerra"
           : "Clique no bloco de onde sai a energia"
-        : "Arraste os blocos da paleta para o desenho · clique para selecionar e arrastar · barramento: puxe as pontas para vencer os pavimentos · Delete apaga · botão do meio/direito ou área vazia: deslocar · roda: zoom";
+        : bandHover >= 0
+          ? `Arraste para mudar a altura da faixa do ${flow.storeys[bandHover]} (os blocos acompanham)`
+          : "Arraste os blocos da paleta para o desenho · clique para selecionar e arrastar · barramento: puxe as pontas para vencer os pavimentos · linha entre as faixas (coluna dos nomes): altura do pavimento · Delete apaga · botão do meio/direito ou área vazia: deslocar · roda: zoom";
 
   return (
     <div className="flow-editor">
@@ -388,7 +429,7 @@ export function FlowCanvas({ view, flow, update, sel, setSel, mode, setMode, iss
           viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}
           width="100%"
           height="100%"
-          className={mode.kind === "sel" ? "" : "drawing"}
+          className={mode.kind !== "sel" ? "drawing" : bandHover >= 0 || drag.current?.kind === "band" ? "band-resize" : ""}
           onPointerDown={onDown}
           onPointerMove={onMove}
           onPointerUp={onUp}
@@ -821,12 +862,25 @@ function FlowSettings({
   const setTowers = (fn: (t: FlowData["towers"]) => FlowData["towers"]) => update((f) => ({ ...f, towers: fn(f.towers) }), "torres");
   const setStoreys = (fn: (s: string[]) => string[]) => update((f) => ({ ...f, storeys: fn(f.storeys) }), "pavimentos");
   /** Altera faixas e os dados do perfil junto (mesma ordem). */
-  type Row = { s: string; lv?: NonNullable<FlowData["levels"]>[number] };
+  type Row = { s: string; lv?: NonNullable<FlowData["levels"]>[number]; h?: number | null };
   const setRows = (fn: (rows: Row[]) => Row[]) =>
     update((f) => {
-      const rows = fn(f.storeys.map((s, i) => ({ s, lv: f.levels?.[i] })));
-      return { ...f, storeys: rows.map((r) => r.s), levels: f.levels ? rows.map((r) => r.lv ?? { floor: r.s }) : undefined };
+      const rows = fn(f.storeys.map((s, i) => ({ s, lv: f.levels?.[i], h: f.bandHs?.[i] ?? null })));
+      return {
+        ...f,
+        storeys: rows.map((r) => r.s),
+        levels: f.levels ? rows.map((r) => r.lv ?? { floor: r.s }) : undefined,
+        bandHs: f.bandHs ? rows.map((r) => r.h ?? null) : undefined,
+      };
     }, "pavimentos");
+  /** Altura própria da faixa i (vazio = padrão); os blocos acompanham. */
+  const setBandH = (i: number, v: string) =>
+    update((f) => {
+      const hs = f.storeys.map((_, j) => f.bandHs?.[j] ?? null);
+      const n = Number(v.replace(",", "."));
+      hs[i] = v.trim() === "" || !Number.isFinite(n) ? null : Math.max(MIN_BAND_H, n);
+      return withBandHeights(f, { bandHs: hs });
+    }, `faixa:${i}`);
   return (
     <>
       <section className="card">
@@ -854,8 +908,8 @@ function FlowSettings({
             </select>
           </label>
           <label>
-            Altura da faixa
-            <input type="number" step={0.5} min={1.5} value={flow.bandH} onChange={(e) => update((f) => ({ ...f, bandH: Math.max(1.5, Number(e.target.value) || 3) }), "faixa")} />
+            Altura padrão da faixa
+            <input type="number" step={0.5} min={MIN_BAND_H} value={flow.bandH} onChange={(e) => update((f) => withBandHeights(f, { bandH: Math.max(MIN_BAND_H, Number(e.target.value) || 3) }), "faixa")} />
           </label>
         </div>
         <p className="muted small">{flow.blocks.length} bloco(s) · {flow.links.length} ligação(ões). Selecione um bloco ou ligação para editar.</p>
@@ -906,6 +960,16 @@ function FlowSettings({
           {flow.storeys.map((s, i) => (
             <li key={`${s}${i}`}>
               <input className="grow flow-name" value={s} onChange={(e) => setStoreys((l) => l.map((x, j) => (j === i ? e.target.value : x)))} />
+              <input
+                className="flow-bandh"
+                type="number"
+                step={0.5}
+                min={MIN_BAND_H}
+                title="Altura da faixa deste pavimento (vazio = padrão). Também dá para arrastar a linha entre as faixas, na coluna dos nomes."
+                placeholder={String(flow.bandH)}
+                value={flow.bandHs?.[i] ?? ""}
+                onChange={(e) => setBandH(i, e.target.value)}
+              />
               <button className="link" title="Subir" disabled={i === 0} onClick={() => setRows((l) => (i ? [...l.slice(0, i - 1), l[i], l[i - 1], ...l.slice(i + 1)] : l))}>
                 ↑
               </button>

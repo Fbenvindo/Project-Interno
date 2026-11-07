@@ -130,3 +130,31 @@ describe("fluxograma — alimentação, média tensão e modelo", () => {
     expect(prims.some((p) => p.t === "text" && p.text === "2º PAVIMENTO")).toBe(true);
   });
 });
+
+describe("altura da faixa por pavimento", () => {
+  it("faixas com alturas diferentes e blocos que acompanham a faixa", async () => {
+    const { bandTop, bandIndexAt, withBandHeights, bandsBottom } = await import("../src/core/flow");
+    const f = base(); // 3º, 2º, 1º, Térreo (3 cada)
+    const q3 = blk("qd", "QD-3", 5, yOf(f, "3º Pavimento"));
+    const qT = blk("qgbt", "QGBT", 5, yOf(f, "Térreo", 1.6));
+    const bus = blk("barramento", "BB", 12, bandTop(f, 0) + 0.3, { h: bandTop(f, 4) - 0.3 - (bandTop(f, 0) + 0.3) });
+    f.blocks = [q3, qT, bus];
+    // Térreo com 6 de altura e 3º com 2
+    const g = withBandHeights(f, { bandHs: [2, null, null, 6] });
+    expect(bandTop(g, 1)).toBeCloseTo(HEADER_H + 2);
+    expect(bandsBottom(g)).toBeCloseTo(HEADER_H + 2 + 3 + 3 + 6);
+    expect(bandIndexAt(g, bandTop(g, 3) + 5.5)).toBe(3);
+    const nq3 = g.blocks.find((b) => b.tag === "QD-3")!;
+    const nqT = g.blocks.find((b) => b.tag === "QGBT")!;
+    const nbus = g.blocks.find((b) => b.tag === "BB")!;
+    expect(blockStorey(g, nq3)).toBe("3º Pavimento");
+    expect(blockStorey(g, nqT)).toBe("Térreo");
+    expect(nqT.y - bandTop(g, 3)).toBeCloseTo(qT.y - bandTop(f, 3));
+    // Barramento continua do 3º ao Térreo
+    expect(busStoreys(g, nbus)).toEqual(["3º Pavimento", "2º Pavimento", "1º Pavimento", "Térreo"]);
+    // Altura padrão também leva os blocos
+    const h = withBandHeights(f, { bandH: 4 });
+    expect(blockStorey(h, h.blocks.find((b) => b.tag === "QGBT")!)).toBe("Térreo");
+    expect(flowPrims(g).some((p) => p.t === "text" && p.text === "TÉRREO")).toBe(true);
+  });
+});
