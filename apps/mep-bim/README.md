@@ -303,6 +303,21 @@ Comandos de desenho e edição na planta do pavimento, no estilo dos programas d
 
 Os desenhos ficam no pavimento em que foram feitos e são salvos no arquivo do projeto. Também entram na prancha, no PDF/SVG e no DXF (camadas `ANOT-DESENHO`, `ANOT-COTAS` e `ANOT-TEXTOS`). Ctrl+Z desfaz.
 
+### Perfil do empreendimento
+
+Em **Modelo › Perfil do empreendimento** (também em Elétrica › Fluxograma) você descreve o prédio: **torres**, **pavimentos** de baixo para cima e a altura piso a piso de cada um. O perfil fica salvo no projeto (.seb).
+- **Repetição (×):** o tipo "1º ao 18º" é uma linha só, com ×18.
+- **Comum:** subsolos, térreo e lazer são compartilhados por todas as torres. Os demais pavimentos pertencem às torres marcadas, o que permite torres de alturas diferentes.
+- **Cotas:** são calculadas a partir da cota do pavimento mais baixo; nos repetidos, do primeiro ao último.
+- **Resumo:** o painel mostra os pavimentos e a altura de cada torre e avisa nomes repetidos, alturas faltando e pavimentos sem torre.
+- **Para começar:** use os pavimentos do modelo (alturas pela diferença das cotas) ou um perfil típico (torres, subsolos e pavimentos tipo).
+
+**Nos fluxogramas:**
+- Os novos fluxogramas já saem com o perfil.
+- Nos existentes, use *do perfil* (Propriedades do fluxograma) ou *Aplicar aos fluxogramas* (no painel do perfil). Os blocos ficam no mesmo pavimento, pelo nome, e na mesma torre.
+- As faixas mostram a cota. Os pavimentos comuns atravessam as colunas das torres ("comum às torres").
+- A célula de uma torre que não tem o pavimento fica cinza, e um bloco colocado ali gera aviso na conferência.
+
 ### Fluxogramas (Elétrica)
 
 Em **Elétrica › Fluxograma**, *Novo fluxograma* abre uma aba de desenho para mostrar o percurso da instalação, da alimentação até os quadros, pavimento a pavimento. O fluxograma é **livre**: as regras só avisam, nunca impedem. Cada fluxograma é uma vista (Trabalho ou Documentação), aparece no navegador *Vistas e folhas* em "Fluxogramas", é salvo no projeto (.seb) e vai para as pranchas (PDF, SVG e DXF pela prancha), em escala de 1:25 a 1:200.

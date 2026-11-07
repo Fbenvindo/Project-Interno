@@ -13,6 +13,7 @@ import { syncDraftIds, type DraftEntity } from "./draft";
 import { migrateViews, type ViewDef } from "./views";
 import type { SheetDef } from "./viewDrawing";
 import type { Discipline } from "./types";
+import type { BuildingProfile } from "./building";
 import type { ProjectChoices } from "./alternatives";
 import { normalizeInstall, withInstallDefaults, type ConduitInstall, type InstallSettings } from "./conduits";
 
@@ -46,6 +47,8 @@ export interface ProjectData {
   choices?: ProjectChoices;
   /** Medidas das formas de instalação no empreendimento. */
   installSettings?: InstallSettings;
+  /** Perfil do empreendimento (torres, pavimentos, alturas). */
+  profile?: BuildingProfile | null;
 }
 
 interface StoredCircuit {
@@ -89,6 +92,7 @@ export interface ProjectFile extends LocacaoFile {
   disciplinas?: Discipline[];
   marcas?: Record<string, string>;
   instalacoes?: InstallSettings;
+  empreendimento?: BuildingProfile;
   variantes?: Record<string, string>;
   vinculos?: { id: string; nome: string; caminho: string | null; disciplina: LinkMeta["discipline"]; visivel: boolean; transparente: boolean; alinhamento?: LinkMeta["align"] }[];
 }
@@ -134,6 +138,7 @@ export function serializeProject(data: ProjectData, cs: CoordinateSystem, modelN
     ...(data.choices && Object.keys(data.choices.brands).length ? { marcas: data.choices.brands } : {}),
     ...(data.choices && Object.keys(data.choices.variants).length ? { variantes: data.choices.variants } : {}),
     ...(data.installSettings ? { instalacoes: data.installSettings } : {}),
+    ...(data.profile?.floors.length || (data.profile?.towers.length ?? 0) > 1 ? { empreendimento: data.profile! } : {}),
     ...(data.links?.length
       ? { vinculos: data.links.map((l) => ({ id: l.id, nome: l.name, caminho: l.path, disciplina: l.discipline, visivel: l.visible, transparente: l.translucent, ...(l.align ? { alinhamento: l.align } : {}) })) }
       : {}),
@@ -190,5 +195,6 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
     disciplines: Array.isArray(file.disciplinas) ? file.disciplinas : [],
     choices: { brands: file.marcas ?? {}, variants: file.variantes ?? {} },
     installSettings: withInstallDefaults(file.instalacoes),
+    profile: file.empreendimento && Array.isArray(file.empreendimento.floors) && Array.isArray(file.empreendimento.towers) ? file.empreendimento : null,
   };
 }

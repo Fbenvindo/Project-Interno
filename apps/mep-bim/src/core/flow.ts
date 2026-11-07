@@ -8,6 +8,7 @@
 import type { Prim } from "./plan/drawing";
 import type { P2 } from "./plan/section";
 import type { Discipline } from "./types";
+import { elevationText, floorElevations, floorLabel, type BuildingProfile } from "./building";
 
 export type FlowLinkKind = "mt" | "bt" | "barramento" | "emergencia" | "fv";
 
@@ -508,17 +509,31 @@ export interface FlowData {
   layout: "pavimentos" | "livre";
   /** Pavimentos de cima para baixo. */
   storeys: string[];
+  /** Dados de cada faixa (mesma ordem de `storeys`), vindos do perfil do empreendimento. */
+  levels?: FlowLevel[];
   bandH: number;
   towers: FlowTower[];
   blocks: FlowBlock[];
   links: FlowLink[];
 }
 
+/** Faixa de pavimento vinda do perfil do empreendimento. */
+export interface FlowLevel {
+  /** Nome do pavimento no perfil (sem a repetição). */
+  floor: string;
+  /** Cota (texto, ex.: "+3,00 a +54,00"). */
+  elevation?: string;
+  /** Comum a todas as torres. */
+  common?: boolean;
+  /** Torres que têm o pavimento (quando não é comum). */
+  towers?: string[];
+}
+
 export const LABEL_W = 3.2;
 export const HEADER_H = 1.2;
 
-export function newFlow(discipline: Discipline, storeysBottomUp: string[]): FlowData {
-  return {
+export function newFlow(discipline: Discipline, storeysBottomUp: string[], profile?: BuildingProfile | null): FlowData {
+  const base: FlowData = {
     discipline,
     layout: "pavimentos",
     storeys: [...storeysBottomUp].reverse(),
@@ -527,6 +542,59 @@ export function newFlow(discipline: Discipline, storeysBottomUp: string[]): Flow
     blocks: [],
     links: [],
   };
+  return profile?.floors.length ? applyProfile(base, profile) : base;
+}
+
+/** X inicial da coluna de cada torre. */
+export function towerX0(f: FlowData): Map<string, number> {
+  const m = new Map<string, number>();
+  let x = LABEL_W;
+  for (const t of f.towers) (m.set(t.id, x), (x += t.width));
+  return m;
+}
+
+/** A torre tem o pavimento da faixa i? (sem dados do perfil: sim) */
+export function levelHasTower(f: FlowData, i: number, towerId: string): boolean {
+  const lv = f.levels?.[i];
+  if (!lv || lv.common || !lv.towers) return true;
+  return lv.towers.includes(towerId);
+}
+
+/**
+ * Faixas e colunas a partir do perfil do empreendimento. Os blocos já desenhados ficam no
+ * mesmo pavimento (pelo nome) e na mesma torre (pelo id), na mesma posição dentro da célula.
+ */
+export function applyProfile(f: FlowData, p: BuildingProfile): FlowData {
+  const el = floorElevations(p);
+  const topDown = p.floors.map((fl, i) => ({ fl, e: el[i] })).reverse();
+  const storeys = topDown.map(({ fl }) => floorLabel(fl));
+  const levels: FlowLevel[] = topDown.map(({ fl, e }) => ({ floor: fl.name, elevation: elevationText(fl, e), common: fl.common, towers: fl.common ? undefined : [...fl.towers] }));
+  const oldWidth = new Map(f.towers.map((t) => [t.id, t.width]));
+  const towers: FlowTower[] = p.towers.map((t) => ({ id: t.id, name: t.name, width: oldWidth.get(t.id) ?? 16 }));
+  const next: FlowData = { ...f, storeys, levels, towers };
+  if (f.layout !== "pavimentos") return next;
+  const oldX0 = towerX0(f);
+  const newX0 = towerX0(next);
+  const indexOf = (name: string | null) => {
+    if (!name) return -1;
+    const i = storeys.indexOf(name);
+    if (i >= 0) return i;
+    const base = f.levels?.[f.storeys.indexOf(name)]?.floor ?? name;
+    return levels.findIndex((l) => l.floor === base || l.floor === name);
+  };
+  const blocks = f.blocks.map((b) => {
+    const r = blockRect(b);
+    // Barramento: pela faixa do topo; demais: pela faixa do centro.
+    const refY = isBus(b) ? r.y + 0.01 : r.y + r.h / 2;
+    const oi = Math.floor((refY - HEADER_H) / f.bandH);
+    const ni = oi >= 0 && oi < f.storeys.length ? indexOf(f.storeys[oi]) : -1;
+    let { x, y } = b;
+    if (ni >= 0) y = Math.round((HEADER_H + ni * next.bandH + (b.y - (HEADER_H + oi * f.bandH))) * 10) / 10;
+    const t = towerAt(f, r.x + r.w / 2);
+    if (t && newX0.has(t.id)) x = Math.round((newX0.get(t.id)! + (b.x - oldX0.get(t.id)!)) * 10) / 10;
+    return x === b.x && y === b.y ? b : { ...b, x, y };
+  });
+  return { ...next, blocks };
 }
 
 let seq = 0;
@@ -713,17 +781,29 @@ export function flowPrims(f: FlowData, opt: FlowDrawOptions = {}): Prim[] {
   const W = flowWidth(f);
   if (f.layout === "pavimentos" && f.storeys.length) {
     const H = HEADER_H + f.storeys.length * f.bandH;
-    // Colunas por torre
-    let x0 = LABEL_W;
-    for (const t of f.towers) {
-      out.push({ t: "text", p: P(x0 + t.width / 2, HEADER_H * 0.6), text: t.name.toUpperCase(), height: mm(4), anchor: "middle", color: "#334155", layer: "FLUXO-FAIXAS" });
-      x0 += t.width;
-      out.push({ t: "line", a: P(x0, 0.2), b: P(x0, H), weight: 0.18, color: "#94a3b8", layer: "FLUXO-FAIXAS", dashed: true });
-    }
+    // Colunas por torre (nomes no topo)
+    const x0s = towerX0(f);
+    for (const t of f.towers)
+      out.push({ t: "text", p: P(x0s.get(t.id)! + t.width / 2, HEADER_H * 0.6), text: t.name.toUpperCase(), height: mm(4), anchor: "middle", color: "#334155", layer: "FLUXO-FAIXAS" });
     f.storeys.forEach((s, i) => {
       const y0 = HEADER_H + i * f.bandH;
+      const lv = f.levels?.[i];
       if (i % 2 === 0) out.push({ t: "poly", pts: [P(0, y0), P(W, y0), P(W, y0 + f.bandH), P(0, y0 + f.bandH)], closed: true, weight: 0, fill: "#f4f6f9", color: "#f4f6f9", layer: "FLUXO-FAIXAS" });
+      // Pavimento que uma torre não tem: célula cinza.
+      for (const t of f.towers) {
+        if (levelHasTower(f, i, t.id)) continue;
+        const x0 = x0s.get(t.id)!;
+        out.push({ t: "poly", pts: [P(x0, y0), P(x0 + t.width, y0), P(x0 + t.width, y0 + f.bandH), P(x0, y0 + f.bandH)], closed: true, weight: 0, fill: "#e5e7eb", color: "#e5e7eb", layer: "FLUXO-FAIXAS" });
+        out.push({ t: "text", p: P(x0 + t.width / 2, y0 + f.bandH / 2), text: `${t.name} não tem este pavimento`, height: mm(2.2), anchor: "middle", color: "#94a3b8", layer: "FLUXO-FAIXAS" });
+      }
+      // Divisas entre torres: só nos pavimentos que não são comuns.
+      if (!lv?.common) for (const t of f.towers.slice(0, -1)) {
+        const x = x0s.get(t.id)! + t.width;
+        out.push({ t: "line", a: P(x, y0), b: P(x, y0 + f.bandH), weight: 0.18, color: "#94a3b8", layer: "FLUXO-FAIXAS", dashed: true });
+      }
       out.push({ t: "text", p: P(0.25, y0 + 0.55), text: s.toUpperCase(), height: mm(3), anchor: "start", color: "#334155", layer: "FLUXO-FAIXAS" });
+      if (lv?.elevation) out.push({ t: "text", p: P(0.25, y0 + 0.95), text: lv.elevation, height: mm(2.4), anchor: "start", color: "#64748b", layer: "FLUXO-FAIXAS" });
+      if (lv?.common && f.towers.length > 1) out.push({ t: "text", p: P(0.25, y0 + 1.3), text: "comum às torres", height: mm(2.2), anchor: "start", color: "#0e7490", layer: "FLUXO-FAIXAS" });
       out.push({ t: "line", a: P(0, y0), b: P(W, y0), weight: 0.13, color: "#cbd5e1", layer: "FLUXO-FAIXAS", dashed: true });
     });
     out.push({ t: "line", a: P(0, H), b: P(W, H), weight: 0.13, color: "#cbd5e1", layer: "FLUXO-FAIXAS", dashed: true });
@@ -905,6 +985,13 @@ export function checkFlow(f: FlowData, ctx: FlowContext): FlowIssue[] {
     for (const l of inc)
       if (l.kind === "mt" && !d.acceptsMT) issues.push({ level: "aviso", text: `Média tensão chegando em ${tag(b)}: só painel de MT, cabine de medição MT ou transformador recebem MT.`, blockId: b.id });
     if (paved && d.symbol !== "barramento" && !blockStorey(f, b)) issues.push({ level: "aviso", text: `${tag(b)} está fora das faixas de pavimento.`, blockId: b.id });
+    if (paved && d.symbol !== "barramento") {
+      const r = blockRect(b);
+      const i = Math.floor((r.y + r.h / 2 - HEADER_H) / f.bandH);
+      const t = blockTower(f, b);
+      if (t && i >= 0 && i < f.storeys.length && !levelHasTower(f, i, t.id))
+        issues.push({ level: "aviso", text: `${tag(b)} está no ${f.storeys[i]} da ${t.name}, mas a ${t.name} não tem esse pavimento (perfil do empreendimento).`, blockId: b.id });
+    }
   }
 
   // Barramentos blindados: caixa direta (uma só) ou caixas de derivação (até 2 por andar).

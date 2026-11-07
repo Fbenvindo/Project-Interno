@@ -455,6 +455,13 @@ const P: Record<string, ReactNode> = {
       <path d="M4 4 L20 20" />
     </>
   ),
+  predio: (
+    <>
+      <rect x="3" y="8" width="8" height="13" />
+      <rect x="13" y="3" width="8" height="18" />
+      <path d="M5.5 11h3M5.5 14h3M5.5 17h3M15.5 6h3M15.5 9h3M15.5 12h3M15.5 15h3" />
+    </>
+  ),
   fluxo: (
     <>
       <rect x="3" y="3" width="7" height="5" rx="1" />

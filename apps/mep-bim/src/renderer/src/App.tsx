@@ -41,7 +41,8 @@ import { Ribbon } from "./shell/Ribbon";
 import { DrawAidsBar, useDrawAidsKeys } from "./shell/DrawAidsBar";
 import { useDrawAids } from "./desenho/drawAids";
 import { FlowCanvas, FlowPanel, FlowSidebar, type FlowMode, type FlowSel } from "./fluxo/FlowEditor";
-import { blockStorey as blockStoreyOf, checkFlow, newFlow, newFlowId, type FlowContext, type FlowData } from "../../core/flow";
+import { applyProfile, blockStorey as blockStoreyOf, checkFlow, newFlow, newFlowId, type FlowContext, type FlowData } from "../../core/flow";
+import { PerfilPanel } from "./shell/PerfilPanel";
 import { pointPowerVA } from "../../core/circuits";
 import { ParamsPanel } from "./shell/ParamsPanel";
 import { BibliotecaPanel } from "./library/BibliotecaPanel";
@@ -106,6 +107,7 @@ const TOOL_HINT: Record<ToolSpec["kind"], string> = {
   vinculos: "Modelos de outras disciplinas sobrepostos ao principal, pelas coordenadas do projeto",
   coordenadas: "Ponto base, survey point, sistema de referência e norte do projeto",
   instalacoes: "Medidas de cada forma de instalação dos eletrodutos neste empreendimento",
+  perfil: "Torres, pavimentos comuns ou por torre, alturas e cotas do empreendimento",
   desenho: "Siga as instruções sobre a planta · Enter conclui · Esc cancela",
 };
 
@@ -1174,7 +1176,7 @@ export function App() {
   const selectedOne = selection.length === 1 ? (elementById.get(selection[0]) ?? null) : null;
   const viewer = viewerRef.current;
   // Sem ferramenta ativa (seleção), o painel da direita some: as propriedades ficam na coluna esquerda.
-  const rightWidth = view === "fluxograma" && tool.kind === "propriedades" ? 380 : tool.kind === "propriedades" ? 0 : tool.kind === "pranchas" ? 400 : tool.kind === "programa" ? 620 : 460;
+  const rightWidth = view === "fluxograma" && tool.kind === "propriedades" ? 380 : tool.kind === "propriedades" ? 0 : tool.kind === "pranchas" ? 400 : tool.kind === "programa" ? 620 : tool.kind === "perfil" ? 640 : 460;
   const resolveCeiling = useMemo(() => (viewer && model ? makeCeilingResolver(viewer, elementById, model.storeyLevels) : null), [viewer, model, elementById]);
   const slabAt = useMemo(() => (viewer && model ? makeSlabProbe(viewer, elementById, model.storeyLevels) : null), [viewer, model, elementById]);
   const projectName = (fileName ?? "").replace(/\.ifc$/i, "");
@@ -1205,7 +1207,7 @@ export function App() {
       kind: "fluxograma",
       section: "trabalho",
       scale: 50,
-      flow: newFlow("eletrica", model.storeys),
+      flow: newFlow("eletrica", model.storeys, store.profile),
     };
     store.setViews((l) => [...l, v]);
     openFlowRef.current(v);
@@ -1269,7 +1271,26 @@ export function App() {
   };
 
   const rightPanel = () => {
-    if (view === "fluxograma" && flowDef?.flow)
+    if (tool.kind === "perfil")
+      return (
+        <PerfilPanel
+          profile={store.profile}
+          onChange={store.setProfile}
+          modelStoreys={
+            model
+              ? model.storeyLevels.map((s) => ({ name: s.name, elevation: Math.round(model.coordinates.worldToIfc([0, s.level, 0])[2] * 1000) / 1000 }))
+              : []
+          }
+          flowCount={store.views.filter((v) => v.kind === "fluxograma").length}
+          onApplyToFlows={() => {
+            const p = store.profile;
+            if (!p) return;
+            store.setViews((l) => l.map((v) => (v.kind === "fluxograma" && v.flow ? { ...v, flow: applyProfile(v.flow, p) } : v)));
+            files.setMessage("Perfil do empreendimento aplicado aos fluxogramas.");
+          }}
+        />
+      );
+    if (view === "fluxograma" && flowDef?.flow && tool.kind === "propriedades")
       return (
         <FlowPanel
           view={flowDef}
@@ -1278,6 +1299,9 @@ export function App() {
           onRename={(name) => updateView({ ...flowDef, name })}
           onSection={(section) => updateView({ ...flowDef, section })}
           onScale={(scale) => updateView({ ...flowDef, scale })}
+          hasProfile={!!store.profile?.floors.length}
+          onApplyProfile={() => store.profile && updateFlowOf(flowDef.id, (f) => applyProfile(f, store.profile!))}
+          onEditProfile={() => chooseTool({ kind: "perfil" })}
           sel={flowSel}
           setSel={setFlowSel}
           issues={flowIssues}

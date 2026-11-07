@@ -487,6 +487,9 @@ interface PanelProps {
   onRename: (name: string) => void;
   onSection: (s: ViewDef["section"]) => void;
   onScale: (scale: number) => void;
+  hasProfile: boolean;
+  onApplyProfile: () => void;
+  onEditProfile: () => void;
   sel: FlowSel;
   setSel: (s: FlowSel) => void;
   issues: FlowIssue[];
@@ -499,7 +502,7 @@ interface PanelProps {
 const fmtKva = (va: number) => `${(va / 1000).toFixed(1).replace(".", ",")} kVA`;
 const LEVEL_ICON = { erro: "⛔", aviso: "⚠", info: "ℹ" } as const;
 
-export function FlowPanel({ view, flow, update, onRename, onSection, onScale, sel, setSel, issues, ctx, modelStoreys, onLocate, onShowBoard }: PanelProps) {
+export function FlowPanel({ view, flow, update, onRename, onSection, onScale, hasProfile, onApplyProfile, onEditProfile, sel, setSel, issues, ctx, modelStoreys, onLocate, onShowBoard }: PanelProps) {
   const block = sel?.kind === "block" ? flow.blocks.find((b) => b.id === sel.id) : undefined;
   const link = sel?.kind === "link" ? flow.links.find((l) => l.id === sel.id) : undefined;
   const setBlock = (patch: Partial<FlowBlock>, key?: string | null) => block && update((f) => ({ ...f, blocks: f.blocks.map((b) => (b.id === block.id ? { ...b, ...patch } : b)) }), key === undefined ? `bloco:${block.id}` : key);
@@ -560,7 +563,7 @@ export function FlowPanel({ view, flow, update, onRename, onSection, onScale, se
           </div>
         </section>
       ) : (
-        <FlowSettings view={view} flow={flow} update={update} onRename={onRename} onSection={onSection} onScale={onScale} modelStoreys={modelStoreys} />
+        <FlowSettings view={view} flow={flow} update={update} onRename={onRename} onSection={onSection} onScale={onScale} modelStoreys={modelStoreys} hasProfile={hasProfile} onApplyProfile={onApplyProfile} onEditProfile={onEditProfile} />
       )}
 
       <section className="card">
@@ -794,6 +797,9 @@ function FlowSettings({
   onSection,
   onScale,
   modelStoreys,
+  hasProfile,
+  onApplyProfile,
+  onEditProfile,
 }: {
   view: ViewDef;
   flow: FlowData;
@@ -802,10 +808,20 @@ function FlowSettings({
   onSection: (s: ViewDef["section"]) => void;
   onScale: (scale: number) => void;
   modelStoreys: string[];
+  hasProfile: boolean;
+  onApplyProfile: () => void;
+  onEditProfile: () => void;
 }) {
   const [newStorey, setNewStorey] = useState("");
   const setTowers = (fn: (t: FlowData["towers"]) => FlowData["towers"]) => update((f) => ({ ...f, towers: fn(f.towers) }), "torres");
   const setStoreys = (fn: (s: string[]) => string[]) => update((f) => ({ ...f, storeys: fn(f.storeys) }), "pavimentos");
+  /** Altera faixas e os dados do perfil junto (mesma ordem). */
+  type Row = { s: string; lv?: NonNullable<FlowData["levels"]>[number] };
+  const setRows = (fn: (rows: Row[]) => Row[]) =>
+    update((f) => {
+      const rows = fn(f.storeys.map((s, i) => ({ s, lv: f.levels?.[i] })));
+      return { ...f, storeys: rows.map((r) => r.s), levels: f.levels ? rows.map((r) => r.lv ?? { floor: r.s }) : undefined };
+    }, "pavimentos");
   return (
     <>
       <section className="card">
@@ -871,18 +887,24 @@ function FlowSettings({
       <section className="card">
         <div className="panel-head">
           <h3>Pavimentos ({flow.storeys.length})</h3>
-          <button className="link" title="Usa os pavimentos do modelo, de cima para baixo" onClick={() => setStoreys(() => [...modelStoreys].reverse())}>
-            do modelo
-          </button>
+          <span>
+            <button className="link" title="Faixas e torres pelo perfil do empreendimento (torres, pavimentos comuns, alturas)" disabled={!hasProfile} onClick={onApplyProfile}>
+              do perfil
+            </button>
+            {" · "}
+            <button className="link" title="Usa os pavimentos do modelo, de cima para baixo" onClick={() => update((f) => ({ ...f, storeys: [...modelStoreys].reverse(), levels: undefined }), "pavimentos")}>
+              do modelo
+            </button>
+          </span>
         </div>
         <ul className="sel-list">
           {flow.storeys.map((s, i) => (
             <li key={`${s}${i}`}>
               <input className="grow flow-name" value={s} onChange={(e) => setStoreys((l) => l.map((x, j) => (j === i ? e.target.value : x)))} />
-              <button className="link" title="Subir" disabled={i === 0} onClick={() => setStoreys((l) => (i ? [...l.slice(0, i - 1), l[i], l[i - 1], ...l.slice(i + 1)] : l))}>
+              <button className="link" title="Subir" disabled={i === 0} onClick={() => setRows((l) => (i ? [...l.slice(0, i - 1), l[i], l[i - 1], ...l.slice(i + 1)] : l))}>
                 ↑
               </button>
-              <button className="link danger-link" onClick={() => setStoreys((l) => l.filter((_, j) => j !== i))}>
+              <button className="link danger-link" onClick={() => setRows((l) => l.filter((_, j) => j !== i))}>
                 ✕
               </button>
             </li>
@@ -894,14 +916,20 @@ function FlowSettings({
             className="btn small-btn"
             disabled={!newStorey.trim()}
             onClick={() => {
-              setStoreys((l) => [newStorey.trim(), ...l]);
+              setRows((l) => [{ s: newStorey.trim() }, ...l]);
               setNewStorey("");
             }}
           >
             + no topo
           </button>
         </div>
-        <p className="muted small">Faixas de cima para baixo. Os blocos ficam no pavimento da faixa em que estão.</p>
+        <p className="muted small">
+          Faixas de cima para baixo. Os blocos ficam no pavimento da faixa em que estão. Torres, pavimentos comuns e alturas vêm do{" "}
+          <button className="link" onClick={onEditProfile}>
+            perfil do empreendimento
+          </button>
+          .
+        </p>
       </section>
     </>
   );

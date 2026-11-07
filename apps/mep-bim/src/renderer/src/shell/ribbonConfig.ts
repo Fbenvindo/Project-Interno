@@ -32,6 +32,7 @@ export type ToolSpec =
   | { kind: "vinculos" }
   | { kind: "coordenadas" }
   | { kind: "instalacoes" }
+  | { kind: "perfil" }
   | { kind: "desenho"; cmd: DraftCmd }
   | { kind: "programa"; section: "tipos" | "ambientes" };
 
@@ -248,6 +249,10 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
       ],
     },
     {
+      label: "Empreendimento",
+      buttons: [{ key: "perfil", label: "Perfil do empreendimento", icon: "predio", tool: { kind: "perfil" } }],
+    },
+    {
       label: "Consulta",
       buttons: [
         { key: "selecionar", label: "Selecionar", icon: "selecionar", tool: { kind: "propriedades" }, needsModel: true },
@@ -309,6 +314,7 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
       buttons: [
         { key: "fluxogramas", label: "Fluxogramas", icon: "fluxo", action: "fluxogramas", needsModel: true },
         { key: "novo-fluxograma", label: "Novo fluxograma", icon: "fluxoNovo", action: "novoFluxograma", needsModel: true },
+        { key: "perfil-el", label: "Perfil do empreendimento", icon: "predio", tool: { kind: "perfil" } },
       ],
     },
   ],

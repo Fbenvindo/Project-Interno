@@ -2524,3 +2524,66 @@ h3 {
   flex: none;
   white-space: nowrap;
 }
+
+/* ---- Perfil do empreendimento ---- */
+.perfil-table {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 8px 0;
+}
+.perfil-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46px 58px 112px 44px minmax(70px, auto) 62px;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.perfil-row.head {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.perfil-row.common {
+  background: var(--sel-bg);
+}
+.perfil-row input[type="number"],
+.perfil-row input:not([type]),
+.perfil-name {
+  min-width: 0;
+  width: 100%;
+  padding: 3px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text);
+}
+.perfil-row input[type="checkbox"] {
+  justify-self: center;
+}
+.perfil-elev {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.perfil-towers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+.perfil-tower {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+}
+.perfil-actions {
+  display: inline-flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.perfil-problems {
+  color: var(--warn-text);
+  margin: 6px 0;
+  padding-left: 16px;
+}
