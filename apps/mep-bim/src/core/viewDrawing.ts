@@ -1,5 +1,6 @@
 // Desenho de uma vista (planta, ampliação ou corte) para a folha e o DXF, aplicando as regras
 // da seção: em Documentação, só as disciplinas do projeto e, em meio-tom, as de referência.
+import { flowPrims } from "./flow";
 import type { PullBox } from "./conduits";
 import type { DraftEntity } from "./draft";
 import { draftPrims } from "./draft";
@@ -31,6 +32,11 @@ export interface ModelContext {
 }
 
 export function viewDrawing(view: ViewDef, ctx: ModelContext): PlanDrawing | null {
+  if (view.kind === "fluxograma") {
+    if (!view.flow) return null;
+    const prims = flowPrims(view.flow, { legend: true });
+    return { prims, bounds: boundsOf(prims), legend: [], scale: view.scale, storey: "", cutHeight: 0 };
+  }
   const f = viewFilter(view, ctx.projectDisciplines);
   if (view.kind === "corte" && view.cut) {
     const d = buildSection({
@@ -84,7 +90,7 @@ export function viewSubtitle(view: ViewDef): string {
   const s = `ESCALA 1:${view.scale}`;
   if (view.kind === "planta") return `${s} · corte a ${(view.cutHeight ?? 1.2).toFixed(2).replace(".", ",")} m do piso`;
   if (view.kind === "corte" && view.cut) return `${s} · profundidade ${view.cut.depth.toFixed(1).replace(".", ",")} m`;
-  if (view.kind === "3d") return "SEM ESCALA";
+  if (view.kind === "3d" || view.kind === "fluxograma") return "SEM ESCALA";
   return s;
 }
 

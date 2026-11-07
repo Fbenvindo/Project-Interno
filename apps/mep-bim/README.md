@@ -303,6 +303,36 @@ Comandos de desenho e edição na planta do pavimento, no estilo dos programas d
 
 Os desenhos ficam no pavimento em que foram feitos e são salvos no arquivo do projeto. Também entram na prancha, no PDF/SVG e no DXF (camadas `ANOT-DESENHO`, `ANOT-COTAS` e `ANOT-TEXTOS`). Ctrl+Z desfaz.
 
+### Fluxogramas (Elétrica)
+
+Em **Elétrica › Fluxograma**, *Novo fluxograma* abre uma aba de desenho para mostrar o percurso da instalação, da alimentação até os quadros, pavimento a pavimento. O fluxograma é **livre**: as regras só avisam, nunca impedem. Cada fluxograma é uma vista (Trabalho ou Documentação), aparece no navegador *Vistas e folhas* em "Fluxogramas", é salvo no projeto (.seb) e vai para as pranchas (PDF, SVG e DXF pela prancha), em escala de 1:25 a 1:200.
+
+- **Blocos** (paleta à esquerda; arraste para o desenho, ou clique no bloco e depois no desenho, com Shift para colocar vários):
+  1. Alimentação: concessionária MT/BT, cabine de medição MT, entrada BT.
+  2. Distribuição: caixa de passagem, chave seccionadora.
+  3. Subestação: painel de média tensão, transformador (kVA, primário, secundário, ligação, impedância, tipo).
+  4. Centro de medição convencional.
+  5. Barramento blindado, caixa de derivação (cofre) e caixas **MEC II, IV, VI, IX e XII** (2, 4, 6, 9 e 12 medidores).
+  6. Grupo gerador e QTA.
+  7. Módulos fotovoltaicos, string box e inversor.
+  8. QGBT e quadros de distribuição (QD/QL/QT; um bloco pode representar vários quadros iguais).
+  9. Quadro de bombas, CCM e quadro de elevadores.
+
+  Há também *Texto* para anotações.
+- **Por pavimento:** faixas de cima para baixo, vindas do modelo e editáveis (acrescentar, renomear, reordenar), e colunas por **torre** (várias torres). O bloco fica no pavimento da faixa em que está. O barramento blindado é vertical: puxe as pontas para vencer os pavimentos. Pode haver vários barramentos. *Livre* tira as faixas, e *Auto-organizar* centraliza os blocos nas faixas.
+- **Ligar:** clique no bloco de origem e depois no de destino; o comando segue ligando a partir do destino, e Esc encerra. O tipo sai do bloco de origem: média tensão até o transformador, depois BT; emergência do gerador; fotovoltaico. O tipo é editável, assim como o rótulo do cabo ou barramento e o sentido. Cada tipo tem cor própria, e a legenda entra no desenho.
+- **Conferência** (painel direito), com marcador vermelho ou laranja no bloco:
+  - **Caixa MEC direto no barramento:** só uma caixa por barramento.
+  - **Com caixas de derivação:** até 2 caixas por andar no mesmo barramento e no máximo 2 por derivação. A derivação deve sair do barramento, ficar num pavimento que o barramento alcança, e a MEC deve estar no mesmo andar da derivação.
+  - **Medidores:** a quantidade de quadros ligados não pode passar dos medidores da caixa ou do centro de medição.
+  - **Média tensão:** só chega em painel MT, cabine de medição MT ou transformador.
+  - **Alimentação:** avisa blocos sem alimentação e blocos fora das faixas.
+- **Ligação com o modelo:**
+  - **Vincular:** quadros, QGBT e quadros de motores se vinculam ao quadro locado. A conferência sugere vincular quando as etiquetas batem.
+  - **Locar no modelo:** abre a locação do quadro no pavimento do bloco. O quadro locado fica vinculado ao bloco e recebe a mesma etiqueta.
+  - **Avisos do modelo:** vínculo perdido, quadro locado em outro pavimento e quadros do modelo que não aparecem no fluxograma.
+  - **Cargas:** o bloco mostra a carga instalada dos circuitos do quadro e a carga a jusante. Em transformadores e geradores, também o carregamento, com aviso quando passa da potência.
+
 ### Traçado de tubulações e eletrodutos
 
 Na aba **Traçado**, escolha o tipo (eletroduto, eletrocalha, água fria…), a bitola, o sistema, o circuito e a **elevação de trabalho** (altura acima do piso em que os trechos horizontais correm, por exemplo logo abaixo da laje ou do forro).

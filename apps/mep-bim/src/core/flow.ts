@@ -1,0 +1,1027 @@
+// Fluxogramas das instalações (começando pela elétrica): o percurso da energia desde a
+// alimentação até os quadros, desenhado livremente pelo usuário com blocos e ligações,
+// em faixas por pavimento e colunas por torre. Depois de pronto, o fluxograma orienta o
+// projeto e é conferido com o modelo (quadros locados, circuitos e cargas).
+//
+// Coordenadas do fluxograma: "metros de desenho" com Y para baixo (como na tela); na folha,
+// a escala 1:100 faz 1 unidade = 10 mm de papel.
+import type { Prim } from "./plan/drawing";
+import type { P2 } from "./plan/section";
+import type { Discipline } from "./types";
+
+export type FlowLinkKind = "mt" | "bt" | "barramento" | "emergencia" | "fv";
+
+export const LINK_LABEL: Record<FlowLinkKind, string> = {
+  mt: "Média tensão",
+  bt: "Alimentador BT",
+  barramento: "Barramento blindado",
+  emergencia: "Emergência (gerador)",
+  fv: "Fotovoltaico",
+};
+
+export const LINK_STYLE: Record<FlowLinkKind, { color: string; weight: number; dashed?: boolean }> = {
+  mt: { color: "#7c3aed", weight: 0.7 },
+  bt: { color: "#1e3a8a", weight: 0.5 },
+  barramento: { color: "#ea580c", weight: 0.9 },
+  emergencia: { color: "#dc2626", weight: 0.5, dashed: true },
+  fv: { color: "#16a34a", weight: 0.5 },
+};
+
+export interface FlowParamDef {
+  key: string;
+  label: string;
+  unit?: string;
+  default: string | number;
+  options?: string[];
+}
+
+export type FlowSymbol =
+  | "rede"
+  | "medicao"
+  | "painel"
+  | "trafo"
+  | "quadro"
+  | "barramento"
+  | "derivacao"
+  | "mec"
+  | "gerador"
+  | "qta"
+  | "fv"
+  | "inversor"
+  | "motor"
+  | "caixa"
+  | "texto";
+
+export interface FlowBlockDef {
+  id: string;
+  /** Grupo da paleta (1 a 9, como no pedido; 0 = anotação). */
+  group: number;
+  label: string;
+  tagPrefix: string;
+  /** Tamanho (unidades de desenho). */
+  w: number;
+  h: number;
+  /** Cor do traço (o fundo é uma versão clara). */
+  color: string;
+  symbol: FlowSymbol;
+  /** Tipo das ligações que saem do bloco. */
+  out: FlowLinkKind;
+  params: FlowParamDef[];
+  /** Fonte de energia (não precisa ser alimentado). */
+  source?: boolean;
+  /** Quadro: pode ser vinculado a um quadro locado no modelo. */
+  board?: boolean;
+  /** Recebe média tensão. */
+  acceptsMT?: boolean;
+  /** Caixa de medição: quantidade de medidores. */
+  meters?: number;
+  /** Uma linha de resumo com os parâmetros principais. */
+  summary?: (p: Record<string, string | number>) => string;
+}
+
+export const FLOW_GROUPS: Record<number, string> = {
+  1: "Alimentação de energia",
+  2: "Distribuição dos alimentadores",
+  3: "Subestação",
+  4: "Centro de medição convencional",
+  5: "Barramento blindado e medição no andar",
+  6: "Geradores",
+  7: "Painéis fotovoltaicos",
+  8: "Quadros de iluminação e tomadas",
+  9: "Quadros de motores e bombas",
+  0: "Anotação",
+};
+
+const MT = "#7c3aed";
+const BT = "#1e3a8a";
+const BUS = "#ea580c";
+const EM = "#dc2626";
+const FV = "#16a34a";
+const MOT = "#b45309";
+
+const mec = (n: number, roman: string): FlowBlockDef => ({
+  id: `mec-${roman.toLowerCase()}`,
+  group: 5,
+  label: `Caixa MEC ${roman} (${n} medidores)`,
+  tagPrefix: "MEC",
+  w: 2.2,
+  h: 0.9,
+  color: BT,
+  symbol: "mec",
+  out: "bt",
+  meters: n,
+  params: [{ key: "disjuntor", label: "Disjuntor geral", unit: "A", default: n <= 4 ? 100 : 200 }],
+  summary: (p) => `${n} medidores${p.disjuntor ? ` · ${p.disjuntor} A` : ""}`,
+});
+
+const RAW_BLOCKS: FlowBlockDef[] = [
+  // 1) Alimentação de energia
+  {
+    id: "concessionaria-mt",
+    group: 1,
+    label: "Concessionária (média tensão)",
+    tagPrefix: "CONC",
+    w: 2.4,
+    h: 1,
+    color: MT,
+    symbol: "rede",
+    out: "mt",
+    source: true,
+    params: [{ key: "tensao", label: "Tensão", unit: "kV", default: 13.8 }],
+    summary: (p) => `Rede MT ${p.tensao} kV`,
+  },
+  {
+    id: "concessionaria-bt",
+    group: 1,
+    label: "Concessionária (baixa tensão)",
+    tagPrefix: "CONC",
+    w: 2.4,
+    h: 1,
+    color: BT,
+    symbol: "rede",
+    out: "bt",
+    source: true,
+    params: [{ key: "tensao", label: "Tensão", unit: "V", default: "380/220" }],
+    summary: (p) => `Rede BT ${p.tensao} V`,
+  },
+  {
+    id: "medicao-mt",
+    group: 1,
+    label: "Cabine de medição MT",
+    tagPrefix: "CMT",
+    w: 2.2,
+    h: 1,
+    color: MT,
+    symbol: "medicao",
+    out: "mt",
+    acceptsMT: true,
+    params: [],
+    summary: () => "TC/TP da concessionária",
+  },
+  {
+    id: "entrada-bt",
+    group: 1,
+    label: "Entrada / medição BT",
+    tagPrefix: "ENT",
+    w: 2.2,
+    h: 1,
+    color: BT,
+    symbol: "medicao",
+    out: "bt",
+    params: [{ key: "disjuntor", label: "Disjuntor geral", unit: "A", default: 200 }],
+    summary: (p) => `Disj. ${p.disjuntor} A`,
+  },
+  // 2) Distribuição dos alimentadores
+  {
+    id: "caixa-passagem",
+    group: 2,
+    label: "Caixa de passagem",
+    tagPrefix: "CP",
+    w: 1.4,
+    h: 0.8,
+    color: BT,
+    symbol: "caixa",
+    out: "bt",
+    params: [{ key: "dimensao", label: "Dimensões", unit: "cm", default: "60×60×60" }],
+    summary: (p) => `${p.dimensao} cm`,
+  },
+  {
+    id: "seccionadora",
+    group: 2,
+    label: "Chave seccionadora / proteção geral",
+    tagPrefix: "CS",
+    w: 1.8,
+    h: 0.8,
+    color: BT,
+    symbol: "caixa",
+    out: "bt",
+    params: [{ key: "corrente", label: "Corrente", unit: "A", default: 630 }],
+    summary: (p) => `${p.corrente} A`,
+  },
+  // 3) Subestação
+  {
+    id: "painel-mt",
+    group: 3,
+    label: "Painel de média tensão",
+    tagPrefix: "PMT",
+    w: 2.2,
+    h: 1.2,
+    color: MT,
+    symbol: "painel",
+    out: "mt",
+    acceptsMT: true,
+    params: [
+      { key: "cubiculos", label: "Cubículos", default: 3 },
+      { key: "tensao", label: "Tensão", unit: "kV", default: 15 },
+    ],
+    summary: (p) => `${p.cubiculos} cubículos · ${p.tensao} kV`,
+  },
+  {
+    id: "transformador",
+    group: 3,
+    label: "Transformador",
+    tagPrefix: "TR",
+    w: 1.8,
+    h: 1.3,
+    color: MT,
+    symbol: "trafo",
+    out: "bt",
+    acceptsMT: true,
+    params: [
+      { key: "potencia", label: "Potência", unit: "kVA", default: 500 },
+      { key: "primario", label: "Primário", unit: "kV", default: 13.8 },
+      { key: "secundario", label: "Secundário", unit: "V", default: "380/220" },
+      { key: "ligacao", label: "Ligação", default: "Δ-Yn", options: ["Δ-Yn", "Y-Yn", "Δ-Δ"] },
+      { key: "impedancia", label: "Impedância", unit: "%", default: 5 },
+      { key: "tipo", label: "Tipo", default: "a seco", options: ["a seco", "a óleo"] },
+    ],
+    summary: (p) => `${p.potencia} kVA`,
+  },
+  // 4) Centro de medição convencional
+  {
+    id: "cm-convencional",
+    group: 4,
+    label: "Centro de medição convencional",
+    tagPrefix: "CM",
+    w: 2.8,
+    h: 1,
+    color: BT,
+    symbol: "mec",
+    out: "bt",
+    params: [
+      { key: "medidores", label: "Medidores", default: 6 },
+      { key: "disjuntor", label: "Disjuntor geral", unit: "A", default: 400 },
+    ],
+    summary: (p) => `${p.medidores} medidores · ${p.disjuntor} A`,
+  },
+  // 5) Barramento blindado e medição no andar
+  {
+    id: "barramento",
+    group: 5,
+    label: "Barramento blindado",
+    tagPrefix: "BB",
+    w: 0.5,
+    h: 6,
+    color: BUS,
+    symbol: "barramento",
+    out: "bt",
+    params: [
+      { key: "corrente", label: "Corrente nominal", unit: "A", default: 800 },
+      { key: "material", label: "Condutor", default: "alumínio", options: ["alumínio", "cobre"] },
+    ],
+    summary: (p) => `${p.corrente} A`,
+  },
+  {
+    id: "derivacao",
+    group: 5,
+    label: "Caixa de derivação (cofre)",
+    tagPrefix: "CD",
+    w: 1.2,
+    h: 0.7,
+    color: BUS,
+    symbol: "derivacao",
+    out: "bt",
+    params: [{ key: "corrente", label: "Corrente", unit: "A", default: 125 }],
+    summary: (p) => `${p.corrente} A`,
+  },
+  mec(2, "II"),
+  mec(4, "IV"),
+  mec(6, "VI"),
+  mec(9, "IX"),
+  mec(12, "XII"),
+  // 6) Geradores
+  {
+    id: "gerador",
+    group: 6,
+    label: "Grupo gerador",
+    tagPrefix: "GMG",
+    w: 1.8,
+    h: 1.2,
+    color: EM,
+    symbol: "gerador",
+    out: "emergencia",
+    source: true,
+    params: [
+      { key: "potencia", label: "Potência", unit: "kVA", default: 250 },
+      { key: "combustivel", label: "Combustível", default: "diesel", options: ["diesel", "gás"] },
+    ],
+    summary: (p) => `${p.potencia} kVA ${p.combustivel}`,
+  },
+  {
+    id: "qta",
+    group: 6,
+    label: "QTA (transferência automática)",
+    tagPrefix: "QTA",
+    w: 1.8,
+    h: 0.9,
+    color: EM,
+    symbol: "qta",
+    out: "emergencia",
+    params: [{ key: "corrente", label: "Corrente", unit: "A", default: 400 }],
+    summary: (p) => `${p.corrente} A`,
+  },
+  // 7) Painéis fotovoltaicos
+  {
+    id: "modulos-fv",
+    group: 7,
+    label: "Módulos fotovoltaicos",
+    tagPrefix: "FV",
+    w: 2.4,
+    h: 1,
+    color: FV,
+    symbol: "fv",
+    out: "fv",
+    source: true,
+    params: [
+      { key: "potencia", label: "Potência", unit: "kWp", default: 60 },
+      { key: "modulos", label: "Módulos", default: 110 },
+    ],
+    summary: (p) => `${p.potencia} kWp · ${p.modulos} módulos`,
+  },
+  {
+    id: "string-box",
+    group: 7,
+    label: "String box",
+    tagPrefix: "SB",
+    w: 1.8,
+    h: 0.9,
+    color: FV,
+    symbol: "caixa",
+    out: "fv",
+    params: [{ key: "tensao", label: "Tensão CC", unit: "V", default: 1000 }],
+    summary: (p) => `CC ${p.tensao} V`,
+  },
+  {
+    id: "inversor",
+    group: 7,
+    label: "Inversor",
+    tagPrefix: "INV",
+    w: 1.8,
+    h: 0.9,
+    color: FV,
+    symbol: "inversor",
+    out: "fv",
+    params: [
+      { key: "potencia", label: "Potência", unit: "kW", default: 50 },
+      { key: "saida", label: "Saída CA", unit: "V", default: 380 },
+    ],
+    summary: (p) => `${p.potencia} kW · CA ${p.saida} V`,
+  },
+  // 8) Quadros de iluminação e tomadas
+  {
+    id: "qgbt",
+    group: 8,
+    label: "QGBT (quadro geral de baixa tensão)",
+    tagPrefix: "QGBT",
+    w: 2.6,
+    h: 1.3,
+    color: BT,
+    symbol: "quadro",
+    out: "bt",
+    board: true,
+    params: [
+      { key: "corrente", label: "Barramento", unit: "A", default: 1000 },
+      { key: "tensao", label: "Tensão", unit: "V", default: "380/220" },
+    ],
+    summary: (p) => `${p.tensao} V · ${p.corrente} A`,
+  },
+  {
+    id: "qd",
+    group: 8,
+    label: "Quadro de distribuição (QD / QL / QT)",
+    tagPrefix: "QD",
+    w: 2,
+    h: 0.9,
+    color: BT,
+    symbol: "quadro",
+    out: "bt",
+    board: true,
+    params: [
+      { key: "tipo", label: "Tipo", default: "QD", options: ["QD", "QL", "QT", "QDL", "QDF"] },
+      { key: "quantidade", label: "Quantidade (unidades iguais)", default: 1 },
+      { key: "uso", label: "Atende", default: "" },
+    ],
+    summary: (p) => `${p.tipo}${Number(p.quantidade) > 1 ? ` ×${p.quantidade}` : ""}${p.uso ? ` · ${p.uso}` : ""}`,
+  },
+  // 9) Quadros de motores e bombas
+  {
+    id: "qfb",
+    group: 9,
+    label: "Quadro de bombas (QFB)",
+    tagPrefix: "QFB",
+    w: 2.4,
+    h: 0.9,
+    color: MOT,
+    symbol: "motor",
+    out: "bt",
+    board: true,
+    params: [
+      { key: "uso", label: "Bombas", default: "recalque" },
+      { key: "potencia", label: "Potência", unit: "cv", default: "2×5" },
+    ],
+    summary: (p) => `${p.uso} · ${p.potencia} cv`,
+  },
+  {
+    id: "ccm",
+    group: 9,
+    label: "CCM (centro de controle de motores)",
+    tagPrefix: "CCM",
+    w: 2.4,
+    h: 0.9,
+    color: MOT,
+    symbol: "motor",
+    out: "bt",
+    board: true,
+    params: [{ key: "potencia", label: "Potência", unit: "kW", default: 30 }],
+    summary: (p) => `${p.potencia} kW`,
+  },
+  {
+    id: "elevadores",
+    group: 9,
+    label: "Quadro de elevadores",
+    tagPrefix: "QE",
+    w: 2.2,
+    h: 0.9,
+    color: MOT,
+    symbol: "motor",
+    out: "bt",
+    board: true,
+    params: [{ key: "potencia", label: "Potência", unit: "kW", default: "2×15" }],
+    summary: (p) => `${p.potencia} kW`,
+  },
+  // Anotação
+  {
+    id: "texto",
+    group: 0,
+    label: "Texto",
+    tagPrefix: "",
+    w: 2.4,
+    h: 0.5,
+    color: "#334155",
+    symbol: "texto",
+    out: "bt",
+    source: true,
+    params: [],
+  },
+];
+
+/** Tamanhos finais (25% maiores que a base, para leitura na tela e na folha). */
+export const FLOW_BLOCKS: FlowBlockDef[] = RAW_BLOCKS.map((b) => (b.symbol === "barramento" || b.symbol === "texto" ? b : { ...b, w: Math.round(b.w * 12.5) / 10, h: Math.round(b.h * 12.5) / 10 }));
+
+export const FLOW_BLOCK_BY_ID: Record<string, FlowBlockDef> = Object.fromEntries(FLOW_BLOCKS.map((b) => [b.id, b]));
+
+export interface FlowBlock {
+  id: string;
+  kind: string;
+  tag: string;
+  /** Canto superior esquerdo (unidades de desenho, Y para baixo). */
+  x: number;
+  y: number;
+  /** Altura própria (barramento blindado: vence vários pavimentos). */
+  h?: number;
+  params: Record<string, string | number>;
+  /** Quadro locado no modelo (GlobalId do ponto). */
+  pointGuid?: string;
+  /** Texto livre (bloco de texto) ou observação. */
+  text?: string;
+}
+
+export interface FlowLink {
+  id: string;
+  from: string;
+  to: string;
+  kind: FlowLinkKind;
+  /** Cabo ou barramento (texto livre, ex.: "4×(1×120) mm²"). */
+  label?: string;
+}
+
+export interface FlowTower {
+  id: string;
+  name: string;
+  /** Largura da coluna (unidades). */
+  width: number;
+}
+
+export interface FlowData {
+  discipline: Discipline;
+  /** Por pavimento (faixas e colunas por torre) ou livre. */
+  layout: "pavimentos" | "livre";
+  /** Pavimentos de cima para baixo. */
+  storeys: string[];
+  bandH: number;
+  towers: FlowTower[];
+  blocks: FlowBlock[];
+  links: FlowLink[];
+}
+
+export const LABEL_W = 3.2;
+export const HEADER_H = 1.2;
+
+export function newFlow(discipline: Discipline, storeysBottomUp: string[]): FlowData {
+  return {
+    discipline,
+    layout: "pavimentos",
+    storeys: [...storeysBottomUp].reverse(),
+    bandH: 3,
+    towers: [{ id: "t1", name: "Torre A", width: 16 }],
+    blocks: [],
+    links: [],
+  };
+}
+
+let seq = 0;
+export const newFlowId = (p: string) => `${p}${Date.now().toString(36)}${(seq++).toString(36)}`;
+
+// ---- Geometria ------------------------------------------------------------------------------
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export function blockRect(b: FlowBlock): Rect {
+  const d = FLOW_BLOCK_BY_ID[b.kind];
+  return { x: b.x, y: b.y, w: d?.w ?? 2, h: b.h ?? d?.h ?? 1 };
+}
+
+export const isBus = (b: FlowBlock | undefined) => b?.kind === "barramento";
+
+/** Faixa (pavimento) e coluna (torre) que contêm o ponto; null fora delas ou no modo livre. */
+export function bandAt(f: FlowData, y: number): string | null {
+  if (f.layout !== "pavimentos") return null;
+  const i = Math.floor((y - HEADER_H) / f.bandH);
+  return i >= 0 && i < f.storeys.length ? f.storeys[i] : null;
+}
+
+export function towerAt(f: FlowData, x: number): FlowTower | null {
+  if (f.layout !== "pavimentos") return null;
+  let x0 = LABEL_W;
+  for (const t of f.towers) {
+    if (x >= x0 && x < x0 + t.width) return t;
+    x0 += t.width;
+  }
+  return null;
+}
+
+export const blockStorey = (f: FlowData, b: FlowBlock) => bandAt(f, b.y + blockRect(b).h / 2);
+export const blockTower = (f: FlowData, b: FlowBlock) => towerAt(f, b.x + blockRect(b).w / 2);
+
+/** Pavimentos que o barramento atravessa (do topo à base do bloco). */
+export function busStoreys(f: FlowData, b: FlowBlock): string[] {
+  const r = blockRect(b);
+  return f.storeys.filter((_, i) => {
+    const y0 = HEADER_H + i * f.bandH;
+    return r.y < y0 + f.bandH - 0.05 && r.y + r.h > y0 + 0.05;
+  });
+}
+
+export function flowWidth(f: FlowData): number {
+  const blocksX = Math.max(0, ...f.blocks.map((b) => b.x + blockRect(b).w + 1));
+  return Math.max(LABEL_W + f.towers.reduce((s, t) => s + t.width, 0), blocksX);
+}
+
+/** Pontos da ligação (ortogonal), da saída do bloco de origem à entrada do destino. */
+export function linkPath(a: FlowBlock, b: FlowBlock): P2[] {
+  const ra = blockRect(a);
+  const rb = blockRect(b);
+  const cy = (r: Rect) => r.y + r.h / 2;
+  const cx = (r: Rect) => r.x + r.w / 2;
+  const clampY = (bus: Rect, y: number) => Math.max(bus.y + 0.2, Math.min(bus.y + bus.h - 0.2, y));
+  // Barramento: a ligação sai ou chega na altura do outro bloco (derivação no andar).
+  if (isBus(a) || isBus(b)) {
+    const busR = isBus(a) ? ra : rb;
+    const other = isBus(a) ? rb : ra;
+    const y = clampY(busR, cy(other));
+    const right = cx(other) > cx(busR);
+    const busPt: P2 = [right ? busR.x + busR.w : busR.x, y];
+    const otherPt: P2 = [right ? other.x : other.x + other.w, cy(other)];
+    const mx = (busPt[0] + otherPt[0]) / 2;
+    const path: P2[] = Math.abs(y - cy(other)) < 1e-6 ? [busPt, otherPt] : [busPt, [mx, y], [mx, cy(other)], otherPt];
+    return isBus(a) ? path : path.reverse();
+  }
+  const gap = 0.2;
+  if (rb.x >= ra.x + ra.w + gap || rb.x + rb.w <= ra.x - gap) {
+    const toRight = rb.x >= ra.x + ra.w + gap;
+    const s: P2 = [toRight ? ra.x + ra.w : ra.x, cy(ra)];
+    const e: P2 = [toRight ? rb.x : rb.x + rb.w, cy(rb)];
+    if (Math.abs(s[1] - e[1]) < 1e-6) return [s, e];
+    const mx = (s[0] + e[0]) / 2;
+    return [s, [mx, s[1]], [mx, e[1]], e];
+  }
+  const down = cy(rb) > cy(ra);
+  const s: P2 = [cx(ra), down ? ra.y + ra.h : ra.y];
+  const e: P2 = [cx(rb), down ? rb.y : rb.y + rb.h];
+  if (Math.abs(s[0] - e[0]) < 1e-6) return [s, e];
+  const my = (s[1] + e[1]) / 2;
+  return [s, [s[0], my], [e[0], my], e];
+}
+
+/** Tipo da ligação pelo bloco de origem (média tensão até o transformador, etc.). */
+export function defaultLinkKind(from: FlowBlock, to: FlowBlock): FlowLinkKind {
+  const d = FLOW_BLOCK_BY_ID[from.kind];
+  if (isBus(from) || isBus(to)) return d?.out === "emergencia" ? "emergencia" : "bt";
+  if (d?.out === "mt" && !FLOW_BLOCK_BY_ID[to.kind]?.acceptsMT) return "mt";
+  return d?.out ?? "bt";
+}
+
+// ---- Desenho (primitivas: planta/folha/DXF) ---------------------------------------------------
+
+const light = (hex: string) => {
+  const [r, g, b] = [1, 3, 5].map((o) => parseInt(hex.slice(o, o + 2), 16));
+  const m = (v: number) => Math.round(v + (255 - v) * 0.9);
+  return `#${[m(r), m(g), m(b)].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+};
+
+/** Altura de texto: mm de papel → unidades de desenho (1:100; as primitivas usam a unidade do desenho). */
+const mm = (v: number) => v * 0.1;
+
+/** Y para cima nas primitivas. */
+const P = (x: number, y: number): P2 => [x, -y];
+
+function symbolPrims(d: FlowBlockDef, r: Rect, layer: string, id?: number): Prim[] {
+  const c = d.color;
+  const out: Prim[] = [];
+  const sx = r.x + 0.5;
+  const sy = r.y + r.h / 2;
+  const line = (a: P2, b: P2, w = 0.25): Prim => ({ t: "line", a: P(...a), b: P(...b), weight: w, color: c, layer, id });
+  switch (d.symbol) {
+    case "rede":
+      out.push({ t: "poly", pts: [P(sx - 0.25, sy + 0.25), P(sx, sy - 0.25), P(sx + 0.25, sy + 0.25)], closed: false, weight: 0.3, color: c, layer, id });
+      out.push(line([sx - 0.12, sy], [sx + 0.12, sy]));
+      break;
+    case "trafo":
+      out.push({ t: "circle", c: P(r.x + r.w / 2 - 0.18, r.y + 0.45), r: 0.3, weight: 0.35, color: MT, layer, id });
+      out.push({ t: "circle", c: P(r.x + r.w / 2 + 0.18, r.y + 0.45), r: 0.3, weight: 0.35, color: BT, layer, id });
+      break;
+    case "gerador":
+      out.push({ t: "circle", c: P(sx, sy), r: 0.3, weight: 0.35, color: c, layer, id });
+      out.push({ t: "poly", pts: [P(sx - 0.18, sy), P(sx - 0.09, sy - 0.1), P(sx, sy), P(sx + 0.09, sy + 0.1), P(sx + 0.18, sy)], closed: false, weight: 0.25, color: c, layer, id });
+      break;
+    case "painel":
+      for (let k = 0; k < 4; k++) out.push(line([r.x + 0.3 + k * 0.25, r.y + 0.2], [r.x + 0.3 + k * 0.25, r.y + 0.65], 0.18));
+      break;
+    case "mec":
+    case "medicao":
+      for (let k = 0; k < 3; k++) out.push(line([sx - 0.18, r.y + 0.22 + k * 0.18], [sx + 0.12, r.y + 0.22 + k * 0.18], 0.3));
+      break;
+    case "quadro":
+      out.push({ t: "poly", pts: [P(sx - 0.18, sy - 0.25), P(sx + 0.18, sy - 0.25), P(sx + 0.18, sy + 0.25), P(sx - 0.18, sy + 0.25)], closed: true, weight: 0.25, color: c, layer, id });
+      out.push({ t: "poly", pts: [P(sx - 0.18, sy - 0.25), P(sx + 0.18, sy - 0.25), P(sx + 0.18, sy + 0.25)], closed: true, weight: 0.1, fill: c, color: c, layer, id });
+      break;
+    case "qta":
+      out.push(line([sx - 0.2, sy - 0.15], [sx + 0.2, sy - 0.15]));
+      out.push(line([sx - 0.2, sy + 0.15], [sx + 0.2, sy + 0.15]));
+      out.push(line([sx + 0.2, sy - 0.15], [sx - 0.05, sy + 0.15]));
+      break;
+    case "fv":
+      for (let k = 0; k < 2; k++)
+        out.push({ t: "poly", pts: [P(sx - 0.3 + k * 0.32, sy - 0.18), P(sx - 0.05 + k * 0.32, sy - 0.18), P(sx - 0.12 + k * 0.32, sy + 0.18), P(sx - 0.37 + k * 0.32, sy + 0.18)], closed: true, weight: 0.2, color: c, layer, id });
+      break;
+    case "inversor":
+      out.push({ t: "poly", pts: [P(sx - 0.25, sy - 0.25), P(sx + 0.25, sy - 0.25), P(sx + 0.25, sy + 0.25), P(sx - 0.25, sy + 0.25)], closed: true, weight: 0.2, color: c, layer, id });
+      out.push(line([sx - 0.25, sy + 0.25], [sx + 0.25, sy - 0.25], 0.15));
+      break;
+    case "motor":
+      out.push({ t: "circle", c: P(sx, sy), r: 0.27, weight: 0.3, color: c, layer, id });
+      out.push({ t: "text", p: P(sx, sy + 0.1), text: "M", height: mm(2.2), anchor: "middle", color: c, layer, id });
+      break;
+    case "derivacao":
+      break;
+    case "caixa":
+      out.push({ t: "poly", pts: [P(sx - 0.2, sy - 0.2), P(sx + 0.2, sy - 0.2), P(sx + 0.2, sy + 0.2), P(sx - 0.2, sy + 0.2)], closed: true, weight: 0.2, color: c, layer, id });
+      out.push(line([sx - 0.2, sy - 0.2], [sx + 0.2, sy + 0.2], 0.12));
+      out.push(line([sx - 0.2, sy + 0.2], [sx + 0.2, sy - 0.2], 0.12));
+      break;
+    default:
+      break;
+  }
+  return out;
+}
+
+export interface FlowDrawOptions {
+  /** Id numérico de cena por bloco (para seleção no editor). */
+  idOf?: (blockId: string) => number | undefined;
+  /** Legenda das ligações. */
+  legend?: boolean;
+}
+
+/** Desenho do fluxograma em primitivas (Y para cima), para a tela, as folhas, o PDF e o DXF. */
+export function flowPrims(f: FlowData, opt: FlowDrawOptions = {}): Prim[] {
+  const out: Prim[] = [];
+  const W = flowWidth(f);
+  if (f.layout === "pavimentos" && f.storeys.length) {
+    const H = HEADER_H + f.storeys.length * f.bandH;
+    // Colunas por torre
+    let x0 = LABEL_W;
+    for (const t of f.towers) {
+      out.push({ t: "text", p: P(x0 + t.width / 2, HEADER_H * 0.6), text: t.name.toUpperCase(), height: mm(4), anchor: "middle", color: "#334155", layer: "FLUXO-FAIXAS" });
+      x0 += t.width;
+      out.push({ t: "line", a: P(x0, 0.2), b: P(x0, H), weight: 0.18, color: "#94a3b8", layer: "FLUXO-FAIXAS", dashed: true });
+    }
+    f.storeys.forEach((s, i) => {
+      const y0 = HEADER_H + i * f.bandH;
+      if (i % 2 === 0) out.push({ t: "poly", pts: [P(0, y0), P(W, y0), P(W, y0 + f.bandH), P(0, y0 + f.bandH)], closed: true, weight: 0, fill: "#f4f6f9", color: "#f4f6f9", layer: "FLUXO-FAIXAS" });
+      out.push({ t: "text", p: P(0.25, y0 + 0.55), text: s.toUpperCase(), height: mm(3), anchor: "start", color: "#334155", layer: "FLUXO-FAIXAS" });
+      out.push({ t: "line", a: P(0, y0), b: P(W, y0), weight: 0.13, color: "#cbd5e1", layer: "FLUXO-FAIXAS", dashed: true });
+    });
+    out.push({ t: "line", a: P(0, H), b: P(W, H), weight: 0.13, color: "#cbd5e1", layer: "FLUXO-FAIXAS", dashed: true });
+    out.push({ t: "line", a: P(LABEL_W, HEADER_H), b: P(LABEL_W, H), weight: 0.13, color: "#cbd5e1", layer: "FLUXO-FAIXAS" });
+  }
+  const byId = new Map(f.blocks.map((b) => [b.id, b]));
+  // Ligações (por baixo dos blocos)
+  for (const l of f.links) {
+    const a = byId.get(l.from);
+    const b = byId.get(l.to);
+    if (!a || !b) continue;
+    const st = LINK_STYLE[l.kind];
+    const pts = linkPath(a, b);
+    out.push({ t: "poly", pts: pts.map((q) => P(...q)), closed: false, weight: st.weight, color: st.color, layer: `FLUXO-LIG-${l.kind.toUpperCase()}`, dashed: st.dashed });
+    // Seta na chegada
+    const [p1, p2] = [pts[pts.length - 2], pts[pts.length - 1]];
+    const len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) || 1;
+    const u = [(p2[0] - p1[0]) / len, (p2[1] - p1[1]) / len];
+    const k = 0.22;
+    out.push({
+      t: "poly",
+      pts: [P(p2[0], p2[1]), P(p2[0] - u[0] * k - u[1] * k * 0.55, p2[1] - u[1] * k + u[0] * k * 0.55), P(p2[0] - u[0] * k + u[1] * k * 0.55, p2[1] - u[1] * k - u[0] * k * 0.55)],
+      closed: true,
+      weight: 0.1,
+      fill: st.color,
+      color: st.color,
+      layer: `FLUXO-LIG-${l.kind.toUpperCase()}`,
+    });
+    if (l.label) {
+      // Rótulo no trecho mais longo
+      let best = 0;
+      let bl = -1;
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const d = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+        if (d > bl) ((bl = d), (best = i));
+      }
+      const [s, e] = [pts[best], pts[best + 1]];
+      const vertical = Math.abs(e[0] - s[0]) < 1e-6;
+      out.push({
+        t: "text",
+        p: P((s[0] + e[0]) / 2 + (vertical ? -0.12 : 0), (s[1] + e[1]) / 2 - (vertical ? 0 : 0.12)),
+        text: l.label,
+        height: mm(2.1),
+        anchor: "middle",
+        angle: vertical ? Math.PI / 2 : 0,
+        color: "#475569",
+        layer: "FLUXO-TEXTOS",
+      });
+    }
+  }
+  // Blocos
+  for (const b of f.blocks) {
+    const d = FLOW_BLOCK_BY_ID[b.kind];
+    if (!d) continue;
+    const r = blockRect(b);
+    const id = opt.idOf?.(b.id);
+    const layer = `FLUXO-${d.group ? `G${d.group}` : "TEXTO"}`;
+    if (d.symbol === "texto") {
+      out.push({ t: "text", p: P(r.x, r.y + r.h * 0.7), text: b.text || "Texto", height: mm(2.5), anchor: "start", color: d.color, layer, id });
+      continue;
+    }
+    if (d.symbol === "barramento") {
+      out.push({ t: "poly", pts: [P(r.x, r.y), P(r.x + r.w, r.y), P(r.x + r.w, r.y + r.h), P(r.x, r.y + r.h)], closed: true, weight: 0.5, fill: "#fff7ed", color: d.color, layer, id });
+      out.push({ t: "line", a: P(r.x + r.w / 2, r.y + 0.1), b: P(r.x + r.w / 2, r.y + r.h - 0.1), weight: 0.25, color: d.color, layer, id });
+      out.push({ t: "text", p: P(r.x - 0.15, r.y + r.h / 2), text: `${b.tag} · ${d.summary?.(b.params) ?? ""}`, height: mm(2.4), anchor: "middle", angle: Math.PI / 2, color: "#9a3412", layer, id });
+      continue;
+    }
+    out.push({ t: "poly", pts: [P(r.x, r.y), P(r.x + r.w, r.y), P(r.x + r.w, r.y + r.h), P(r.x, r.y + r.h)], closed: true, weight: d.symbol === "quadro" && b.kind === "qgbt" ? 0.5 : 0.35, fill: light(d.color), color: d.color, layer, id });
+    if (d.symbol === "derivacao") out.push({ t: "poly", pts: [P(r.x, r.y), P(r.x + 0.35, r.y), P(r.x + 0.35, r.y + r.h), P(r.x, r.y + r.h)], closed: true, weight: 0.1, fill: d.color, color: d.color, layer, id });
+    out.push(...symbolPrims(d, r, layer, id));
+    const tx = d.symbol === "trafo" ? r.x + r.w / 2 : r.x + 0.9 + (r.w - 0.9) / 2;
+    const ty = d.symbol === "trafo" ? r.y + r.h - 0.55 : r.y + r.h / 2 - 0.08;
+    out.push({ t: "text", p: P(tx, ty), text: b.tag, height: mm(3.2), anchor: "middle", color: d.color, layer, id });
+    const sub = d.summary?.(b.params);
+    if (sub) out.push({ t: "text", p: P(tx, ty + 0.36), text: sub, height: mm(2.1), anchor: "middle", color: "#475569", layer, id });
+  }
+  if (opt.legend && f.links.length) {
+    const kinds = [...new Set(f.links.map((l) => l.kind))];
+    const H = f.layout === "pavimentos" ? HEADER_H + f.storeys.length * f.bandH : Math.max(0, ...f.blocks.map((b) => b.y + blockRect(b).h));
+    let x = 0.3;
+    const y = H + 0.7;
+    for (const k of kinds) {
+      const st = LINK_STYLE[k];
+      out.push({ t: "line", a: P(x, y), b: P(x + 1, y), weight: st.weight, color: st.color, layer: "FLUXO-LEGENDA", dashed: st.dashed });
+      out.push({ t: "text", p: P(x + 1.2, y + 0.06), text: LINK_LABEL[k], height: mm(2.4), anchor: "start", color: "#334155", layer: "FLUXO-LEGENDA" });
+      x += 1.8 + LINK_LABEL[k].length * 0.17;
+    }
+  }
+  return out;
+}
+
+// ---- Conferência (regras e modelo) ----------------------------------------------------------
+
+export type IssueLevel = "erro" | "aviso" | "info";
+
+export interface FlowIssue {
+  level: IssueLevel;
+  text: string;
+  blockId?: string;
+  /** Ação sugerida: locar o quadro no modelo, ou vincular ao quadro de mesma etiqueta. */
+  action?: { kind: "locar"; blockId: string } | { kind: "vincular"; blockId: string; pointGuid: string };
+}
+
+/** Quadro locado no modelo, com a carga dos circuitos dele. */
+export interface ModelBoard {
+  guid: string;
+  tag: string;
+  storey: string | null;
+  /** Carga instalada dos circuitos do quadro (VA). */
+  loadVA: number;
+}
+
+export interface FlowContext {
+  boards: ModelBoard[];
+}
+
+/** Blocos alimentados por um bloco (a jusante, sem repetir). */
+export function downstream(f: FlowData, fromId: string): FlowBlock[] {
+  const byId = new Map(f.blocks.map((b) => [b.id, b]));
+  const seen = new Set<string>([fromId]);
+  const out: FlowBlock[] = [];
+  const stack = [fromId];
+  while (stack.length) {
+    const id = stack.pop()!;
+    for (const l of f.links) {
+      if (l.from !== id || seen.has(l.to)) continue;
+      seen.add(l.to);
+      const b = byId.get(l.to);
+      if (b) (out.push(b), stack.push(b.id));
+    }
+  }
+  return out;
+}
+
+/** Quadro do modelo representado pelo bloco (vínculo explícito ou mesma etiqueta). */
+export function boardOf(b: FlowBlock, ctx: FlowContext): ModelBoard | undefined {
+  if (b.pointGuid) return ctx.boards.find((x) => x.guid === b.pointGuid);
+  return undefined;
+}
+
+/** Carga a jusante (VA) somada dos quadros vinculados ao modelo. */
+export function downstreamLoad(f: FlowData, blockId: string, ctx: FlowContext): { va: number; boards: number } {
+  const self = f.blocks.find((b) => b.id === blockId);
+  const list = [...(self ? [self] : []), ...downstream(f, blockId)];
+  let va = 0;
+  let boards = 0;
+  const seen = new Set<string>();
+  for (const b of list) {
+    const m = boardOf(b, ctx);
+    if (!m || seen.has(m.guid)) continue;
+    seen.add(m.guid);
+    va += m.loadVA * Math.max(1, Number(b.params.quantidade) || 1);
+    boards++;
+  }
+  return { va, boards };
+}
+
+const MEC_KINDS = new Set(["mec-ii", "mec-iv", "mec-vi", "mec-ix", "mec-xii"]);
+export const isMec = (b: FlowBlock | undefined): b is FlowBlock => !!b && MEC_KINDS.has(b.kind);
+
+export function checkFlow(f: FlowData, ctx: FlowContext): FlowIssue[] {
+  const issues: FlowIssue[] = [];
+  const byId = new Map(f.blocks.map((b) => [b.id, b]));
+  const incoming = (id: string) => f.links.filter((l) => l.to === id);
+  const outgoing = (id: string) => f.links.filter((l) => l.from === id);
+  const tag = (b: FlowBlock) => b.tag || FLOW_BLOCK_BY_ID[b.kind]?.label || b.kind;
+  const paved = f.layout === "pavimentos";
+
+  for (const l of f.links) if (!byId.has(l.from) || !byId.has(l.to)) issues.push({ level: "erro", text: "Ligação com bloco apagado." });
+
+  for (const b of f.blocks) {
+    const d = FLOW_BLOCK_BY_ID[b.kind];
+    if (!d || d.symbol === "texto") continue;
+    const inc = incoming(b.id);
+    if (!d.source && !inc.length) issues.push({ level: "aviso", text: `${tag(b)} não está alimentado (nenhuma ligação chega nele).`, blockId: b.id });
+    if (!outgoing(b.id).length && !d.board && !MEC_KINDS.has(b.kind) && b.kind !== "cm-convencional")
+      issues.push({ level: "info", text: `${tag(b)} não alimenta nenhum bloco.`, blockId: b.id });
+    // Média tensão só em painel MT, cabine de medição MT e transformador.
+    for (const l of inc)
+      if (l.kind === "mt" && !d.acceptsMT) issues.push({ level: "aviso", text: `Média tensão chegando em ${tag(b)}: só painel de MT, cabine de medição MT ou transformador recebem MT.`, blockId: b.id });
+    if (paved && d.symbol !== "barramento" && !blockStorey(f, b)) issues.push({ level: "aviso", text: `${tag(b)} está fora das faixas de pavimento.`, blockId: b.id });
+  }
+
+  // Barramentos blindados: caixa direta (uma só) ou caixas de derivação (até 2 por andar).
+  for (const bus of f.blocks.filter(isBus)) {
+    const direct = outgoing(bus.id)
+      .map((l) => byId.get(l.to))
+      .filter(isMec);
+    const derivs = outgoing(bus.id)
+      .map((l) => byId.get(l.to))
+      .filter((b): b is FlowBlock => b?.kind === "derivacao");
+    const viaDeriv = derivs.flatMap((dv) => outgoing(dv.id).map((l) => ({ dv, mec: byId.get(l.to) }))).filter((x): x is { dv: FlowBlock; mec: FlowBlock } => isMec(x.mec));
+    if (direct.length && direct.length + viaDeriv.length > 1)
+      issues.push({
+        level: "erro",
+        text: `${tag(bus)}: com a caixa de medição ligada direto no barramento, só pode haver uma caixa por barramento (há ${direct.length + viaDeriv.length}). Use caixas de derivação para ter até 2 caixas por andar.`,
+        blockId: bus.id,
+      });
+    if (paved) {
+      const span = new Set(busStoreys(f, bus));
+      const perStorey = new Map<string, number>();
+      for (const { dv, mec } of viaDeriv) {
+        const s = blockStorey(f, dv);
+        if (s) perStorey.set(s, (perStorey.get(s) ?? 0) + 1);
+        const sm = blockStorey(f, mec);
+        if (s && sm && s !== sm) issues.push({ level: "aviso", text: `${tag(mec)} está em ${sm}, mas a caixa de derivação ${tag(dv)} está em ${s}.`, blockId: mec.id });
+      }
+      for (const [s, n] of perStorey) if (n > 2) issues.push({ level: "erro", text: `${tag(bus)}: ${n} caixas de medição no ${s}; com derivação, o limite é de 2 caixas por andar no mesmo barramento.`, blockId: bus.id });
+      for (const b of [...direct, ...derivs]) {
+        const s = blockStorey(f, b);
+        if (s && !span.has(s)) issues.push({ level: "aviso", text: `${tag(b)} (${s}) está num pavimento que o ${tag(bus)} não alcança: estique o barramento.`, blockId: b.id });
+      }
+    }
+  }
+  for (const dv of f.blocks.filter((b) => b.kind === "derivacao")) {
+    if (incoming(dv.id).some((l) => !isBus(byId.get(l.from)))) issues.push({ level: "aviso", text: `${tag(dv)}: a caixa de derivação deve sair de um barramento blindado.`, blockId: dv.id });
+    const mecs = outgoing(dv.id).filter((l) => isMec(byId.get(l.to))).length;
+    if (mecs > 2) issues.push({ level: "erro", text: `${tag(dv)}: ${mecs} caixas de medição na mesma derivação (máximo 2).`, blockId: dv.id });
+  }
+
+  // Capacidade das caixas de medição e centros de medição.
+  for (const b of f.blocks) {
+    const d = FLOW_BLOCK_BY_ID[b.kind];
+    const cap = d?.meters ?? (b.kind === "cm-convencional" ? Number(b.params.medidores) || 0 : 0);
+    if (!cap) continue;
+    const units = outgoing(b.id).reduce((s, l) => {
+      const t = byId.get(l.to);
+      return s + (t && FLOW_BLOCK_BY_ID[t.kind]?.board ? Math.max(1, Number(t.params.quantidade) || 1) : 0);
+    }, 0);
+    if (units > cap) issues.push({ level: "erro", text: `${tag(b)}: ${units} quadros ligados, mas a caixa tem ${cap} medidores.`, blockId: b.id });
+  }
+
+  // Capacidade de transformadores e geradores frente à carga dos quadros vinculados.
+  for (const b of f.blocks.filter((x) => x.kind === "transformador" || x.kind === "gerador")) {
+    const kva = Number(b.params.potencia) || 0;
+    const { va } = downstreamLoad(f, b.id, ctx);
+    if (kva && va > kva * 1000) issues.push({ level: "aviso", text: `${tag(b)}: carga instalada a jusante de ${(va / 1000).toFixed(1).replace(".", ",")} kVA passa da potência de ${kva} kVA (confira a demanda).`, blockId: b.id });
+  }
+
+  // Modelo: quadros locados e vínculos.
+  const linked = new Set<string>();
+  for (const b of f.blocks) {
+    const d = FLOW_BLOCK_BY_ID[b.kind];
+    if (!d?.board) continue;
+    if (b.pointGuid) {
+      const m = ctx.boards.find((x) => x.guid === b.pointGuid);
+      if (!m) {
+        issues.push({ level: "erro", text: `${tag(b)}: o quadro vinculado não existe mais no modelo.`, blockId: b.id, action: { kind: "locar", blockId: b.id } });
+        continue;
+      }
+      linked.add(m.guid);
+      const s = blockStorey(f, b);
+      if (paved && s && m.storey && s !== m.storey) issues.push({ level: "aviso", text: `${tag(b)} está no ${s} no fluxograma, mas o quadro ${m.tag} foi locado no ${m.storey}.`, blockId: b.id });
+      if (m.tag !== b.tag) issues.push({ level: "info", text: `${tag(b)} está vinculado ao quadro ${m.tag} (etiquetas diferentes).`, blockId: b.id });
+      continue;
+    }
+    const same = ctx.boards.find((x) => x.tag === b.tag && !f.blocks.some((o) => o.pointGuid === x.guid));
+    if (same) issues.push({ level: "info", text: `${tag(b)}: há um quadro ${same.tag} no modelo; vincule para conferir a carga e o pavimento.`, blockId: b.id, action: { kind: "vincular", blockId: b.id, pointGuid: same.guid } });
+    else issues.push({ level: "info", text: `${tag(b)} ainda não foi locado no modelo.`, blockId: b.id, action: { kind: "locar", blockId: b.id } });
+  }
+  for (const m of ctx.boards) if (!linked.has(m.guid) && !f.blocks.some((b) => b.tag === m.tag)) issues.push({ level: "aviso", text: `O quadro ${m.tag}${m.storey ? ` (${m.storey})` : ""} está no modelo, mas não aparece no fluxograma.` });
+
+  const order: Record<IssueLevel, number> = { erro: 0, aviso: 1, info: 2 };
+  return issues.sort((a, b) => order[a.level] - order[b.level]);
+}
+
+/** Próxima etiqueta livre (ex.: QD-3). */
+export function nextTag(f: FlowData, kind: string): string {
+  const d = FLOW_BLOCK_BY_ID[kind];
+  if (!d?.tagPrefix) return "";
+  const used = new Set(f.blocks.map((b) => b.tag));
+  for (let n = 1; ; n++) {
+    const t = `${d.tagPrefix}-${n}`;
+    if (!used.has(t)) return t;
+  }
+}
+
+/** Organiza: centraliza cada bloco na faixa do seu pavimento e afasta os que se sobrepõem. */
+export function autoArrange(f: FlowData): FlowData {
+  if (f.layout !== "pavimentos") return f;
+  const blocks = f.blocks.map((b) => ({ ...b }));
+  const groups = new Map<string, FlowBlock[]>();
+  for (const b of blocks) {
+    if (isBus(b) || b.kind === "texto") continue;
+    const s = blockStorey(f, b);
+    if (!s) continue;
+    const i = f.storeys.indexOf(s);
+    b.y = Math.round((HEADER_H + i * f.bandH + (f.bandH - blockRect(b).h) / 2) * 10) / 10;
+    const k = `${s}|${blockTower(f, b)?.id ?? ""}`;
+    groups.set(k, [...(groups.get(k) ?? []), b]);
+  }
+  for (const list of groups.values()) {
+    list.sort((a, b) => a.x - b.x);
+    for (let i = 1; i < list.length; i++) {
+      const prev = list[i - 1];
+      const minX = prev.x + blockRect(prev).w + 0.6;
+      if (list[i].x < minX) list[i].x = Math.round(minX * 10) / 10;
+    }
+  }
+  return { ...f, blocks };
+}

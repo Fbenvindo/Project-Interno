@@ -3,6 +3,7 @@
 // - Documentação: só as disciplinas do projeto (as do IFC que este projeto entrega), com
 //   a opção de trazer outras disciplinas em meio-tom como informação. É o que vai para as folhas.
 // Tipos: planta do pavimento, ampliação (recorte de uma planta em escala maior), corte e vista 3D.
+import type { FlowData } from "./flow";
 import { DISCIPLINES, MEP_DISCIPLINES } from "./disciplines";
 import type { LegendItem, Prim } from "./plan/drawing";
 import { PRINT_COLOR, LAYER_PREFIX } from "./plan/drawing";
@@ -11,10 +12,10 @@ import type { P2 } from "./plan/section";
 import type { Discipline, Vec3 } from "./types";
 
 export type ViewSection = "trabalho" | "documentacao";
-export type ViewKind = "planta" | "ampliacao" | "corte" | "3d";
+export type ViewKind = "planta" | "ampliacao" | "corte" | "3d" | "fluxograma";
 
 export const SECTION_LABEL: Record<ViewSection, string> = { trabalho: "Trabalho", documentacao: "Documentação" };
-export const KIND_LABEL: Record<ViewKind, string> = { planta: "Plantas", ampliacao: "Ampliações", corte: "Cortes", "3d": "Vistas 3D" };
+export const KIND_LABEL: Record<ViewKind, string> = { planta: "Plantas", ampliacao: "Ampliações", corte: "Cortes", "3d": "Vistas 3D", fluxograma: "Fluxogramas" };
 
 export interface ClipPlaneDef {
   normal: Vec3;
@@ -62,6 +63,8 @@ export interface ViewDef {
   workNotes?: boolean;
   /** Plantas: de piso (vigas da laje de baixo) ou de teto (vigas do pavimento de cima). */
   planType?: "piso" | "teto";
+  /** Fluxograma: blocos, ligações, pavimentos e torres. */
+  flow?: FlowData;
   /** Vigas em projeção e o texto de cada uma (podem ser ocultados separadamente). */
   showBeams?: boolean;
   showBeamText?: boolean;
@@ -99,7 +102,7 @@ export function migrateViews(raw: unknown): ViewDef[] {
     .filter((v): v is Record<string, unknown> => !!v && typeof v === "object" && typeof (v as { id?: unknown }).id === "string")
     .map((v) => {
       const kind = (v.kind as ViewKind) ?? "3d";
-      return { scale: kind === "ampliacao" ? 25 : 50, ...v, kind, section: (v.section as ViewSection) ?? "trabalho" } as ViewDef;
+      return { scale: kind === "ampliacao" ? 25 : kind === "fluxograma" ? 100 : 50, ...v, kind, section: (v.section as ViewSection) ?? "trabalho" } as ViewDef;
     });
 }
 

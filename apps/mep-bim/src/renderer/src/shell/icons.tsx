@@ -455,6 +455,22 @@ const P: Record<string, ReactNode> = {
       <path d="M4 4 L20 20" />
     </>
   ),
+  fluxo: (
+    <>
+      <rect x="3" y="3" width="7" height="5" rx="1" />
+      <rect x="14" y="10" width="7" height="5" rx="1" />
+      <rect x="3" y="16" width="7" height="5" rx="1" />
+      <path d="M6.5 8v8M10 18.5h4V15M10 5.5h7.5V10" />
+    </>
+  ),
+  fluxoNovo: (
+    <>
+      <rect x="3" y="3" width="7" height="5" rx="1" />
+      <rect x="3" y="16" width="7" height="5" rx="1" />
+      <path d="M6.5 8v8" />
+      <path d="M17 11v8M13 15h8" />
+    </>
+  ),
   elNovo: (
     <>
       <path d="M11 3 L18 7 V15 L11 19 L4 15 V7 Z" />

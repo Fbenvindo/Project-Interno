@@ -23,7 +23,7 @@ interface Props {
   onNewSheet: () => void;
 }
 
-const KINDS: ViewKind[] = ["planta", "ampliacao", "corte", "3d"];
+const KINDS: ViewKind[] = ["planta", "ampliacao", "corte", "3d", "fluxograma"];
 const MEP = DISCIPLINES.filter((d) => d.isMep);
 
 export function VistasBrowser({ storeys, views, sheets, active, disciplines, available, onDisciplines, onOpen, onRename, onDelete, onNewSheet }: Props) {
@@ -139,6 +139,7 @@ function emptyHint(kind: ViewKind): string {
   if (kind === "ampliacao") return "Geral › Ampliação";
   if (kind === "corte") return "Geral › Corte por linha";
   if (kind === "3d") return "Geral › Vista 3D no local ou Corte pela seleção";
+  if (kind === "fluxograma") return "Elétrica › Novo fluxograma";
   return "";
 }
 

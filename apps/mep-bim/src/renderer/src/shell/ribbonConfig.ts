@@ -58,7 +58,9 @@ export type ActionId =
   | "novaFolha"
   | "folhasPlantas"
   | "propriedades"
-  | "novoElemento";
+  | "novoElemento"
+  | "fluxogramas"
+  | "novoFluxograma";
 
 export interface RibbonButton {
   key: string;
@@ -300,6 +302,13 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
       buttons: [
         { key: "circuitos", label: "Circuitos", icon: "circuito", tool: { kind: "circuitos" }, needsModel: true },
         { key: "queda", label: "Queda de tensão", icon: "calculo", tool: { kind: "calc", which: "eletrica" } },
+      ],
+    },
+    {
+      label: "Fluxograma",
+      buttons: [
+        { key: "fluxogramas", label: "Fluxogramas", icon: "fluxo", action: "fluxogramas", needsModel: true },
+        { key: "novo-fluxograma", label: "Novo fluxograma", icon: "fluxoNovo", action: "novoFluxograma", needsModel: true },
       ],
     },
   ],

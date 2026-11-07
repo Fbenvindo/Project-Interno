@@ -40,6 +40,9 @@ import { EMPTY_FILTERS, Navigator, NO_STOREY, type Filters } from "./shell/Navig
 import { Ribbon } from "./shell/Ribbon";
 import { DrawAidsBar, useDrawAidsKeys } from "./shell/DrawAidsBar";
 import { useDrawAids } from "./desenho/drawAids";
+import { FlowCanvas, FlowPanel, FlowSidebar, type FlowMode, type FlowSel } from "./fluxo/FlowEditor";
+import { blockStorey as blockStoreyOf, checkFlow, newFlow, newFlowId, type FlowContext, type FlowData } from "../../core/flow";
+import { pointPowerVA } from "../../core/circuits";
 import { ParamsPanel } from "./shell/ParamsPanel";
 import { BibliotecaPanel } from "./library/BibliotecaPanel";
 import { ProgramaPanel, ProgramaTiposOnly } from "./programa/ProgramaPanel";
@@ -59,10 +62,10 @@ import { makeCeilingResolver, makeSlabProbe } from "./locacao/ceiling";
 import { Icon, LogoMark } from "./shell/icons";
 import { DISCIPLINE_TABS, TOP_TABS, type ActionId, type DisciplineTab, type Tool, type ToolSpec, type TopTab } from "./shell/ribbonConfig";
 
-type View = "planta" | "3d" | "prancha" | "vazio";
+type View = "planta" | "3d" | "prancha" | "fluxograma" | "vazio";
 type TabView = Exclude<View, "vazio">;
-const TABS: TabView[] = ["planta", "3d", "prancha"];
-const TAB_LABEL: Record<TabView, string> = { planta: "Planta", "3d": "Vista 3D", prancha: "Prancha" };
+const TABS: TabView[] = ["planta", "3d", "prancha", "fluxograma"];
+const TAB_LABEL: Record<TabView, string> = { planta: "Planta", "3d": "Vista 3D", prancha: "Prancha", fluxograma: "Fluxograma" };
 const IDENTITY_CS = new CoordinateSystem();
 type Theme = "claro" | "escuro";
 
@@ -168,6 +171,12 @@ export function App() {
   /** Plantas de trabalho: tipo (piso/teto) e vigas — as de documentação guardam isso na própria vista. */
   const [workDisplay, setWorkDisplay] = useState<Pick<ViewDef, "planType" | "showBeams" | "showBeamText">>({ planType: "piso", showBeams: true, showBeamText: true });
   const [view3dId, setView3dId] = useState<string | null>(null);
+  // ---- Fluxogramas (vistas do tipo "fluxograma") ----
+  const [flowId, setFlowId] = useState<string | null>(null);
+  const [flowSel, setFlowSel] = useState<FlowSel>(null);
+  const [flowMode, setFlowMode] = useState<FlowMode>({ kind: "sel" });
+  const openFlowsRef = useRef<() => void>(() => {});
+  const newFlowRef = useRef<() => void>(() => {});
   const [sheetId, setSheetId] = useState<string | null>(null);
   const [moveMode, setMoveMode] = useState(false);
   const [snapshots, setSnapshots] = useState<Map<string, { href: string; aspect: number }>>(() => new Map());
@@ -758,6 +767,10 @@ export function App() {
           return void handleSample();
         case "exemploApartamento":
           return void handleSample("exemplo-apartamento.ifc");
+        case "fluxogramas":
+          return openFlowsRef.current();
+        case "novoFluxograma":
+          return newFlowRef.current();
         case "novoElemento":
           return setDesigning(newDesign(undefined, newDesignUid()));
         case "vincularIfc":
@@ -863,6 +876,7 @@ export function App() {
   const openViewDef = useCallback(
     (v: ViewDef) => {
       if (v.kind === "3d") return open3D(v);
+      if (v.kind === "fluxograma") return openFlowRef.current(v);
       if (v.storey && model?.storeys.includes(v.storey)) setStorey(v.storey);
       setPlanKey(v.id.startsWith("doc-planta:") ? "doc" : `view:${v.id}`);
       setView("planta");
@@ -991,12 +1005,14 @@ export function App() {
       setExtraClip(false);
     }
     if (t === "prancha" && tool.kind === "pranchas") chooseTool({ kind: "propriedades" });
-    const left = TABS.filter((x) => x !== t && !closedTabs.includes(x));
+    if (t === "fluxograma") setFlowId(null);
+    const left = TABS.filter((x) => x !== t && !closedTabs.includes(x) && (x !== "fluxograma" || !!flowDef));
     setClosedTabs((c) => [...new Set([...c, t])]);
     if (view === t) setView(left[0] ?? "vazio");
   };
   const openTab = (t: TabView) => {
     if (t === "prancha") chooseTool({ kind: "pranchas" });
+    else if (t === "fluxograma") openFlows();
     else setView(t);
     if (t === "3d") setTimeout(() => viewerRef.current?.fitTo(), 60);
   };
@@ -1158,12 +1174,119 @@ export function App() {
   const selectedOne = selection.length === 1 ? (elementById.get(selection[0]) ?? null) : null;
   const viewer = viewerRef.current;
   // Sem ferramenta ativa (seleção), o painel da direita some: as propriedades ficam na coluna esquerda.
-  const rightWidth = tool.kind === "propriedades" ? 0 : tool.kind === "pranchas" ? 400 : tool.kind === "programa" ? 620 : 460;
+  const rightWidth = view === "fluxograma" && tool.kind === "propriedades" ? 380 : tool.kind === "propriedades" ? 0 : tool.kind === "pranchas" ? 400 : tool.kind === "programa" ? 620 : 460;
   const resolveCeiling = useMemo(() => (viewer && model ? makeCeilingResolver(viewer, elementById, model.storeyLevels) : null), [viewer, model, elementById]);
   const slabAt = useMemo(() => (viewer && model ? makeSlabProbe(viewer, elementById, model.storeyLevels) : null), [viewer, model, elementById]);
   const projectName = (fileName ?? "").replace(/\.ifc$/i, "");
 
+  // ---- Fluxogramas -------------------------------------------------------------------------
+  const flowViews = store.views.filter((v) => v.kind === "fluxograma" && v.flow?.discipline === "eletrica");
+  const flowDef = flowId ? (store.views.find((v) => v.id === flowId && v.kind === "fluxograma" && v.flow) ?? null) : null;
+  const updateFlowOf = useCallback(
+    (id: string, fn: (f: FlowData) => FlowData, key: string | null = null) =>
+      store.setViews((l) => l.map((v) => (v.id === id && v.flow ? { ...v, flow: fn(v.flow) } : v)), key && `fluxo:${id}:${key}`),
+    [store],
+  );
+  const openFlowRef = useRef<(v: ViewDef) => void>(() => {});
+  openFlowRef.current = (v) => {
+    setFlowId(v.id);
+    setFlowSel(null);
+    setFlowMode({ kind: "sel" });
+    setClosedTabs((c) => c.filter((x) => x !== "fluxograma"));
+    setView("fluxograma");
+    setRightOpen(true);
+  };
+  const newFlowView = () => {
+    if (!model) return;
+    const n = flowViews.length;
+    const v: ViewDef = {
+      id: newFlowId("fluxo-"),
+      name: n ? `Fluxograma ${n + 1}` : "Distribuição geral",
+      kind: "fluxograma",
+      section: "trabalho",
+      scale: 50,
+      flow: newFlow("eletrica", model.storeys),
+    };
+    store.setViews((l) => [...l, v]);
+    openFlowRef.current(v);
+  };
+  const openFlows = () => (flowDef ? openFlowRef.current(flowDef) : flowViews.length ? openFlowRef.current(flowViews[0]) : newFlowView());
+  openFlowsRef.current = openFlows;
+  newFlowRef.current = newFlowView;
+  /** Quadros locados no modelo, com a carga instalada dos circuitos de cada um. */
+  const flowCtx = useMemo((): FlowContext => {
+    const boards = store.points
+      .filter((p) => COMPONENT_BY_ID[p.componentId]?.ifcType === "IFCELECTRICDISTRIBUTIONBOARD")
+      .map((p) => {
+        let loadVA = 0;
+        for (const c of store.circuits) if (c.panel === p.guid) for (const q of store.points) if (q.circuit === c.uid) loadVA += pointPowerVA(q, c.powerFactor);
+        return { guid: p.guid, tag: p.tag, storey: p.storey, loadVA };
+      });
+    return { boards };
+  }, [store.points, store.circuits]);
+  const flowIssues = useMemo(() => (flowDef?.flow ? checkFlow(flowDef.flow, flowCtx) : []), [flowDef, flowCtx]);
+  /** "Locar no modelo": abre a locação do quadro; o próximo quadro locado fica vinculado ao bloco. */
+  const pendingLocate = useRef<{ viewId: string; blockId: string; known: Set<number> } | null>(null);
+  const locateBlock = (blockId: string) => {
+    if (!flowDef) return;
+    pendingLocate.current = { viewId: flowDef.id, blockId, known: new Set(store.points.map((p) => p.id)) };
+    const b = flowDef.flow?.blocks.find((x) => x.id === blockId);
+    const st = b && flowDef.flow?.layout === "pavimentos" ? flowDef.flow.storeys.find((s) => s === (b ? blockStoreyOf(flowDef.flow!, b) : null)) : null;
+    if (st && model?.storeys.includes(st)) setStorey(st);
+    setClosedTabs((c) => c.filter((x) => x !== "planta"));
+    setView("planta");
+    chooseTool({ kind: "locacao", componentId: "quadro-distribuicao" }, "eletrica");
+    files.setMessage(`Clique na planta para locar o quadro ${b?.tag ?? ""}: ele fica vinculado ao fluxograma.`);
+  };
+  useEffect(() => {
+    const pend = pendingLocate.current;
+    if (!pend) return;
+    const fresh = store.points.find((p) => !pend.known.has(p.id) && COMPONENT_BY_ID[p.componentId]?.ifcType === "IFCELECTRICDISTRIBUTIONBOARD");
+    if (!fresh) return;
+    pendingLocate.current = null;
+    const v = store.views.find((x) => x.id === pend.viewId);
+    const b = v?.flow?.blocks.find((x) => x.id === pend.blockId);
+    if (!b) return;
+    updateFlowOf(pend.viewId, (f) => ({ ...f, blocks: f.blocks.map((x) => (x.id === b.id ? { ...x, pointGuid: fresh.guid } : x)) }));
+    if (b.tag) store.update([fresh.id], () => ({ tag: b.tag }));
+    files.setMessage(`Quadro ${b.tag} locado no ${fresh.storey ?? "modelo"} e vinculado ao fluxograma.`);
+  }, [store.points, store.views, updateFlowOf, store, files]);
+  const showBoard = (guid: string) => {
+    const p = store.points.find((x) => x.guid === guid);
+    if (!p) return;
+    if (p.storey && model?.storeys.includes(p.storey)) setStorey(p.storey);
+    setClosedTabs((c) => c.filter((x) => x !== "planta"));
+    setView("planta");
+    setSelection([p.id]);
+  };
+  const placeFlowOnSheet = () => {
+    if (!flowDef) return;
+    if (flowDef.section !== "documentacao") {
+      updateView({ ...flowDef, section: "documentacao" });
+      files.setMessage(`"${flowDef.name}" passou para Documentação (só as vistas de documentação vão para as folhas).`);
+    }
+    addToSheet(flowDef.id, sheetId ?? store.sheets[0]?.id ?? null);
+  };
+
   const rightPanel = () => {
+    if (view === "fluxograma" && flowDef?.flow)
+      return (
+        <FlowPanel
+          view={flowDef}
+          flow={flowDef.flow}
+          update={(fn, key) => updateFlowOf(flowDef.id, fn, key ?? null)}
+          onRename={(name) => updateView({ ...flowDef, name })}
+          onSection={(section) => updateView({ ...flowDef, section })}
+          onScale={(scale) => updateView({ ...flowDef, scale })}
+          sel={flowSel}
+          setSel={setFlowSel}
+          issues={flowIssues}
+          ctx={flowCtx}
+          modelStoreys={model?.storeys ?? []}
+          onLocate={locateBlock}
+          onShowBoard={showBoard}
+        />
+      );
     if (tool.kind === "calc") return <CalcPanel selected={selectedOne} which={tool.which} />;
     if (tool.kind === "biblioteca")
       return (
@@ -1388,7 +1511,14 @@ export function App() {
 
       <main className="workspace" style={{ gridTemplateColumns: `${leftOpen ? 300 : 0}px minmax(0, 1fr) ${rightOpen ? rightWidth : 0}px` }}>
         <aside className={`sidebar docks ${leftOpen ? "" : "collapsed"}`} aria-hidden={!leftOpen}>
-          {model && resolveCeiling && slabAt && (
+          {model && view === "fluxograma" && (
+            <section className="dock open flow-dock">
+              <div className="dock-body">
+                <FlowSidebar flows={flowViews} activeId={flowId} onOpen={(v) => openFlowRef.current(v)} onNew={newFlowView} mode={flowMode} setMode={setFlowMode} />
+              </div>
+            </section>
+          )}
+          {model && resolveCeiling && slabAt && view !== "fluxograma" && (
             <section className={`dock ${propsOpen ? "open" : ""}`}>
               <button className="dock-head" onClick={() => setPropsOpen(!propsOpen)} aria-expanded={propsOpen}>
                 <span className={`caret ${propsOpen ? "open" : ""}`}>▸</span> Propriedades
@@ -1494,7 +1624,7 @@ export function App() {
               )}
             </section>
           )}
-          {model ? (
+          {model && view === "fluxograma" ? null : model ? (
             <section className={`dock ${navOpen ? "open" : ""}`}>
               <button className="dock-head" onClick={() => setNavOpen(!navOpen)} aria-expanded={navOpen}>
                 <span className={`caret ${navOpen ? "open" : ""}`}>▸</span> Navegador
@@ -1561,6 +1691,16 @@ export function App() {
                     </button>
                   </span>
                 )}
+                {flowDef && !closedTabs.includes("fluxograma") && (
+                  <span className={`view-tab-wrap ${view === "fluxograma" ? "active" : ""}`}>
+                    <button className={`view-tab ${view === "fluxograma" ? "active" : ""}`} onClick={() => setView("fluxograma")}>
+                      Fluxograma · {flowDef.name}
+                    </button>
+                    <button className="tab-close" title="Fechar esta aba" aria-label="Fechar fluxograma" onClick={() => closeTab("fluxograma")}>
+                      ×
+                    </button>
+                  </span>
+                )}
                 {closedTabs.length > 0 && (
                   <select className="tab-reopen" value="" title="Abrir uma aba fechada" onChange={(e) => e.target.value && openTab(e.target.value as TabView)}>
                     <option value="">+</option>
@@ -1620,6 +1760,19 @@ export function App() {
                 </div>
                 <p className="muted small">Ou escolha uma vista ou folha no navegador “Vistas e folhas”, à esquerda.</p>
               </div>
+            )}
+            {view === "fluxograma" && model && flowDef?.flow && (
+              <FlowCanvas
+                view={flowDef}
+                flow={flowDef.flow}
+                update={(fn, key) => updateFlowOf(flowDef.id, fn, key ?? null)}
+                sel={flowSel}
+                setSel={setFlowSel}
+                mode={flowMode}
+                setMode={setFlowMode}
+                issues={flowIssues}
+                onPlaceOnSheet={placeFlowOnSheet}
+              />
             )}
             {view === "planta" && model && viewer && storey && (
               <PlanEditor
