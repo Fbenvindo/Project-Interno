@@ -413,6 +413,7 @@ export function FlowSidebar({
   activeId,
   onOpen,
   onNew,
+  onExample,
   mode,
   setMode,
 }: {
@@ -420,6 +421,7 @@ export function FlowSidebar({
   activeId: string | null;
   onOpen: (v: ViewDef) => void;
   onNew: () => void;
+  onExample: () => void;
   mode: FlowMode;
   setMode: (m: FlowMode) => void;
 }) {
@@ -440,6 +442,9 @@ export function FlowSidebar({
           </li>
         ))}
       </ul>
+      <button className="link small" onClick={onExample} title="Cria o perfil e o fluxograma de exemplo: 2 torres (12 e 16 andares), 2 subsolos e térreo comuns, entrada BT e medição nos andares por barramento blindado">
+        + exemplo: 2 torres com medição nos andares
+      </button>
       <div className="panel-head">
         <h3>Blocos</h3>
         <span className="muted small">arraste ou clique e coloque</span>

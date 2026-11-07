@@ -336,6 +336,11 @@ Em **Elétrica › Fluxograma**, *Novo fluxograma* abre uma aba de desenho para 
   Há também *Texto* para anotações.
 - **Por pavimento:** faixas de cima para baixo, vindas do modelo e editáveis (acrescentar, renomear, reordenar), e colunas por **torre** (várias torres). O bloco fica no pavimento da faixa em que está. O barramento blindado é vertical: puxe as pontas para vencer os pavimentos. Pode haver vários barramentos. *Livre* tira as faixas, e *Auto-organizar* centraliza os blocos nas faixas.
 - **Ligar:** clique no bloco de origem e depois no de destino; o comando segue ligando a partir do destino, e Esc encerra. O tipo sai do bloco de origem: média tensão até o transformador, depois BT; emergência do gerador; fotovoltaico. O tipo é editável, assim como o rótulo do cabo ou barramento e o sentido. Cada tipo tem cor própria, e a legenda entra no desenho.
+- **Exemplo pronto** (*+ exemplo: 2 torres com medição nos andares*, na lista de fluxogramas):
+  - **Prédio:** 2 torres, A do 1º ao 12º e B do 1º ao 16º; 2º subsolo, 1º subsolo e térreo comuns.
+  - **Entrada:** concessionária em BT, entrada com medição e QGBT no 1º subsolo; quadro do condomínio e quadro de bombas.
+  - **Em cada torre:** um barramento blindado no shaft. Em cada andar, caixa de derivação → MEC IV → 4 QDs de apartamento.
+  - **Perfil:** o exemplo também cria o perfil do empreendimento (substitui o atual, com confirmação).
 - **Conferência** (painel direito), com marcador vermelho ou laranja no bloco:
   - **Caixa MEC direto no barramento:** só uma caixa por barramento.
   - **Com caixas de derivação:** até 2 caixas por andar no mesmo barramento e no máximo 2 por derivação. A derivação deve sair do barramento, ficar num pavimento que o barramento alcança, e a MEC deve estar no mesmo andar da derivação.

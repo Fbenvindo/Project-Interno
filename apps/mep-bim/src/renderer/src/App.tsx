@@ -43,6 +43,7 @@ import { useDrawAids } from "./desenho/drawAids";
 import { FlowCanvas, FlowPanel, FlowSidebar, type FlowMode, type FlowSel } from "./fluxo/FlowEditor";
 import { applyProfile, blockStorey as blockStoreyOf, checkFlow, newFlow, newFlowId, type FlowContext, type FlowData } from "../../core/flow";
 import { PerfilPanel } from "./shell/PerfilPanel";
+import { exampleTwoTowersBusway } from "../../core/flowExamples";
 import { pointPowerVA } from "../../core/circuits";
 import { ParamsPanel } from "./shell/ParamsPanel";
 import { BibliotecaPanel } from "./library/BibliotecaPanel";
@@ -1212,6 +1213,15 @@ export function App() {
     store.setViews((l) => [...l, v]);
     openFlowRef.current(v);
   };
+  /** Exemplo: 2 torres com medição nos andares (substitui o perfil do empreendimento, se confirmado). */
+  const addFlowExample = () => {
+    if (store.profile?.floors.length && !window.confirm("O exemplo substitui o perfil do empreendimento atual. Continuar?")) return;
+    const ex = exampleTwoTowersBusway();
+    store.setProfile(() => ex.profile, null);
+    const v: ViewDef = { id: newFlowId("fluxo-"), name: "Exemplo · 2 torres, medição nos andares", kind: "fluxograma", section: "trabalho", scale: 50, flow: ex.flow };
+    store.setViews((l) => [...l, v]);
+    openFlowRef.current(v);
+  };
   const openFlows = () => (flowDef ? openFlowRef.current(flowDef) : flowViews.length ? openFlowRef.current(flowViews[0]) : newFlowView());
   openFlowsRef.current = openFlows;
   newFlowRef.current = newFlowView;
@@ -1538,7 +1548,7 @@ export function App() {
           {model && view === "fluxograma" && (
             <section className="dock open flow-dock">
               <div className="dock-body">
-                <FlowSidebar flows={flowViews} activeId={flowId} onOpen={(v) => openFlowRef.current(v)} onNew={newFlowView} mode={flowMode} setMode={setFlowMode} />
+                <FlowSidebar flows={flowViews} activeId={flowId} onOpen={(v) => openFlowRef.current(v)} onNew={newFlowView} onExample={addFlowExample} mode={flowMode} setMode={setFlowMode} />
               </div>
             </section>
           )}

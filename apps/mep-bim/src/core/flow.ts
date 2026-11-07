@@ -842,6 +842,8 @@ export function flowPrims(f: FlowData, opt: FlowDrawOptions = {}): Prim[] {
       }
       const [s, e] = [pts[best], pts[best + 1]];
       const vertical = Math.abs(e[0] - s[0]) < 1e-6;
+      // Rótulo que não cabe no trecho fica só nas propriedades (não encavala nos blocos).
+      if (bl < l.label.length * mm(2.1) * 0.6 + 0.3) continue;
       out.push({
         t: "text",
         p: P((s[0] + e[0]) / 2 + (vertical ? -0.12 : 0), (s[1] + e[1]) / 2 - (vertical ? 0 : 0.12)),
