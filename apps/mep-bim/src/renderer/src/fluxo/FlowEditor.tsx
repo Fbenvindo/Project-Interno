@@ -15,7 +15,18 @@ import {
   downstreamLoad,
   FLOW_BLOCK_BY_ID,
   FLOW_BLOCKS,
-  FLOW_GROUPS,
+  FLOW_GROUPS_BY,
+  flowSystem,
+  LINK_KINDS,
+  SYSTEM_LABEL,
+  waterBalance,
+  waterHeads,
+  waterPressure,
+  fmtL,
+  blockZ,
+  downstream,
+  P_MAX,
+  P_MIN,
   flowPrims,
   HEADER_H,
   isBus,
@@ -32,6 +43,7 @@ import {
   type FlowIssue,
   type FlowLink,
   type FlowLinkKind,
+  type FlowSystem,
   withBandHeights,
 } from "../../../core/flow";
 import type { Prim } from "../../../core/plan/drawing";
@@ -377,7 +389,7 @@ export function FlowCanvas({ view, flow, update, sel, setSel, mode, setMode, iss
           : "Clique no bloco de onde sai a energia"
         : bandHover >= 0
           ? `Arraste para mudar a altura da faixa do ${flow.storeys[bandHover]} (os blocos acompanham)`
-          : "Arraste os blocos da paleta para o desenho · clique para selecionar e arrastar · barramento: puxe as pontas para vencer os pavimentos · linha entre as faixas (coluna dos nomes): altura do pavimento · Delete apaga · botão do meio/direito ou área vazia: deslocar · roda: zoom";
+          : "Arraste os blocos da paleta para o desenho · clique para selecionar e arrastar · barramento ou coluna: puxe as pontas para vencer os pavimentos · linha entre as faixas (coluna dos nomes): altura do pavimento · Delete apaga · botão do meio/direito ou área vazia: deslocar · roda: zoom";
 
   return (
     <div className="flow-editor">
@@ -457,7 +469,9 @@ export function FlowSidebar({
   onExample,
   mode,
   setMode,
+  system,
 }: {
+  system: FlowSystem;
   flows: ViewDef[];
   activeId: string | null;
   onOpen: (v: ViewDef) => void;
@@ -466,11 +480,16 @@ export function FlowSidebar({
   mode: FlowMode;
   setMode: (m: FlowMode) => void;
 }) {
-  const groups = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+  const groupNames = FLOW_GROUPS_BY[system];
+  const groups = Object.keys(groupNames)
+    .map(Number)
+    .filter((g) => g > 0)
+    .sort((a, b) => a - b);
+  const water = system === "agua-fria";
   return (
     <div className="flow-side">
       <div className="panel-head">
-        <h3>Fluxogramas da Elétrica</h3>
+        <h3>Fluxogramas · {SYSTEM_LABEL[system]}</h3>
         <button className="link" onClick={onNew}>
           + novo
         </button>
@@ -483,8 +502,16 @@ export function FlowSidebar({
           </li>
         ))}
       </ul>
-      <button className="link small" onClick={onExample} title="Cria o perfil e o fluxograma de exemplo: 2 torres (12 e 16 andares), 2 subsolos e térreo comuns, entrada BT e medição nos andares por barramento blindado">
-        + exemplo: 2 torres com medição nos andares
+      <button
+        className="link small"
+        onClick={onExample}
+        title={
+          water
+            ? "Cria o perfil e o fluxograma de exemplo: 2 torres (12 e 16 andares) com coberturas, cisterna, recalque, reservatórios superiores, VRP e pressurizador"
+            : "Cria o perfil e o fluxograma de exemplo: 2 torres (12 e 16 andares), 2 subsolos e térreo comuns, entrada BT e medição nos andares por barramento blindado"
+        }
+      >
+        {water ? "+ exemplo: 2 torres (água fria)" : "+ exemplo: 2 torres com medição nos andares"}
       </button>
       <div className="panel-head">
         <h3>Blocos</h3>
@@ -494,10 +521,10 @@ export function FlowSidebar({
         <div key={g} className="flow-group">
           <div className="flow-group-head">
             <i>{g}</i>
-            {FLOW_GROUPS[g]}
+            {groupNames[g]}
           </div>
           <div className="chips">
-            {FLOW_BLOCKS.filter((b) => b.group === g).map((b) => (
+            {FLOW_BLOCKS.filter((b) => b.group === g && (b.system ?? "eletrica") === system).map((b) => (
               <button
                 key={b.id}
                 className={`chip flow-chip ${mode.kind === "place" && mode.block === b.id ? "on" : ""}`}
@@ -516,10 +543,17 @@ export function FlowSidebar({
           </div>
         </div>
       ))}
+      {water ? (
+        <p className="muted small">
+          As pressões são estáticas, pelas cotas do perfil do empreendimento: máxima no piso do pavimento mais baixo, mínima no chuveiro (2 m) do mais
+          alto, a partir do reservatório superior, da VRP ou do pressurizador a montante. Colunas vencem pavimentos: puxe as pontas.
+        </p>
+      ) : (
       <p className="muted small">
-        Barramento blindado: a caixa MEC pode ir direto no barramento (uma só por barramento) ou em caixas de derivação (até 2 caixas por andar no mesmo
-        barramento). Use mais de um barramento e mais de uma torre quando precisar (colunas em Propriedades).
-      </p>
+          Barramento blindado: a caixa MEC pode ir direto no barramento (uma só por barramento) ou em caixas de derivação (até 2 caixas por andar no mesmo
+          barramento). Use mais de um barramento e mais de uma torre quando precisar (colunas em Propriedades).
+        </p>
+      )}
     </div>
   );
 }
@@ -581,7 +615,7 @@ export function FlowPanel({ view, flow, update, onRename, onSection, onScale, ha
             <label>
               Tipo
               <select value={link.kind} onChange={(e) => setLink({ kind: e.target.value as FlowLinkKind })}>
-                {(Object.keys(LINK_LABEL) as FlowLinkKind[]).map((k) => (
+                {LINK_KINDS[flowSystem(flow)].map((k) => (
                   <option key={k} value={k}>
                     {LINK_LABEL[k]}
                   </option>
@@ -654,7 +688,12 @@ export function FlowPanel({ view, flow, update, onRename, onSection, onScale, ha
             ))}
           </ul>
         )}
-        <p className="muted small">O fluxograma é livre: as regras só avisam. Os quadros vinculados trazem a carga dos circuitos do projeto.</p>
+        <p className="muted small">
+          O fluxograma é livre: as regras só avisam.{" "}
+          {flowSystem(flow) === "agua-fria"
+            ? "Pressões estáticas pelas cotas do perfil do empreendimento (sem perdas de carga); reservação e recalque pela NBR 5626."
+            : "Os quadros vinculados trazem a carga dos circuitos do projeto."}
+        </p>
       </section>
     </div>
   );
@@ -764,6 +803,7 @@ function BlockProps({
         </section>
       )}
 
+      {d.system === "agua-fria" && <WaterCard flow={flow} b={b} tagOf={tagOf} />}
       {d.board && (
         <section className="card">
           <h3>Vínculo com o modelo</h3>
@@ -1001,5 +1041,86 @@ function FlowSettings({
         </p>
       </section>
     </>
+  );
+}
+
+const fmca = (v: number) => `${v.toFixed(1).replace(".", ",")} mca`;
+
+/** Água fria: pressões estáticas do bloco, cota piezométrica, desnível do recalque e reservação. */
+function WaterCard({ flow, b, tagOf }: { flow: FlowData; b: FlowBlock; tagOf: (id: string) => string }) {
+  const d = FLOW_BLOCK_BY_ID[b.kind];
+  const heads = waterHeads(flow);
+  const z = blockZ(flow, b);
+  const p = waterPressure(flow, b, heads);
+  const bal = waterBalance(flow);
+  const showPressure = d?.sink || b.kind === "abrigo-hidrometros" || b.kind === "registro" || b.kind === "barrilete";
+  const own = heads.get(b.id);
+  return (
+    <section className="card">
+      <h3>Água fria</h3>
+      {z ? (
+        <div className="row-kv">
+          <span>Cota do piso</span>
+          <b>{z.low === z.high ? `${z.low.toFixed(2).replace(".", ",")} m` : `${z.low.toFixed(2).replace(".", ",")} a ${z.high.toFixed(2).replace(".", ",")} m`}</b>
+        </div>
+      ) : (
+        <p className="muted small">Sem cota: aplique o perfil do empreendimento (Pavimentos › do perfil).</p>
+      )}
+      {(b.kind === "reservatorio-superior" || b.kind === "vrp" || b.kind === "pressurizador") && own && (
+        <div className="row-kv">
+          <span>Cota piezométrica</span>
+          <b>{own.head.toFixed(2).replace(".", ",")} m</b>
+        </div>
+      )}
+      {showPressure &&
+        (p ? (
+          <>
+            <div className="row-kv">
+              <span>Pressão estática máx. (piso)</span>
+              <b style={{ color: p.max > P_MAX ? "var(--fail)" : undefined }}>{fmca(p.max)}</b>
+            </div>
+            <div className="row-kv">
+              <span>Pressão estática mín. (chuveiro)</span>
+              <b style={{ color: p.min < P_MIN ? "var(--fail)" : undefined }}>{fmca(p.min)}</b>
+            </div>
+            <p className="muted small">
+              A partir de {tagOf(p.from)} (cota piezométrica {p.head.toFixed(2).replace(".", ",")} m). Limites: até {P_MAX} mca e ao menos {P_MIN} mca; sem
+              perdas de carga.
+            </p>
+          </>
+        ) : (
+          z && <p className="muted small">Sem reservatório superior, VRP ou pressurizador a montante: a pressão não é calculada.</p>
+        ))}
+      {b.kind === "bomba-recalque" && z && (
+        <p className="muted small">
+          Desnível até o reservatório superior:{" "}
+          {fmca(
+            Math.max(
+              0,
+              ...downstream(flow, b.id)
+                .filter((x) => x.kind === "reservatorio-superior")
+                .map((x) => (blockZ(flow, x)?.low ?? z.low) + (Number(x.params.nivel) || 0) - z.low),
+            ),
+          )}{" "}
+          (sem as perdas). Vazão mínima: {((0.15 * bal.consumo) / 1000).toFixed(1).replace(".", ",")} m³/h (15% do consumo diário por hora).
+        </p>
+      )}
+      {(b.kind === "cisterna" || b.kind === "reservatorio-superior" || d?.sink) && bal.consumo > 0 && (
+        <>
+          <div className="row-kv">
+            <span>Consumo do fluxograma</span>
+            <b>{fmtL(bal.consumo)}/dia</b>
+          </div>
+          <div className="row-kv">
+            <span>Reservação (inferior + superior)</span>
+            <b>{fmtL(bal.inferior + bal.superior)}</b>
+          </div>
+          <div className="row-kv">
+            <span>Autonomia</span>
+            <b style={{ color: bal.dias < 1 ? "var(--fail)" : undefined }}>{bal.dias.toFixed(1).replace(".", ",")} dia(s)</b>
+          </div>
+        </>
+      )}
+    </section>
   );
 }

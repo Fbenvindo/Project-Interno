@@ -33,14 +33,44 @@ export const newBuildingId = (p: string) => `${p}${Date.now().toString(36)}${(se
 
 export const EMPTY_PROFILE: BuildingProfile = { towers: [{ id: "torre-a", name: "Torre A" }], floors: [], baseElevation: 0 };
 
-/** Cota do piso de cada pavimento (do primeiro, nos repetidos). */
+const r3 = (v: number) => Math.round(v * 1000) / 1000;
+
+/**
+ * Cota do piso de cada pavimento em cada torre (do primeiro, nos repetidos): cada torre
+ * acumula só os pavimentos que tem (os comuns valem para todas). null = a torre não tem.
+ */
+export function floorElevationsByTower(p: BuildingProfile): Record<string, (number | null)[]> {
+  const out: Record<string, (number | null)[]> = {};
+  const towers = p.towers.length ? p.towers : [{ id: "_", name: "" }];
+  for (const t of towers) {
+    let z = p.baseElevation;
+    out[t.id] = p.floors.map((f) => {
+      if (!(f.common || f.towers.includes(t.id) || t.id === "_")) return null;
+      const e = z;
+      z += f.height * Math.max(1, f.repeat);
+      return r3(e);
+    });
+  }
+  return out;
+}
+
+/** Cota do piso de cada pavimento (a maior entre as torres que o têm; do primeiro, nos repetidos). */
 export function floorElevations(p: BuildingProfile): number[] {
-  let z = p.baseElevation;
-  return p.floors.map((f) => {
-    const e = z;
-    z += f.height * Math.max(1, f.repeat);
-    return Math.round(e * 1000) / 1000;
+  const by = Object.values(floorElevationsByTower(p));
+  return p.floors.map((_, i) => {
+    const v = by.map((l) => l[i]).filter((x): x is number => x != null);
+    return v.length ? Math.max(...v) : p.baseElevation;
   });
+}
+
+/** Texto da cota do pavimento i: única ou por torre ("A +33,50 · B +16,10") quando diferem. */
+export function floorElevText(p: BuildingProfile, i: number): string {
+  const f = p.floors[i];
+  const by = floorElevationsByTower(p);
+  const vals = p.towers.map((t) => ({ t, e: by[t.id]?.[i] })).filter((x): x is { t: BuildingTower; e: number } => x.e != null);
+  if (!vals.length) return "";
+  if (vals.every((v) => Math.abs(v.e - vals[0].e) < 1e-6)) return elevationText(f, vals[0].e);
+  return vals.map((v) => `${v.t.name.replace(/^Torre\s+/i, "")} ${elevationText(f, v.e)}`).join(" · ");
 }
 
 export const fmtElev = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : "±"}${Math.abs(v).toFixed(2).replace(".", ",")}`;
@@ -58,13 +88,13 @@ export const towerHasFloor = (f: BuildingFloor, towerId: string) => f.common || 
 
 /** Pavimentos de uma torre (contando os repetidos) e altura total dela. */
 export function towerSummary(p: BuildingProfile, towerId: string): { floors: number; height: number; top: number } {
-  const el = floorElevations(p);
+  const el = floorElevationsByTower(p)[towerId] ?? floorElevations(p);
   let floors = 0;
   let top = p.baseElevation;
   p.floors.forEach((f, i) => {
     if (!towerHasFloor(f, towerId)) return;
     floors += Math.max(1, f.repeat);
-    top = Math.max(top, el[i] + f.height * Math.max(1, f.repeat));
+    top = Math.max(top, (el[i] ?? p.baseElevation) + f.height * Math.max(1, f.repeat));
   });
   return { floors, height: Math.round((top - p.baseElevation) * 100) / 100, top };
 }

@@ -61,7 +61,9 @@ export type ActionId =
   | "propriedades"
   | "novoElemento"
   | "fluxogramas"
-  | "novoFluxograma";
+  | "novoFluxograma"
+  | "fluxogramasAgua"
+  | "novoFluxogramaAgua";
 
 export interface RibbonButton {
   key: string;
@@ -343,6 +345,14 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
     {
       label: "Cálculo",
       buttons: [{ key: "calc-af", label: "Água fria", icon: "calculo", tool: { kind: "calc", which: "hidraulica" } }],
+    },
+    {
+      label: "Fluxograma",
+      buttons: [
+        { key: "fluxogramas-af", label: "Fluxogramas", icon: "fluxo", action: "fluxogramasAgua", needsModel: true },
+        { key: "novo-fluxograma-af", label: "Novo fluxograma (água fria)", icon: "fluxoNovo", action: "novoFluxogramaAgua", needsModel: true },
+        { key: "perfil-hid", label: "Perfil do empreendimento", icon: "predio", tool: { kind: "perfil" } },
+      ],
     },
   ],
   incendio: [

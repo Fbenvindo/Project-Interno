@@ -303,6 +303,30 @@ Comandos de desenho e edição na planta do pavimento, no estilo dos programas d
 
 Os desenhos ficam no pavimento em que foram feitos e são salvos no arquivo do projeto. Também entram na prancha, no PDF/SVG e no DXF (camadas `ANOT-DESENHO`, `ANOT-COTAS` e `ANOT-TEXTOS`). Ctrl+Z desfaz.
 
+### Fluxograma de água fria (Hidráulica)
+
+Em **Hidráulica › Fluxograma**, *Novo fluxograma (água fria)* usa a mesma ferramenta da elétrica (desenho livre, faixas por pavimento e torre, altura de faixa por pavimento, pranchas), com blocos e regras próprios:
+- **Blocos:**
+  1. Abastecimento: rede pública, poço, hidrômetro geral.
+  2. Reservatório inferior (volume, reserva de incêndio, células).
+  3. Recalque: conjunto motobomba (vazão, altura manométrica, potência) e coluna de recalque.
+  4. Reservatório superior (volume, nível d'água acima do piso).
+  5. Barrilete, coluna de água fria (vertical, vence pavimentos) e registro.
+  6. Controle de pressão: VRP (pressão de saída) e pressurizador.
+  7. Abrigo de hidrômetros do andar.
+  8. Consumo: apartamentos (quantidade, pessoas, per capita) e área comum/outros usos (L/dia).
+- **Ligações:** abastecimento, recalque, distribuição por gravidade e pressurizada.
+- **Conferência:**
+  - **Pressão estática** pelas cotas do perfil (cota de cada torre), a partir do reservatório superior, da VRP ou do pressurizador a montante: máxima no piso do pavimento mais baixo, até 40 mca; mínima no chuveiro (2 m) do mais alto, de ao menos 1 mca. Sem perdas de carga.
+  - **Reservação:** total frente ao consumo diário, com a divisão inferior/superior e a autonomia (aviso abaixo de 24 h).
+  - **Recalque:** deve sair do reservatório inferior e chegar ao superior; a altura manométrica não pode ficar abaixo do desnível geométrico, e a vazão deve ser de ao menos 15% do consumo diário por hora.
+  - **Abrigo de hidrômetros:** unidades atendidas frente à quantidade de hidrômetros.
+  - **Colunas:** o pavimento atendido tem de estar no alcance da coluna.
+- **Propriedades:** o painel mostra a cota do piso, as pressões máxima e mínima e de onde vêm, a cota piezométrica dos reservatórios e VRPs, o desnível do recalque e o balanço de consumo e reservação.
+- **Exemplo pronto:** *+ exemplo: 2 torres (água fria)*, com as torres de 12 e 16 andares e a cobertura de cada uma. Tem rede, hidrômetro geral, cisterna, recalque por coluna até o reservatório de cada torre, barrilete, colunas, abrigo de 4 hidrômetros e 4 apartamentos por andar. Na Torre B, VRP no térreo para o 1º ao 3º; pressurizador para as áreas comuns.
+
+As **cotas do perfil são calculadas por torre**: cada torre soma só os seus pavimentos, e a cobertura da torre mais baixa fica na cota dela.
+
 ### Perfil do empreendimento
 
 Em **Modelo › Perfil do empreendimento** (também em Elétrica › Fluxograma) você descreve o prédio: **torres**, **pavimentos** de baixo para cima e a altura piso a piso de cada um. O perfil fica salvo no projeto (.seb).

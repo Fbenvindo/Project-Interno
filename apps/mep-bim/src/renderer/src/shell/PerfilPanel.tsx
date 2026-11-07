@@ -3,9 +3,9 @@
 import { useState } from "react";
 import {
   checkProfile,
-  elevationText,
   EMPTY_PROFILE,
   floorElevations,
+  floorElevText,
   newBuildingId,
   profileFromModel,
   towerSummary,
@@ -128,12 +128,14 @@ export function PerfilPanel({ profile, onChange, modelStoreys, flowCount, onAppl
               <span>Torres</span>
               <span />
             </div>
-            {rows.map(({ f, e, i }) => (
+            {rows.map(({ f, i }) => (
               <div key={f.id} className={`perfil-row ${f.common ? "common" : ""}`}>
                 <input value={f.name} onChange={(ev) => setFloor(f.id, { name: ev.target.value })} />
                 <input type="number" min={1} step={1} value={f.repeat} onChange={(ev) => setFloor(f.id, { repeat: Math.max(1, Math.round(num(ev.target.value, 1))) })} />
                 <input type="number" min={0.5} step={0.05} value={f.height} onChange={(ev) => setFloor(f.id, { height: Math.max(0.5, num(ev.target.value, 3)) })} />
-                <span className="muted small perfil-elev">{elevationText(f, e)}</span>
+                <span className="muted small perfil-elev" title={floorElevText(p, i)}>
+                  {floorElevText(p, i)}
+                </span>
                 <input type="checkbox" checked={f.common} onChange={(ev) => setFloor(f.id, { common: ev.target.checked, towers: ev.target.checked ? [] : allTowers })} title="Comum a todas as torres" />
                 <span className="perfil-towers">
                   {f.common ? (

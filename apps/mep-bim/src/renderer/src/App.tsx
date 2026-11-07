@@ -41,9 +41,9 @@ import { Ribbon } from "./shell/Ribbon";
 import { DrawAidsBar, useDrawAidsKeys } from "./shell/DrawAidsBar";
 import { useDrawAids } from "./desenho/drawAids";
 import { FlowCanvas, FlowPanel, FlowSidebar, type FlowMode, type FlowSel } from "./fluxo/FlowEditor";
-import { applyProfile, blockStorey as blockStoreyOf, checkFlow, newFlow, newFlowId, type FlowContext, type FlowData } from "../../core/flow";
+import { applyProfile, blockStorey as blockStoreyOf, checkFlow, flowSystem, newFlow, newFlowId, type FlowContext, type FlowData, type FlowSystem } from "../../core/flow";
 import { PerfilPanel } from "./shell/PerfilPanel";
-import { exampleTwoTowersBusway } from "../../core/flowExamples";
+import { exampleTwoTowersBusway, exampleTwoTowersWater } from "../../core/flowExamples";
 import { pointPowerVA } from "../../core/circuits";
 import { ParamsPanel } from "./shell/ParamsPanel";
 import { BibliotecaPanel } from "./library/BibliotecaPanel";
@@ -178,8 +178,8 @@ export function App() {
   const [flowId, setFlowId] = useState<string | null>(null);
   const [flowSel, setFlowSel] = useState<FlowSel>(null);
   const [flowMode, setFlowMode] = useState<FlowMode>({ kind: "sel" });
-  const openFlowsRef = useRef<() => void>(() => {});
-  const newFlowRef = useRef<() => void>(() => {});
+  const openFlowsRef = useRef<(sys?: FlowSystem) => void>(() => {});
+  const newFlowRef = useRef<(sys?: FlowSystem) => void>(() => {});
   const [sheetId, setSheetId] = useState<string | null>(null);
   const [moveMode, setMoveMode] = useState(false);
   const [snapshots, setSnapshots] = useState<Map<string, { href: string; aspect: number }>>(() => new Map());
@@ -771,9 +771,13 @@ export function App() {
         case "exemploApartamento":
           return void handleSample("exemplo-apartamento.ifc");
         case "fluxogramas":
-          return openFlowsRef.current();
+          return openFlowsRef.current("eletrica");
         case "novoFluxograma":
-          return newFlowRef.current();
+          return newFlowRef.current("eletrica");
+        case "fluxogramasAgua":
+          return openFlowsRef.current("agua-fria");
+        case "novoFluxogramaAgua":
+          return newFlowRef.current("agua-fria");
         case "novoElemento":
           return setDesigning(newDesign(undefined, newDesignUid()));
         case "vincularIfc":
@@ -1183,8 +1187,10 @@ export function App() {
   const projectName = (fileName ?? "").replace(/\.ifc$/i, "");
 
   // ---- Fluxogramas -------------------------------------------------------------------------
-  const flowViews = store.views.filter((v) => v.kind === "fluxograma" && v.flow?.discipline === "eletrica");
   const flowDef = flowId ? (store.views.find((v) => v.id === flowId && v.kind === "fluxograma" && v.flow) ?? null) : null;
+  const activeSystem: FlowSystem = flowDef?.flow ? flowSystem(flowDef.flow) : "eletrica";
+  const flowViewsOf = (sys: FlowSystem) => store.views.filter((v) => v.kind === "fluxograma" && v.flow && flowSystem(v.flow) === sys);
+  const flowViews = flowViewsOf(activeSystem);
   const updateFlowOf = useCallback(
     (id: string, fn: (f: FlowData) => FlowData, key: string | null = null) =>
       store.setViews((l) => l.map((v) => (v.id === id && v.flow ? { ...v, flow: fn(v.flow) } : v)), key && `fluxo:${id}:${key}`),
@@ -1199,16 +1205,17 @@ export function App() {
     setView("fluxograma");
     setRightOpen(true);
   };
-  const newFlowView = () => {
+  const newFlowView = (sys: FlowSystem = activeSystem) => {
     if (!model) return;
-    const n = flowViews.length;
+    const n = flowViewsOf(sys).length;
+    const water = sys === "agua-fria";
     const v: ViewDef = {
       id: newFlowId("fluxo-"),
-      name: n ? `Fluxograma ${n + 1}` : "Distribuição geral",
+      name: n ? `${water ? "Água fria" : "Fluxograma"} ${n + 1}` : water ? "Água fria · distribuição" : "Distribuição geral",
       kind: "fluxograma",
       section: "trabalho",
       scale: 50,
-      flow: newFlow("eletrica", model.storeys, store.profile),
+      flow: newFlow(water ? "hidraulica" : "eletrica", model.storeys, store.profile, sys),
     };
     store.setViews((l) => [...l, v]);
     openFlowRef.current(v);
@@ -1216,13 +1223,26 @@ export function App() {
   /** Exemplo: 2 torres com medição nos andares (substitui o perfil do empreendimento, se confirmado). */
   const addFlowExample = () => {
     if (store.profile?.floors.length && !window.confirm("O exemplo substitui o perfil do empreendimento atual. Continuar?")) return;
-    const ex = exampleTwoTowersBusway();
+    const water = activeSystem === "agua-fria";
+    const ex = water ? exampleTwoTowersWater() : exampleTwoTowersBusway();
     store.setProfile(() => ex.profile, null);
-    const v: ViewDef = { id: newFlowId("fluxo-"), name: "Exemplo · 2 torres, medição nos andares", kind: "fluxograma", section: "trabalho", scale: 50, flow: ex.flow };
+    const v: ViewDef = {
+      id: newFlowId("fluxo-"),
+      name: water ? "Exemplo · 2 torres, água fria" : "Exemplo · 2 torres, medição nos andares",
+      kind: "fluxograma",
+      section: "trabalho",
+      scale: 50,
+      flow: ex.flow,
+    };
     store.setViews((l) => [...l, v]);
     openFlowRef.current(v);
   };
-  const openFlows = () => (flowDef ? openFlowRef.current(flowDef) : flowViews.length ? openFlowRef.current(flowViews[0]) : newFlowView());
+  const openFlows = (sys?: FlowSystem) => {
+    if (!sys) return flowDef ? openFlowRef.current(flowDef) : flowViews.length ? openFlowRef.current(flowViews[0]) : newFlowView();
+    if (flowDef && activeSystem === sys) return openFlowRef.current(flowDef);
+    const list = flowViewsOf(sys);
+    return list.length ? openFlowRef.current(list[0]) : newFlowView(sys);
+  };
   openFlowsRef.current = openFlows;
   newFlowRef.current = newFlowView;
   /** Quadros locados no modelo, com a carga instalada dos circuitos de cada um. */
@@ -1548,7 +1568,7 @@ export function App() {
           {model && view === "fluxograma" && (
             <section className="dock open flow-dock">
               <div className="dock-body">
-                <FlowSidebar flows={flowViews} activeId={flowId} onOpen={(v) => openFlowRef.current(v)} onNew={newFlowView} onExample={addFlowExample} mode={flowMode} setMode={setFlowMode} />
+                <FlowSidebar system={activeSystem} flows={flowViews} activeId={flowId} onOpen={(v) => openFlowRef.current(v)} onNew={() => newFlowView()} onExample={addFlowExample} mode={flowMode} setMode={setFlowMode} />
               </div>
             </section>
           )}

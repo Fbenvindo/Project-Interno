@@ -8,9 +8,14 @@
 import type { Prim } from "./plan/drawing";
 import type { P2 } from "./plan/section";
 import type { Discipline } from "./types";
-import { elevationText, floorElevations, floorLabel, type BuildingProfile } from "./building";
+import { floorElevationsByTower, floorElevText, floorLabel, type BuildingProfile } from "./building";
 
-export type FlowLinkKind = "mt" | "bt" | "barramento" | "emergencia" | "fv";
+/** Sistema do fluxograma (cada um com a sua paleta, ligações e conferência). */
+export type FlowSystem = "eletrica" | "agua-fria";
+
+export const SYSTEM_LABEL: Record<FlowSystem, string> = { eletrica: "Elétrica", "agua-fria": "Água fria" };
+
+export type FlowLinkKind = "mt" | "bt" | "barramento" | "emergencia" | "fv" | "abastecimento" | "recalque" | "agua" | "pressurizada";
 
 export const LINK_LABEL: Record<FlowLinkKind, string> = {
   mt: "Média tensão",
@@ -18,6 +23,10 @@ export const LINK_LABEL: Record<FlowLinkKind, string> = {
   barramento: "Barramento blindado",
   emergencia: "Emergência (gerador)",
   fv: "Fotovoltaico",
+  abastecimento: "Abastecimento (rede)",
+  recalque: "Recalque",
+  agua: "Distribuição por gravidade",
+  pressurizada: "Distribuição pressurizada",
 };
 
 export const LINK_STYLE: Record<FlowLinkKind, { color: string; weight: number; dashed?: boolean }> = {
@@ -26,6 +35,15 @@ export const LINK_STYLE: Record<FlowLinkKind, { color: string; weight: number; d
   barramento: { color: "#ea580c", weight: 0.9 },
   emergencia: { color: "#dc2626", weight: 0.5, dashed: true },
   fv: { color: "#16a34a", weight: 0.5 },
+  abastecimento: { color: "#0ea5e9", weight: 0.6, dashed: true },
+  recalque: { color: "#ea580c", weight: 0.6 },
+  agua: { color: "#1d4ed8", weight: 0.5 },
+  pressurizada: { color: "#7c3aed", weight: 0.5 },
+};
+
+export const LINK_KINDS: Record<FlowSystem, FlowLinkKind[]> = {
+  eletrica: ["mt", "bt", "barramento", "emergencia", "fv"],
+  "agua-fria": ["abastecimento", "recalque", "agua", "pressurizada"],
 };
 
 export interface FlowParamDef {
@@ -51,10 +69,18 @@ export type FlowSymbol =
   | "inversor"
   | "motor"
   | "caixa"
-  | "texto";
+  | "texto"
+  | "tanque"
+  | "bomba"
+  | "valvula"
+  | "coluna"
+  | "hidrometro"
+  | "consumo";
 
 export interface FlowBlockDef {
   id: string;
+  /** Sistema (ausente = elétrica). */
+  system?: FlowSystem;
   /** Grupo da paleta (1 a 9, como no pedido; 0 = anotação). */
   group: number;
   label: string;
@@ -78,8 +104,11 @@ export interface FlowBlockDef {
   meters?: number;
   /** Uma linha de resumo com os parâmetros principais. */
   summary?: (p: Record<string, string | number>) => string;
+  /** Ponto final do sistema (consumo): não precisa alimentar outros blocos. */
+  sink?: boolean;
 }
 
+/** Grupos da paleta da elétrica (mantido por compatibilidade; ver FLOW_GROUPS_BY). */
 export const FLOW_GROUPS: Record<number, string> = {
   1: "Alimentação de energia",
   2: "Distribuição dos alimentadores",
@@ -93,7 +122,28 @@ export const FLOW_GROUPS: Record<number, string> = {
   0: "Anotação",
 };
 
+export const FLOW_GROUPS_BY: Record<FlowSystem, Record<number, string>> = {
+  eletrica: FLOW_GROUPS,
+  "agua-fria": {
+    1: "Abastecimento",
+    2: "Reservação inferior",
+    3: "Recalque",
+    4: "Reservação superior",
+    5: "Distribuição (barrilete e colunas)",
+    6: "Controle de pressão",
+    7: "Medição individualizada",
+    8: "Consumo",
+    0: "Anotação",
+  },
+};
+
 const MT = "#7c3aed";
+const AF = "#0369a1";
+const AF_SRC = "#0ea5e9";
+const PUMP = "#c2410c";
+const VALVE = "#7c3aed";
+/** Litros com separador de milhar ("60.000 L"). */
+export const fmtL = (v: number) => `${Math.round(v || 0).toLocaleString("pt-BR")} L`;
 const BT = "#1e3a8a";
 const BUS = "#ea580c";
 const EM = "#dc2626";
@@ -450,6 +500,248 @@ const RAW_BLOCKS: FlowBlockDef[] = [
     params: [{ key: "potencia", label: "Potência", unit: "kW", default: "2×15" }],
     summary: (p) => `${p.potencia} kW`,
   },
+  // ---- Água fria --------------------------------------------------------------------------
+  {
+    id: "rede-agua",
+    system: "agua-fria",
+    group: 1,
+    label: "Rede pública (concessionária)",
+    tagPrefix: "REDE",
+    w: 2.4,
+    h: 1,
+    color: AF_SRC,
+    symbol: "rede",
+    out: "abastecimento",
+    source: true,
+    params: [{ key: "diametro", label: "Ramal predial", unit: "mm", default: 50 }],
+    summary: (p) => `ramal Ø${p.diametro} mm`,
+  },
+  {
+    id: "poco",
+    system: "agua-fria",
+    group: 1,
+    label: "Poço artesiano",
+    tagPrefix: "POÇO",
+    w: 2,
+    h: 1,
+    color: AF_SRC,
+    symbol: "bomba",
+    out: "abastecimento",
+    source: true,
+    params: [{ key: "vazao", label: "Vazão", unit: "m³/h", default: 5 }],
+    summary: (p) => `${p.vazao} m³/h`,
+  },
+  {
+    id: "hidrometro-geral",
+    system: "agua-fria",
+    group: 1,
+    label: "Hidrômetro geral (cavalete)",
+    tagPrefix: "HG",
+    w: 2,
+    h: 0.9,
+    color: AF_SRC,
+    symbol: "hidrometro",
+    out: "abastecimento",
+    params: [{ key: "diametro", label: "Diâmetro", unit: "mm", default: 50 }],
+    summary: (p) => `Ø${p.diametro} mm`,
+  },
+  {
+    id: "cisterna",
+    system: "agua-fria",
+    group: 2,
+    label: "Reservatório inferior (cisterna)",
+    tagPrefix: "RI",
+    w: 2.6,
+    h: 1.3,
+    color: AF,
+    symbol: "tanque",
+    out: "recalque",
+    params: [
+      { key: "volume", label: "Volume útil", unit: "L", default: 60000 },
+      { key: "incendio", label: "Reserva de incêndio", unit: "L", default: 0 },
+      { key: "celulas", label: "Células", default: 2 },
+    ],
+    summary: (p) => `${fmtL(Number(p.volume))}${Number(p.incendio) ? ` + RTI ${fmtL(Number(p.incendio))}` : ""}`,
+  },
+  {
+    id: "bomba-recalque",
+    system: "agua-fria",
+    group: 3,
+    label: "Conjunto motobomba de recalque",
+    tagPrefix: "BR",
+    w: 2.4,
+    h: 1.1,
+    color: PUMP,
+    symbol: "bomba",
+    out: "recalque",
+    params: [
+      { key: "conjunto", label: "Bombas", default: "1+1 reserva" },
+      { key: "vazao", label: "Vazão", unit: "m³/h", default: 10 },
+      { key: "hman", label: "Altura manométrica", unit: "mca", default: 40 },
+      { key: "potencia", label: "Potência", unit: "cv", default: 5 },
+    ],
+    summary: (p) => `${p.vazao} m³/h · ${p.hman} mca · ${p.potencia} cv`,
+  },
+  {
+    id: "coluna-recalque",
+    system: "agua-fria",
+    group: 3,
+    label: "Coluna de recalque",
+    tagPrefix: "RC",
+    w: 0.35,
+    h: 6,
+    color: PUMP,
+    symbol: "coluna",
+    out: "recalque",
+    params: [{ key: "diametro", label: "Diâmetro", unit: "mm", default: 50 }],
+    summary: (p) => `Ø${p.diametro} mm`,
+  },
+  {
+    id: "reservatorio-superior",
+    system: "agua-fria",
+    group: 4,
+    label: "Reservatório superior",
+    tagPrefix: "RS",
+    w: 2.6,
+    h: 1.3,
+    color: AF,
+    symbol: "tanque",
+    out: "agua",
+    params: [
+      { key: "volume", label: "Volume útil", unit: "L", default: 30000 },
+      { key: "incendio", label: "Reserva de incêndio", unit: "L", default: 0 },
+      { key: "nivel", label: "Nível d'água acima do piso", unit: "m", default: 1.5 },
+      { key: "celulas", label: "Células", default: 2 },
+    ],
+    summary: (p) => `${fmtL(Number(p.volume))}${Number(p.incendio) ? ` + RTI ${fmtL(Number(p.incendio))}` : ""}`,
+  },
+  {
+    id: "barrilete",
+    system: "agua-fria",
+    group: 5,
+    label: "Barrilete",
+    tagPrefix: "BAR",
+    w: 2.2,
+    h: 0.8,
+    color: AF,
+    symbol: "caixa",
+    out: "agua",
+    params: [{ key: "diametro", label: "Diâmetro", unit: "mm", default: 75 }],
+    summary: (p) => `Ø${p.diametro} mm`,
+  },
+  {
+    id: "coluna-af",
+    system: "agua-fria",
+    group: 5,
+    label: "Coluna de água fria",
+    tagPrefix: "AF",
+    w: 0.35,
+    h: 6,
+    color: AF,
+    symbol: "coluna",
+    out: "agua",
+    params: [{ key: "diametro", label: "Diâmetro", unit: "mm", default: 50 }],
+    summary: (p) => `Ø${p.diametro} mm`,
+  },
+  {
+    id: "registro",
+    system: "agua-fria",
+    group: 5,
+    label: "Registro geral",
+    tagPrefix: "RG",
+    w: 1.4,
+    h: 0.8,
+    color: AF,
+    symbol: "valvula",
+    out: "agua",
+    params: [{ key: "diametro", label: "Diâmetro", unit: "mm", default: 50 }],
+    summary: (p) => `Ø${p.diametro} mm`,
+  },
+  {
+    id: "vrp",
+    system: "agua-fria",
+    group: 6,
+    label: "Estação redutora de pressão (VRP)",
+    tagPrefix: "VRP",
+    w: 2.2,
+    h: 1,
+    color: VALVE,
+    symbol: "valvula",
+    out: "agua",
+    params: [
+      { key: "saida", label: "Pressão de saída", unit: "mca", default: 20 },
+      { key: "diametro", label: "Diâmetro", unit: "mm", default: 50 },
+    ],
+    summary: (p) => `saída ${p.saida} mca · Ø${p.diametro}`,
+  },
+  {
+    id: "pressurizador",
+    system: "agua-fria",
+    group: 6,
+    label: "Pressurizador (booster)",
+    tagPrefix: "PR",
+    w: 2.2,
+    h: 1,
+    color: VALVE,
+    symbol: "bomba",
+    out: "pressurizada",
+    params: [
+      { key: "pressao", label: "Pressão de saída", unit: "mca", default: 20 },
+      { key: "vazao", label: "Vazão", unit: "m³/h", default: 3 },
+    ],
+    summary: (p) => `${p.pressao} mca · ${p.vazao} m³/h`,
+  },
+  {
+    id: "abrigo-hidrometros",
+    system: "agua-fria",
+    group: 7,
+    label: "Abrigo de hidrômetros (andar)",
+    tagPrefix: "HID",
+    w: 2.2,
+    h: 0.9,
+    color: AF,
+    symbol: "hidrometro",
+    out: "agua",
+    params: [{ key: "hidrometros", label: "Hidrômetros", default: 4 }],
+    summary: (p) => `${p.hidrometros} hidrômetros`,
+  },
+  {
+    id: "aptos-af",
+    system: "agua-fria",
+    group: 8,
+    label: "Apartamentos (ramais)",
+    tagPrefix: "AP",
+    w: 2.2,
+    h: 0.9,
+    color: AF,
+    symbol: "consumo",
+    out: "agua",
+    sink: true,
+    params: [
+      { key: "quantidade", label: "Apartamentos", default: 4 },
+      { key: "pessoas", label: "Pessoas por apto", default: 4 },
+      { key: "percapita", label: "Consumo per capita", unit: "L/dia", default: 200 },
+    ],
+    summary: (p) => `${p.quantidade} aptos · ${p.pessoas} pessoas`,
+  },
+  {
+    id: "consumo-af",
+    system: "agua-fria",
+    group: 8,
+    label: "Área comum / outros usos",
+    tagPrefix: "USO",
+    w: 2.2,
+    h: 0.9,
+    color: AF,
+    symbol: "consumo",
+    out: "agua",
+    sink: true,
+    params: [
+      { key: "uso", label: "Uso", default: "áreas comuns" },
+      { key: "consumo", label: "Consumo", unit: "L/dia", default: 3000 },
+    ],
+    summary: (p) => `${p.uso} · ${fmtL(Number(p.consumo))}/dia`,
+  },
   // Anotação
   {
     id: "texto",
@@ -467,7 +759,7 @@ const RAW_BLOCKS: FlowBlockDef[] = [
 ];
 
 /** Tamanhos finais (25% maiores que a base, para leitura na tela e na folha). */
-export const FLOW_BLOCKS: FlowBlockDef[] = RAW_BLOCKS.map((b) => (b.symbol === "barramento" || b.symbol === "texto" ? b : { ...b, w: Math.round(b.w * 12.5) / 10, h: Math.round(b.h * 12.5) / 10 }));
+export const FLOW_BLOCKS: FlowBlockDef[] = RAW_BLOCKS.map((b) => (b.symbol === "barramento" || b.symbol === "coluna" || b.symbol === "texto" ? b : { ...b, w: Math.round(b.w * 12.5) / 10, h: Math.round(b.h * 12.5) / 10 }));
 
 export const FLOW_BLOCK_BY_ID: Record<string, FlowBlockDef> = Object.fromEntries(FLOW_BLOCKS.map((b) => [b.id, b]));
 
@@ -505,6 +797,8 @@ export interface FlowTower {
 
 export interface FlowData {
   discipline: Discipline;
+  /** Sistema (ausente = elétrica). */
+  system?: FlowSystem;
   /** Por pavimento (faixas e colunas por torre) ou livre. */
   layout: "pavimentos" | "livre";
   /** Pavimentos de cima para baixo. */
@@ -530,6 +824,12 @@ export interface FlowLevel {
   common?: boolean;
   /** Torres que têm o pavimento (quando não é comum). */
   towers?: string[];
+  /** Cota do piso (m) em cada torre que tem o pavimento; nos repetidos, do primeiro. */
+  z?: Record<string, number>;
+  /** Repetidos: cota do piso do último pavimento do grupo, por torre. */
+  zTop?: Record<string, number>;
+  /** Pavimentos iguais representados pela faixa (tipo ×n). */
+  repeat?: number;
 }
 
 export const LABEL_W = 3.2;
@@ -597,9 +897,10 @@ export function withBandHeights(f: FlowData, next: { bandH?: number; bandHs?: (n
   return { ...g, blocks };
 }
 
-export function newFlow(discipline: Discipline, storeysBottomUp: string[], profile?: BuildingProfile | null): FlowData {
+export function newFlow(discipline: Discipline, storeysBottomUp: string[], profile?: BuildingProfile | null, system?: FlowSystem): FlowData {
   const base: FlowData = {
     discipline,
+    ...(system ? { system } : {}),
     layout: "pavimentos",
     storeys: [...storeysBottomUp].reverse(),
     bandH: 3,
@@ -630,10 +931,20 @@ export function levelHasTower(f: FlowData, i: number, towerId: string): boolean 
  * mesmo pavimento (pelo nome) e na mesma torre (pelo id), na mesma posição dentro da célula.
  */
 export function applyProfile(f: FlowData, p: BuildingProfile): FlowData {
-  const el = floorElevations(p);
-  const topDown = p.floors.map((fl, i) => ({ fl, e: el[i] })).reverse();
+  const byTower = floorElevationsByTower(p);
+  const topDown = p.floors.map((fl, i) => ({ fl, i })).reverse();
   const storeys = topDown.map(({ fl }) => floorLabel(fl));
-  const levels: FlowLevel[] = topDown.map(({ fl, e }) => ({ floor: fl.name, elevation: elevationText(fl, e), common: fl.common, towers: fl.common ? undefined : [...fl.towers] }));
+  const levels: FlowLevel[] = topDown.map(({ fl, i }) => {
+    const z: Record<string, number> = {};
+    const zTop: Record<string, number> = {};
+    for (const t of p.towers) {
+      const e = byTower[t.id]?.[i];
+      if (e == null) continue;
+      z[t.id] = e;
+      zTop[t.id] = Math.round((e + fl.height * (Math.max(1, fl.repeat) - 1)) * 1000) / 1000;
+    }
+    return { floor: fl.name, elevation: floorElevText(p, i), common: fl.common, towers: fl.common ? undefined : [...fl.towers], z, zTop, repeat: Math.max(1, fl.repeat) };
+  });
   const oldWidth = new Map(f.towers.map((t) => [t.id, t.width]));
   const towers: FlowTower[] = p.towers.map((t) => ({ id: t.id, name: t.name, width: oldWidth.get(t.id) ?? 16 }));
   // A altura própria de cada faixa segue o pavimento (pelo nome).
@@ -688,7 +999,15 @@ export function blockRect(b: FlowBlock): Rect {
   return { x: b.x, y: b.y, w: d?.w ?? 2, h: b.h ?? d?.h ?? 1 };
 }
 
-export const isBus = (b: FlowBlock | undefined) => b?.kind === "barramento";
+/** Elemento vertical que vence pavimentos (barramento blindado, coluna de água). */
+export const isBus = (b: FlowBlock | undefined) => {
+  const s = b && FLOW_BLOCK_BY_ID[b.kind]?.symbol;
+  return s === "barramento" || s === "coluna";
+};
+/** Barramento blindado (regras das caixas de medição). */
+export const isBusway = (b: FlowBlock | undefined) => b?.kind === "barramento";
+
+export const flowSystem = (f: FlowData): FlowSystem => f.system ?? (f.discipline === "hidraulica" ? "agua-fria" : "eletrica");
 
 /** Faixa (pavimento) e coluna (torre) que contêm o ponto; null fora delas ou no modo livre. */
 export function bandAt(f: FlowData, y: number): string | null {
@@ -763,6 +1082,7 @@ export function linkPath(a: FlowBlock, b: FlowBlock): P2[] {
 /** Tipo da ligação pelo bloco de origem (média tensão até o transformador, etc.). */
 export function defaultLinkKind(from: FlowBlock, to: FlowBlock): FlowLinkKind {
   const d = FLOW_BLOCK_BY_ID[from.kind];
+  if (d?.system === "agua-fria") return d.out;
   if (isBus(from) || isBus(to)) return d?.out === "emergencia" ? "emergencia" : "bt";
   if (d?.out === "mt" && !FLOW_BLOCK_BY_ID[to.kind]?.acceptsMT) return "mt";
   return d?.out ?? "bt";
@@ -830,6 +1150,25 @@ function symbolPrims(d: FlowBlockDef, r: Rect, layer: string, id?: number): Prim
       out.push({ t: "text", p: P(sx, sy + 0.1), text: "M", height: mm(2.2), anchor: "middle", color: c, layer, id });
       break;
     case "derivacao":
+      break;
+    case "tanque":
+      out.push({ t: "poly", pts: [P(sx - 0.3, sy - 0.3), P(sx + 0.3, sy - 0.3), P(sx + 0.3, sy + 0.3), P(sx - 0.3, sy + 0.3)], closed: true, weight: 0.25, color: c, layer, id });
+      out.push({ t: "poly", pts: [P(sx - 0.3, sy - 0.02), P(sx + 0.3, sy - 0.02), P(sx + 0.3, sy + 0.3), P(sx - 0.3, sy + 0.3)], closed: true, weight: 0.05, fill: "#7dd3fc", color: c, layer, id });
+      break;
+    case "bomba":
+      out.push({ t: "circle", c: P(sx, sy), r: 0.28, weight: 0.3, color: c, layer, id });
+      out.push({ t: "poly", pts: [P(sx - 0.12, sy - 0.2), P(sx + 0.2, sy), P(sx - 0.12, sy + 0.2)], closed: true, weight: 0.1, fill: c, color: c, layer, id });
+      break;
+    case "valvula":
+      out.push({ t: "poly", pts: [P(sx - 0.28, sy - 0.18), P(sx + 0.28, sy + 0.18), P(sx + 0.28, sy - 0.18), P(sx - 0.28, sy + 0.18)], closed: true, weight: 0.25, color: c, layer, id });
+      out.push(line([sx, sy], [sx, sy - 0.3], 0.2));
+      break;
+    case "hidrometro":
+      out.push({ t: "circle", c: P(sx, sy), r: 0.26, weight: 0.3, color: c, layer, id });
+      out.push({ t: "text", p: P(sx, sy + 0.02), text: "H", height: mm(2.2), anchor: "middle", color: c, layer, id });
+      break;
+    case "consumo":
+      out.push({ t: "poly", pts: [P(sx - 0.25, sy + 0.25), P(sx - 0.25, sy - 0.05), P(sx, sy - 0.28), P(sx + 0.25, sy - 0.05), P(sx + 0.25, sy + 0.25)], closed: true, weight: 0.25, color: c, layer, id });
       break;
     case "caixa":
       out.push({ t: "poly", pts: [P(sx - 0.2, sy - 0.2), P(sx + 0.2, sy - 0.2), P(sx + 0.2, sy + 0.2), P(sx - 0.2, sy + 0.2)], closed: true, weight: 0.2, color: c, layer, id });
@@ -942,6 +1281,12 @@ export function flowPrims(f: FlowData, opt: FlowDrawOptions = {}): Prim[] {
       out.push({ t: "text", p: P(r.x, r.y + r.h * 0.7), text: b.text || "Texto", height: mm(2.5), anchor: "start", color: d.color, layer, id });
       continue;
     }
+    if (d.symbol === "coluna") {
+      out.push({ t: "line", a: P(r.x + r.w / 2, r.y), b: P(r.x + r.w / 2, r.y + r.h), weight: 0.7, color: d.color, layer, id });
+      out.push({ t: "circle", c: P(r.x + r.w / 2, r.y), r: 0.09, weight: 0.3, fill: d.color, color: d.color, layer, id });
+      out.push({ t: "text", p: P(r.x - 0.15, r.y + r.h / 2), text: `${b.tag} · ${d.summary?.(b.params) ?? ""}`, height: mm(2.4), anchor: "middle", angle: Math.PI / 2, color: d.color, layer, id });
+      continue;
+    }
     if (d.symbol === "barramento") {
       out.push({ t: "poly", pts: [P(r.x, r.y), P(r.x + r.w, r.y), P(r.x + r.w, r.y + r.h), P(r.x, r.y + r.h)], closed: true, weight: 0.5, fill: "#fff7ed", color: d.color, layer, id });
       out.push({ t: "line", a: P(r.x + r.w / 2, r.y + 0.1), b: P(r.x + r.w / 2, r.y + r.h - 0.1), weight: 0.25, color: d.color, layer, id });
@@ -1041,6 +1386,159 @@ export function downstreamLoad(f: FlowData, blockId: string, ctx: FlowContext): 
 const MEC_KINDS = new Set(["mec-ii", "mec-iv", "mec-vi", "mec-ix", "mec-xii"]);
 export const isMec = (b: FlowBlock | undefined): b is FlowBlock => !!b && MEC_KINDS.has(b.kind);
 
+// ---- Água fria: cotas, pressões e reservação -------------------------------------------------------
+
+/** Cotas do piso (m) do pavimento do bloco, pela faixa e torre: do primeiro e do último (repetidos). */
+export function blockZ(f: FlowData, b: FlowBlock): { low: number; high: number } | null {
+  const r = blockRect(b);
+  const i = bandIndexAt(f, r.y + r.h / 2);
+  const lv = i >= 0 ? f.levels?.[i] : undefined;
+  if (!lv?.z) return null;
+  const t = blockTower(f, b);
+  const pick = (m?: Record<string, number>) => (m ? (t && m[t.id] != null ? m[t.id] : Object.values(m)[0]) : undefined);
+  const low = pick(lv.z);
+  if (low == null) return null;
+  return { low, high: pick(lv.zTop) ?? low };
+}
+
+/** Pavimentos iguais que o bloco representa (faixa "tipo ×n"). */
+export const blockRepeat = (f: FlowData, b: FlowBlock) => {
+  const r = blockRect(b);
+  const i = bandIndexAt(f, r.y + r.h / 2);
+  return Math.max(1, (i >= 0 ? f.levels?.[i]?.repeat : 1) ?? 1);
+};
+
+/** Altura do chuveiro acima do piso, para a pressão mínima (m). */
+export const SHOWER_H = 2.0;
+/** Limites da NBR 5626: estática máxima 40 mca; mínima nos pontos 1 mca. */
+export const P_MAX = 40;
+export const P_MIN = 1;
+
+/** Cota piezométrica (m) que cada bloco recebe: reservatório superior, VRP ou pressurizador a montante. */
+export function waterHeads(f: FlowData): Map<string, { head: number; from: string }> {
+  const byId = new Map(f.blocks.map((b) => [b.id, b]));
+  const heads = new Map<string, { head: number; from: string }>();
+  const own = (b: FlowBlock): number | null => {
+    const z = blockZ(f, b);
+    if (!z) return null;
+    if (b.kind === "reservatorio-superior") return z.low + (Number(b.params.nivel) || 0);
+    if (b.kind === "vrp") return z.low + (Number(b.params.saida) || 0);
+    if (b.kind === "pressurizador") return z.low + (Number(b.params.pressao) || 0);
+    return null;
+  };
+  const setters = f.blocks.filter((b) => b.kind === "reservatorio-superior" || b.kind === "vrp" || b.kind === "pressurizador");
+  const queue: string[] = [];
+  for (const b of setters) {
+    const h = own(b);
+    if (h == null) continue;
+    heads.set(b.id, { head: h, from: b.id });
+    queue.push(b.id);
+  }
+  while (queue.length) {
+    const id = queue.shift()!;
+    const h = heads.get(id)!;
+    for (const l of f.links) {
+      if (l.from !== id) continue;
+      const c = byId.get(l.to);
+      if (!c || heads.has(c.id)) continue;
+      if (c.kind === "reservatorio-superior" || c.kind === "vrp" || c.kind === "pressurizador" || c.kind === "cisterna" || c.kind === "bomba-recalque" || c.kind === "coluna-recalque") continue;
+      heads.set(c.id, h);
+      queue.push(c.id);
+    }
+  }
+  return heads;
+}
+
+/** Pressões estáticas no pavimento do bloco (mca): máxima no piso do mais baixo, mínima no chuveiro do mais alto. */
+export function waterPressure(f: FlowData, b: FlowBlock, heads = waterHeads(f)): { max: number; min: number; head: number; from: string } | null {
+  const h = heads.get(b.id);
+  const z = blockZ(f, b);
+  if (!h || !z) return null;
+  return { max: h.head - z.low, min: h.head - (z.high + SHOWER_H), head: h.head, from: h.from };
+}
+
+/** Consumo diário (L) dos blocos de consumo e volume das reservações. */
+export function waterBalance(f: FlowData): { consumo: number; inferior: number; superior: number; dias: number } {
+  let consumo = 0;
+  let inferior = 0;
+  let superior = 0;
+  for (const b of f.blocks) {
+    const n = blockRepeat(f, b);
+    if (b.kind === "aptos-af") consumo += n * (Number(b.params.quantidade) || 0) * (Number(b.params.pessoas) || 0) * (Number(b.params.percapita) || 0);
+    else if (b.kind === "consumo-af") consumo += n * (Number(b.params.consumo) || 0);
+    else if (b.kind === "cisterna") inferior += Number(b.params.volume) || 0;
+    else if (b.kind === "reservatorio-superior") superior += Number(b.params.volume) || 0;
+  }
+  return { consumo, inferior, superior, dias: consumo > 0 ? (inferior + superior) / consumo : 0 };
+}
+
+const mca = (v: number) => `${v.toFixed(1).replace(".", ",")} mca`;
+
+function checkWater(f: FlowData, issues: FlowIssue[], tag: (b: FlowBlock) => string) {
+  const byId = new Map(f.blocks.map((b) => [b.id, b]));
+  const outgoing = (id: string) => f.links.filter((l) => l.from === id);
+  const hasZ = !!f.levels?.some((l) => l.z && Object.keys(l.z).length);
+  const heads = waterHeads(f);
+  if (!hasZ && f.blocks.some((b) => FLOW_BLOCK_BY_ID[b.kind]?.sink))
+    issues.push({ level: "info", text: "Sem as cotas do perfil do empreendimento as pressões não são calculadas: aplique o perfil (Propriedades › Pavimentos › do perfil)." });
+  // Pressões estáticas nos pontos de consumo e nos abrigos de hidrômetros.
+  for (const b of f.blocks) {
+    if (!(FLOW_BLOCK_BY_ID[b.kind]?.sink || b.kind === "abrigo-hidrometros")) continue;
+    const p = waterPressure(f, b, heads);
+    if (!p) continue;
+    const where = blockStorey(f, b) ?? "";
+    if (p.max > P_MAX)
+      issues.push({ level: "aviso", text: `${tag(b)} (${where}): pressão estática de ${mca(p.max)} no piso passa de ${P_MAX} mca (NBR 5626). Use válvula redutora de pressão (VRP) a montante.`, blockId: b.id });
+    if (p.min < P_MIN)
+      issues.push({ level: "aviso", text: `${tag(b)} (${where}): pressão estática de ${mca(p.min)} no chuveiro, abaixo de ${P_MIN} mca. Use pressurizador ou eleve o reservatório.`, blockId: b.id });
+  }
+  // Abrigo de hidrômetros: unidades atendidas x hidrômetros.
+  for (const b of f.blocks.filter((x) => x.kind === "abrigo-hidrometros")) {
+    const cap = Number(b.params.hidrometros) || 0;
+    const units = outgoing(b.id).reduce((sum, l) => {
+      const t = byId.get(l.to);
+      return sum + (t?.kind === "aptos-af" ? Number(t.params.quantidade) || 0 : t ? 1 : 0);
+    }, 0);
+    if (cap && units > cap) issues.push({ level: "erro", text: `${tag(b)}: ${units} unidades atendidas, mas o abrigo tem ${cap} hidrômetros.`, blockId: b.id });
+  }
+  // Coluna: as derivações têm de estar nos pavimentos que ela alcança.
+  if (f.layout === "pavimentos")
+    for (const col of f.blocks.filter((b) => b.kind === "coluna-af")) {
+      const span = new Set(busStoreys(f, col));
+      for (const l of outgoing(col.id)) {
+        const t = byId.get(l.to);
+        if (!t || isBus(t)) continue;
+        const s = blockStorey(f, t);
+        if (s && !span.has(s)) issues.push({ level: "aviso", text: `${tag(t)} (${s}) está num pavimento que a coluna ${tag(col)} não alcança: estique a coluna.`, blockId: t.id });
+      }
+    }
+  // Reservação e recalque.
+  const bal = waterBalance(f);
+  if (bal.consumo > 0) {
+    const v = bal.inferior + bal.superior;
+    const pctSup = v ? Math.round((bal.superior / v) * 100) : 0;
+    if (bal.dias < 1)
+      issues.push({ level: "aviso", text: `Reservação de ${fmtL(v)} para consumo de ${fmtL(bal.consumo)}/dia: ${bal.dias.toFixed(2).replace(".", ",")} dia — abaixo do consumo de 24 h (NBR 5626).` });
+    else
+      issues.push({ level: "info", text: `Reservação de ${fmtL(v)} (inferior ${100 - pctSup}% · superior ${pctSup}%) para consumo de ${fmtL(bal.consumo)}/dia: autonomia de ${bal.dias.toFixed(1).replace(".", ",")} dia(s).` });
+  }
+  for (const pump of f.blocks.filter((b) => b.kind === "bomba-recalque")) {
+    const zp = blockZ(f, pump);
+    const tops = downstream(f, pump.id).filter((b) => b.kind === "reservatorio-superior");
+    if (!tops.length) issues.push({ level: "aviso", text: `${tag(pump)}: o recalque deve chegar a um reservatório superior.`, blockId: pump.id });
+    if (!f.links.some((l) => l.to === pump.id && byId.get(l.from)?.kind === "cisterna")) issues.push({ level: "aviso", text: `${tag(pump)}: a bomba de recalque deve sair do reservatório inferior.`, blockId: pump.id });
+    if (zp) {
+      const desnivel = Math.max(0, ...tops.map((t) => (blockZ(f, t)?.low ?? zp.low) + (Number(t.params.nivel) || 0) - zp.low));
+      const hman = Number(pump.params.hman) || 0;
+      if (desnivel && hman < desnivel)
+        issues.push({ level: "aviso", text: `${tag(pump)}: altura manométrica de ${mca(hman)} menor que o desnível geométrico de ${mca(desnivel)} até o reservatório superior (sem contar as perdas).`, blockId: pump.id });
+    }
+    const q = Number(pump.params.vazao) || 0;
+    if (bal.consumo > 0 && q < (0.15 * bal.consumo) / 1000)
+      issues.push({ level: "aviso", text: `${tag(pump)}: vazão de ${q} m³/h abaixo de 15% do consumo diário por hora (${((0.15 * bal.consumo) / 1000).toFixed(1).replace(".", ",")} m³/h, NBR 5626).`, blockId: pump.id });
+  }
+}
+
 export function checkFlow(f: FlowData, ctx: FlowContext): FlowIssue[] {
   const issues: FlowIssue[] = [];
   const byId = new Map(f.blocks.map((b) => [b.id, b]));
@@ -1056,13 +1554,13 @@ export function checkFlow(f: FlowData, ctx: FlowContext): FlowIssue[] {
     if (!d || d.symbol === "texto") continue;
     const inc = incoming(b.id);
     if (!d.source && !inc.length) issues.push({ level: "aviso", text: `${tag(b)} não está alimentado (nenhuma ligação chega nele).`, blockId: b.id });
-    if (!outgoing(b.id).length && !d.board && !MEC_KINDS.has(b.kind) && b.kind !== "cm-convencional")
+    if (!outgoing(b.id).length && !d.board && !d.sink && !MEC_KINDS.has(b.kind) && b.kind !== "cm-convencional")
       issues.push({ level: "info", text: `${tag(b)} não alimenta nenhum bloco.`, blockId: b.id });
     // Média tensão só em painel MT, cabine de medição MT e transformador.
     for (const l of inc)
       if (l.kind === "mt" && !d.acceptsMT) issues.push({ level: "aviso", text: `Média tensão chegando em ${tag(b)}: só painel de MT, cabine de medição MT ou transformador recebem MT.`, blockId: b.id });
-    if (paved && d.symbol !== "barramento" && !blockStorey(f, b)) issues.push({ level: "aviso", text: `${tag(b)} está fora das faixas de pavimento.`, blockId: b.id });
-    if (paved && d.symbol !== "barramento") {
+    if (paved && !isBus(b) && !blockStorey(f, b)) issues.push({ level: "aviso", text: `${tag(b)} está fora das faixas de pavimento.`, blockId: b.id });
+    if (paved && !isBus(b)) {
       const r = blockRect(b);
       const i = bandIndexAt(f, r.y + r.h / 2);
       const t = blockTower(f, b);
@@ -1072,7 +1570,7 @@ export function checkFlow(f: FlowData, ctx: FlowContext): FlowIssue[] {
   }
 
   // Barramentos blindados: caixa direta (uma só) ou caixas de derivação (até 2 por andar).
-  for (const bus of f.blocks.filter(isBus)) {
+  for (const bus of f.blocks.filter(isBusway)) {
     const direct = outgoing(bus.id)
       .map((l) => byId.get(l.to))
       .filter(isMec);
@@ -1103,7 +1601,7 @@ export function checkFlow(f: FlowData, ctx: FlowContext): FlowIssue[] {
     }
   }
   for (const dv of f.blocks.filter((b) => b.kind === "derivacao")) {
-    if (incoming(dv.id).some((l) => !isBus(byId.get(l.from)))) issues.push({ level: "aviso", text: `${tag(dv)}: a caixa de derivação deve sair de um barramento blindado.`, blockId: dv.id });
+    if (incoming(dv.id).some((l) => !isBusway(byId.get(l.from)))) issues.push({ level: "aviso", text: `${tag(dv)}: a caixa de derivação deve sair de um barramento blindado.`, blockId: dv.id });
     const mecs = outgoing(dv.id).filter((l) => isMec(byId.get(l.to))).length;
     if (mecs > 2) issues.push({ level: "erro", text: `${tag(dv)}: ${mecs} caixas de medição na mesma derivação (máximo 2).`, blockId: dv.id });
   }
@@ -1148,7 +1646,9 @@ export function checkFlow(f: FlowData, ctx: FlowContext): FlowIssue[] {
     if (same) issues.push({ level: "info", text: `${tag(b)}: há um quadro ${same.tag} no modelo; vincule para conferir a carga e o pavimento.`, blockId: b.id, action: { kind: "vincular", blockId: b.id, pointGuid: same.guid } });
     else issues.push({ level: "info", text: `${tag(b)} ainda não foi locado no modelo.`, blockId: b.id, action: { kind: "locar", blockId: b.id } });
   }
-  for (const m of ctx.boards) if (!linked.has(m.guid) && !f.blocks.some((b) => b.tag === m.tag)) issues.push({ level: "aviso", text: `O quadro ${m.tag}${m.storey ? ` (${m.storey})` : ""} está no modelo, mas não aparece no fluxograma.` });
+  if (flowSystem(f) === "eletrica") for (const m of ctx.boards) if (!linked.has(m.guid) && !f.blocks.some((b) => b.tag === m.tag)) issues.push({ level: "aviso", text: `O quadro ${m.tag}${m.storey ? ` (${m.storey})` : ""} está no modelo, mas não aparece no fluxograma.` });
+
+  if (flowSystem(f) === "agua-fria") checkWater(f, issues, tag);
 
   const order: Record<IssueLevel, number> = { erro: 0, aviso: 1, info: 2 };
   return issues.sort((a, b) => order[a.level] - order[b.level]);

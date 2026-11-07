@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkProfile, elevationText, floorElevations, profileFromModel, towerSummary, typicalProfile, type BuildingProfile } from "../src/core/building";
+import { checkProfile, elevationText, floorElevations, floorElevText, profileFromModel, towerSummary, typicalProfile, type BuildingProfile } from "../src/core/building";
 import { applyProfile, blockStorey, blockTower, checkFlow, flowPrims, HEADER_H, newFlow, type FlowBlock } from "../src/core/flow";
 
 // 2 torres: subsolo e térreo comuns; Torre A com 10 tipos, Torre B com 4; cobertura nas duas.
@@ -21,7 +21,9 @@ const profile = (): BuildingProfile => ({
 describe("perfil do empreendimento", () => {
   it("cotas acumuladas com repetição e resumo por torre", () => {
     const p = profile();
-    expect(floorElevations(p)).toEqual([-3, 0, 4.5, 33.5, 45.1]);
+    // Cotas por torre: o tipo da Torre B começa sobre o térreo; a cobertura difere entre as torres.
+    expect(floorElevations(p)).toEqual([-3, 0, 4.5, 4.5, 33.5]);
+    expect(floorElevText(p, 4)).toBe("A +33,50 · B +16,10");
     expect(elevationText(p.floors[2], 4.5)).toBe("+4,50 a +30,60");
     expect(towerSummary(p, "a").floors).toBe(1 + 1 + 10 + 1);
     expect(towerSummary(p, "b").floors).toBe(1 + 1 + 4 + 1);
