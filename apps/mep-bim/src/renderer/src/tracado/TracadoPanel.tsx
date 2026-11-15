@@ -453,16 +453,7 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
       if (e.key === "Enter" && L.draft.length >= 2) finishRun(L.draft);
       else if (e.key === "Backspace" && L.draft.length) setDraft(L.draft.slice(0, -1));
       else if (e.key.toLowerCase() === "e" && !mod && L.draft.length) goToWorkElevation();
-      else if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
-        e.preventDefault();
-        store.undo();
-      } else if (mod && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) {
-        e.preventDefault();
-        store.redo();
-      } else if (e.key === "Delete" && selectedRunIds.length) {
-        store.removeRuns(selectedRunIds);
-        onSelect([]);
-      }
+      // Ctrl+Z / Ctrl+Y e Delete são tratados no app inteiro (App.tsx).
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

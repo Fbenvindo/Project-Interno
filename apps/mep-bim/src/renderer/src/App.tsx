@@ -8,6 +8,7 @@ import type { Discipline, ElementInfo, Vec3 } from "../../core/types";
 import type { LoadedModel } from "../../ifc/loadIfc";
 import { loadIfcModel, warmIfcWorker } from "./ifc/ifcLoader";
 import { cacheClear, cacheList } from "./ifc/modelCache";
+import { deletedText, deleteSelection } from "./desenho/deleteSelection";
 import { desktop, openIfc } from "./platform";
 import { Viewer, type ColorMode } from "./viewer/Viewer";
 import { QuantitiesPanel } from "./components/QuantitiesPanel";
@@ -825,6 +826,10 @@ export function App() {
             await cacheClear();
             window.alert("Cache de modelos limpo.");
           })();
+        case "desfazer":
+          return store.undo();
+        case "refazer":
+          return store.redo();
         case "temaClaro":
           return setTheme("claro");
         case "temaEscuro":
@@ -1076,6 +1081,7 @@ export function App() {
     draftView,
     cutHeight: activeViewDef?.cutHeight ?? editorCut,
     onDone: () => chooseTool({ kind: "propriedades" }),
+    onNotice: (msg) => files.setMessage(msg),
     isSection: activeViewDef?.kind === "corte",
   });
   const planTool = tool.kind === "desenho" ? draft.tool : null;
@@ -1194,6 +1200,36 @@ export function App() {
   // Ortogonal (botão ORTO / F8) e encaixes (F3): valem para a planta, o 3D e o editor de elementos.
   useDrawAidsKeys();
   const drawAids = useDrawAids();
+
+  // Teclado em todo o app: Ctrl+Z desfaz, Ctrl+Y (ou Ctrl+Shift+Z) refaz e Delete apaga a
+  // seleção direto (só os elementos criados no app; os dos IFCs não são apagados).
+  const keysRef = useRef({ store, selection, view, designing, files });
+  keysRef.current = { store, selection, view, designing, files };
+  useEffect(() => {
+    const typing = (t: EventTarget | null) => t instanceof HTMLElement && (/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName) || t.isContentEditable);
+    const onKey = (e: KeyboardEvent) => {
+      const k = keysRef.current;
+      if (e.defaultPrevented || typing(e.target) || k.designing) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      if (mod && key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        k.store.undo();
+      } else if (mod && (key === "y" || (key === "z" && e.shiftKey))) {
+        e.preventDefault();
+        k.store.redo();
+      } else if (e.key === "Delete" && !mod && k.view !== "fluxograma" && k.selection.length) {
+        e.preventDefault();
+        const n = deleteSelection(k.store, k.selection);
+        if (n) {
+          setSelection([]);
+          k.files.setMessage(deletedText(n));
+        } else k.files.setMessage("Elementos dos modelos IFC não podem ser apagados (são de terceiros, só leitura).");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   useEffect(() => {
     if (viewerRef.current) viewerRef.current.ortho = drawAids.ortho;
   }, [drawAids.ortho]);
@@ -1616,7 +1652,14 @@ export function App() {
         </button>
       </header>
 
-      <Ribbon tab={top} tool={tool} hasModel={!!model} pressed={pressed} onTool={(t) => chooseTool(t, top in DISCIPLINE_TABS ? (top as DisciplineTab) : null)} onAction={onAction} />
+      <Ribbon
+        tab={top}
+        tool={tool}
+        hasModel={!!model}
+        pressed={pressed}
+        disabledActions={{ desfazer: !store.canUndo, refazer: !store.canRedo }}
+        hints={{ desfazer: "Desfazer (Ctrl+Z)", refazer: "Refazer (Ctrl+Y)" }}
+        onTool={(t) => chooseTool(t, top in DISCIPLINE_TABS ? (top as DisciplineTab) : null)} onAction={onAction} />
 
       <main className="workspace" style={{ gridTemplateColumns: `${leftOpen ? 300 : 0}px minmax(0, 1fr) ${rightOpen ? rightWidth : 0}px` }}>
         <aside className={`sidebar docks ${leftOpen ? "" : "collapsed"}`} aria-hidden={!leftOpen}>

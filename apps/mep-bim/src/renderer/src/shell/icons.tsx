@@ -412,6 +412,18 @@ const P: Record<string, ReactNode> = {
       <path d="M9 6 L12 3 L15 6 M9 18 L12 21 L15 18 M6 9 L3 12 L6 15 M18 9 L21 12 L18 15" />
     </>
   ),
+  desfazer: (
+    <>
+      <path d="M9 14 L4 9 L9 4" />
+      <path d="M4 9 H14 A6 6 0 0 1 14 21 H8" />
+    </>
+  ),
+  refazer: (
+    <>
+      <path d="M15 14 L20 9 L15 4" />
+      <path d="M20 9 H10 A6 6 0 0 0 10 21 H16" />
+    </>
+  ),
   mApagar: (
     <>
       <path d="M4 7 H20 M9 7 V4 H15 V7" />

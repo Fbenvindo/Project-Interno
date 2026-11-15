@@ -306,21 +306,8 @@ export function LocacaoPanel({ model, fileName, store, viewer, elementById, sele
         return;
       }
       if (isTyping(e.target)) return;
-      if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
-        e.preventDefault();
-        store.undo();
-      } else if (mod && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) {
-        e.preventDefault();
-        store.redo();
-      } else if (!mod && e.key.toLowerCase() === "r") {
-        setRotationDeg((d) => (d + 90) % 360);
-      } else if (e.key === "Delete" || e.key === "Backspace") {
-        const ids = selection.filter((id) => id < 0);
-        if (ids.length) {
-          store.remove(ids);
-          onSelect(selection.filter((id) => id >= 0));
-        }
-      }
+      // Ctrl+Z / Ctrl+Y e Delete são tratados no app inteiro (App.tsx).
+      if (!mod && e.key.toLowerCase() === "r") setRotationDeg((d) => (d + 90) % 360);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

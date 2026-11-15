@@ -4,7 +4,8 @@
 // cotas ortogonal, inclinada e angular, marcador de coordenada.
 // Modificar: copiar, mover, recortar, colar, apagar, estender, conectar — todos começam por
 // uma seleção (vários elementos, por clique ou janela) e, antes de concluí-la, o app
-// pergunta se o usuário deseja remover algum elemento da seleção.
+// pergunta se o usuário deseja remover algum elemento da seleção. Apagar é direto: com
+// seleção, apaga na hora; sem seleção, apaga o que for selecionado ao concluir (Enter).
 // Geral: corte pelos elementos selecionados, corte por linha e vista 3D no local indicado.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -39,6 +40,7 @@ import { newViewId, nextViewName, SECTION_LABEL, type ViewDef, type ViewSection 
 import type { Vec3 } from "../../../core/types";
 import type { CoordinateSystem } from "../../../core/math";
 import type { PointsStore } from "../locacao/usePointsStore";
+import { deletedText, deleteSelection } from "./deleteSelection";
 import type { ClickInfo, PlanTool, ToolQuestion } from "../planta/planTool";
 import { labelPoint, measureText, type Measure, type Measure3 } from "../../../core/measure";
 import { applyOffset } from "../../../core/runEdit";
@@ -151,6 +153,8 @@ interface Args {
   isSection?: boolean;
   /** Comando terminado: voltar a Selecionar. */
   onDone: () => void;
+  /** Aviso rápido ao usuário (fica visível depois de o comando terminar). */
+  onNotice?: (msg: string) => void;
 }
 
 export interface DraftOptions {
@@ -218,6 +222,16 @@ export function useDraftTool(a: Args) {
     setDesvioStart(null);
     if (!isMeasureCmd(cmd)) (setMeasures([]), setMeasures3d([]));
     if (NEEDS_SELECTION.has(cmd)) argsRef.current.setSelection(editable(argsRef.current.selection));
+    // Apagar com algo já selecionado: apaga na hora e volta a Selecionar.
+    if (cmd === "apagar") {
+      const ids = editable(argsRef.current.selection);
+      if (ids.length) {
+        const k = deleteSelection(argsRef.current.store, ids);
+        argsRef.current.setSelection([]);
+        argsRef.current.onNotice?.(deletedText(k));
+        argsRef.current.onDone();
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmd, n]);
 
@@ -350,10 +364,10 @@ export function useDraftTool(a: Args) {
     const st = state();
     switch (cmd) {
       case "apagar": {
-        const n0 = pickedCount(picked);
-        commitEdit(deleteItems(st, picked));
+        const n0 = deleteSelection(store, a.selection);
         a.setSelection([]);
-        return done(`${n0} elemento(s) apagado(s).`);
+        a.onNotice?.(deletedText(n0));
+        return a.onDone();
       }
       case "recortar": {
         clipboard = toClipboard(st, picked, bboxBase(), storey, level);
@@ -424,6 +438,8 @@ export function useDraftTool(a: Args) {
   const finishSelection = () => {
     if (!count) return setMessage("Selecione ao menos um elemento.");
     setMessage(null);
+    // Apagar não pergunta nada: apaga a seleção.
+    if (cmd === "apagar") return execute();
     setPhase("confirmar");
   };
 

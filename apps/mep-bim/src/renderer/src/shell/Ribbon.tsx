@@ -8,11 +8,15 @@ interface Props {
   hasModel: boolean;
   /** Estados ligados de botões de ação (tema, cores, corte, vista). */
   pressed: Partial<Record<ActionId, boolean>>;
+  /** Ações indisponíveis no momento (ex.: nada para desfazer). */
+  disabledActions?: Partial<Record<ActionId, boolean>>;
+  /** Dica (title) de ações, no lugar do nome (ex.: atalho de teclado). */
+  hints?: Partial<Record<ActionId, string>>;
   onTool: (t: ToolSpec) => void;
   onAction: (a: ActionId) => void;
 }
 
-export function Ribbon({ tab, tool, hasModel, pressed, onTool, onAction }: Props) {
+export function Ribbon({ tab, tool, hasModel, pressed, disabledActions = {}, hints = {}, onTool, onAction }: Props) {
   const disc = disciplineOfTab(tab);
   const style = disc ? ({ "--disc": disc.color, "--disc-text": disc.text } as React.CSSProperties) : undefined;
   const isOn = (b: RibbonButton) => (b.tool ? sameTool(b.tool, tool) : b.action ? !!pressed[b.action] : false);
@@ -25,9 +29,9 @@ export function Ribbon({ tab, tool, hasModel, pressed, onTool, onAction }: Props
               <button
                 key={b.key}
                 className={`ribbon-btn ${isOn(b) ? "on" : ""}`}
-                disabled={b.needsModel && !hasModel}
+                disabled={(b.needsModel && !hasModel) || (!!b.action && !!disabledActions[b.action])}
                 onClick={() => (b.tool ? onTool(b.tool) : b.action && onAction(b.action))}
-                title={b.label}
+                title={(b.action && hints[b.action]) || b.label}
               >
                 <Icon name={b.icon} size={22} />
                 <span>{b.label}</span>

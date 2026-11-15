@@ -48,6 +48,8 @@ export type ActionId =
   | "salvarProjetoComo"
   | "exportarIfc"
   | "limparCache"
+  | "desfazer"
+  | "refazer"
   | "temaClaro"
   | "temaEscuro"
   | "cores"
@@ -210,6 +212,13 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
     },
   ],
   modificar: [
+    {
+      label: "Histórico",
+      buttons: [
+        { key: "desfazer", label: "Desfazer", icon: "desfazer", action: "desfazer" },
+        { key: "refazer", label: "Refazer", icon: "refazer", action: "refazer" },
+      ],
+    },
     {
       label: "Área de transferência",
       buttons: [draw("copiar", "Copiar", "mCopiar"), draw("recortar", "Recortar", "mRecortar"), draw("colar", "Colar", "mColar")],
