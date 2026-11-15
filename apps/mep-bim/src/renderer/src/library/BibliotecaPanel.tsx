@@ -88,7 +88,7 @@ export function BibliotecaPanel({ points, onPlace, choices, onChoices, onEditDes
     setBusy(true);
     setMessage(`Analisando ${file.name}…`);
     try {
-      const { model } = await loadIfcModel(file);
+      const { model } = await loadIfcModel(file, undefined, { transfer: true });
       let elements: IfcElementDef[];
       try {
         elements = analyzeIfcElements(model);

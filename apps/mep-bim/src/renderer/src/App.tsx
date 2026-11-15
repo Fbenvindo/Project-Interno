@@ -465,10 +465,15 @@ export function App() {
       });
       setLinkStatus({});
       setProgressFrac(null);
-      const { model: loaded, info } = await loadIfcModel(file, (stage, f) => {
-        setProgress(stage);
-        setProgressFrac(f);
-      });
+      // O arquivo vai para o leitor sem cópia (economiza memória em IFCs grandes).
+      const { model: loaded, info } = await loadIfcModel(
+        file,
+        (stage, f) => {
+          setProgress(stage);
+          setProgressFrac(f);
+        },
+        { transfer: true },
+      );
       const secs = info.ms < 100 ? "menos de 0,1" : (info.ms / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 });
       setLoadNote(info.fromCache ? `Aberto do cache em ${secs} s` : `Processado em ${secs} s`);
       setProgress("Montando a vista 3D");
@@ -532,7 +537,7 @@ export function App() {
       setLinkStatus((s) => ({ ...s, [id]: "carregando" }));
       await new Promise((r) => setTimeout(r, 20));
       try {
-        const { model: raw } = await loadIfcModel(file);
+        const { model: raw } = await loadIfcModel(file, undefined, { transfer: true });
         const meta = linksRef.current.find((m) => m.id === id);
         const data = prepareLink(id, linkSlot.current++, raw, host, meta?.align ?? DEFAULT_ALIGN, georefRef.current.map);
         setLinkData((cur) => new Map(cur).set(id, data));
