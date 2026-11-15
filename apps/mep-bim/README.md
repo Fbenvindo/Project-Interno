@@ -435,6 +435,14 @@ Num IFC de teste com 40 pavimentos e cerca de 29 mil elementos (34 MB):
 - **Primeira abertura agora:** cerca de 7 s, com a janela respondendo; a pausa mais longa foi de cerca de 1,6 s, ao montar o 3D e as listas.
 - **Reabrindo pelo cache:** cerca de 3,4 s, dos quais 0,3 s para ler o modelo; o resto é a montagem da cena.
 
+### Altura das redes
+
+- **Ao criar uma rede** (Traçado), o primeiro campo, em destaque, é a **Altura da rede** (m acima do piso). Nas tubulações, eletrocalhas e dutos, é a altura dos trechos horizontais. Nos eletrodutos, vem da forma de instalação (mostrada no campo); digitando um valor, vale esse.
+- **Nas Propriedades** de um trecho, **Altura (m)** mostra a altura da parte horizontal e pode ser alterada. Se o trecho tem outros ligados a ele na mesma altura, o app pergunta: **Só este trecho** ou **Toda a rede ligada (N trechos)**.
+  - As descidas até os pontos (quadros, equipamentos) continuam chegando ao ponto.
+  - Ao mudar só um trecho, as ligações com os que não mudaram ganham um trecho vertical, e nada se solta.
+- **Esquema dos níveis do pavimento**, embaixo das Propriedades do trecho e do painel de Traçado: piso, forro (se houver no IFC), face inferior da laje e piso de cima, com a altura das redes selecionadas e da próxima rede.
+
 ### Como a disciplina é definida
 
 1. Tipos IFC que já definem a disciplina (duto = HVAC, luminária = elétrica, sprinkler = incêndio…).

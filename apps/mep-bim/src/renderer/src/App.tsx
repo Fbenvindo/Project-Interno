@@ -1526,6 +1526,7 @@ export function App() {
             typeIds={disc?.runs}
             elementById={elementById}
             preset={{ typeId: tool.typeId, n: tool.n }}
+            storey={storey}
             onConfigureInstalls={() => chooseTool({ kind: "instalacoes" }, toolDisc)}
           />
         );

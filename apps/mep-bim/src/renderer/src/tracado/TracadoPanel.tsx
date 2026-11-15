@@ -52,6 +52,9 @@ import { makeSlabProbe } from "../locacao/ceiling";
 import type { LoadedModel } from "../../../ifc/loadIfc";
 import { useProjectFiles } from "../locacao/useProjectFiles";
 import type { PointsStore } from "../locacao/usePointsStore";
+import { storeyScheme } from "../../../core/plan/levels";
+import { runLevel } from "../../../core/runHeight";
+import { LevelScheme } from "../shell/LevelScheme";
 import type { PointerContext, PreviewItem, Viewer } from "../viewer/Viewer";
 
 interface Props {
@@ -69,6 +72,8 @@ interface Props {
   elementById: Map<number, ElementInfo>;
   /** Abre o painel de medidas das instalações do empreendimento. */
   onConfigureInstalls?: () => void;
+  /** Pavimento ativo (esquema dos níveis e altura de referência). */
+  storey?: string;
 }
 
 type Mode = "desenhar" | "ligar";
@@ -85,7 +90,7 @@ const STEP = 0.01; // arredondamento dos comprimentos: 10 mm
 const isTyping = (t: EventTarget | null) => t instanceof HTMLElement && /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName);
 const roundStep = (v: number) => Math.round(v / STEP) * STEP;
 
-export function TracadoPanel({ model, fileName, store, viewer, selection, onSelect, systems, typeIds, preset, elementById, onConfigureInstalls }: Props) {
+export function TracadoPanel({ model, fileName, store, viewer, selection, onSelect, systems, typeIds, preset, elementById, onConfigureInstalls, storey }: Props) {
   const [typeId, setTypeId] = useState(preset?.typeId ?? typeIds?.[0] ?? "eletroduto-pvc");
   const type = RUN_TYPE_BY_ID[typeId];
   const [sizeLabel, setSizeLabel] = useState(type.defaultSize);
@@ -94,10 +99,14 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
   const [circuit, setCircuit] = useState("");
   const [slope, setSlope] = useState(type.slopeFor?.(size) ?? 0);
   const [workElevation, setWorkElevation] = useState(2.8);
+  /** Eletrodutos: altura escolhida pelo usuário (m acima do piso); null = a da forma de instalação. */
+  const [conduitHeight, setConduitHeight] = useState<number | null>(null);
   const [ortho, setOrtho] = useState(true);
   const [install, setInstall] = useState<ConduitInstall>(DEFAULT_INSTALL);
   const conduit = isConduitType(type);
   const slabAt = useMemo(() => makeSlabProbe(viewer, elementById, model.storeyLevels), [viewer, elementById, model.storeyLevels]);
+  /** Níveis do pavimento ativo (esquema) e a altura que a forma de instalação dá aos eletrodutos. */
+  const scheme = useMemo(() => (storey ? storeyScheme(model.elements, model.storeyLevels, storey) : null), [model, storey]);
   const [mode, setMode] = useState<Mode>("desenhar");
   const [drawing, setDrawing] = useState(false);
   const [draft, setDraft] = useState<Vec3[]>([]);
@@ -175,6 +184,7 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
     (x: number, z: number, floorY: number): number | null => {
       const L = live.current;
       if (!isConduitType(L.type)) return null;
+      if (L.conduitHeight != null) return floorY + L.conduitHeight;
       return conduitElevation(L.install, floorY, slabAt(x, z, floorY), L.size.width, L.settings);
     },
     [slabAt],
@@ -190,8 +200,11 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
 
   // Estado mais recente para os callbacks do visualizador.
   const settings: InstallSettings = store.installSettings;
-  const live = useRef({ type, size, system, circuit, slope, workElevation, ortho, draft, mode, destination, pickingDestination, install, settings });
-  live.current = { type, size, system, circuit, slope, workElevation, ortho, draft, mode, destination, pickingDestination, install, settings };
+  const installHeight = conduit && scheme ? conduitElevation(install, scheme.floor, scheme.slab, size.width, settings) - scheme.floor : null;
+  /** Altura em que a próxima rede será desenhada (m acima do piso). */
+  const newHeight = conduit ? (conduitHeight ?? installHeight) : workElevation;
+  const live = useRef({ type, size, system, circuit, slope, workElevation, conduitHeight, ortho, draft, mode, destination, pickingDestination, install, settings });
+  live.current = { type, size, system, circuit, slope, workElevation, conduitHeight, ortho, draft, mode, destination, pickingDestination, install, settings };
 
   /** Próximo vértice a partir do cursor, com as restrições de desenho. */
   const nextCandidate = useCallback(
@@ -515,6 +528,28 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
       )}
 
       <section className="card">
+        {/* Altura da rede: em destaque, antes de desenhar. */}
+        <label className="height-field">
+          <span>Altura da rede (m, acima do piso)</span>
+          {conduit ? (
+            <input
+              type="number"
+              step={0.05}
+              value={conduitHeight ?? ""}
+              placeholder={installHeight != null ? `${installHeight.toFixed(2).replace(".", ",")} (pela instalação)` : "pela instalação"}
+              onChange={(e) => setConduitHeight(e.target.value === "" ? null : Number(e.target.value))}
+            />
+          ) : (
+            <input type="number" step={0.05} value={workElevation} onChange={(e) => setWorkElevation(Number(e.target.value))} />
+          )}
+          <small className="muted">
+            {conduit
+              ? conduitHeight == null
+                ? "Definida pela forma de instalação abaixo; digite um valor para usar outra altura."
+                : "Altura própria (em vez da forma de instalação). Apague para voltar à da instalação."
+              : "Os trechos horizontais correm nesta altura; depois dá para mudar nas Propriedades."}
+          </small>
+        </label>
         <div className="form-grid">
           <label>
             Tipo
@@ -550,12 +585,6 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
             <label>
               Circuito
               <input value={circuit} onChange={(e) => setCircuit(e.target.value)} placeholder="ex.: C3" />
-            </label>
-          )}
-          {!conduit && (
-            <label>
-              Elevação de trabalho (m, acima do piso)
-              <input type="number" step={0.05} value={workElevation} onChange={(e) => setWorkElevation(Number(e.target.value))} />
             </label>
           )}
           {!conduit && (
@@ -762,6 +791,19 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
         </button>
       </div>
       {files.message && <div className="status small">{files.message}</div>}
+      {scheme && storey && (
+        <LevelScheme
+          scheme={scheme}
+          storey={storey}
+          marks={[
+            ...(newHeight != null ? [{ y: scheme.floor + newHeight, label: "nova rede" }] : []),
+            ...selectedRuns
+              .slice(0, 3)
+              .map((r) => ({ y: runLevel(r), label: r.tag, color: "#0e7490" }))
+              .filter((m): m is { y: number; label: string; color: string } => m.y != null),
+          ]}
+        />
+      )}
       <p className="muted small">
         Atalhos: Enter finaliza · Backspace desfaz vértice · E vai à elevação de trabalho · Shift = vertical · Esc cancela · Delete exclui
         trechos selecionados.

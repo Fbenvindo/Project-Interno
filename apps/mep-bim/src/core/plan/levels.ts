@@ -96,3 +96,26 @@ export function planRangeOf(view: ViewDef, elements: ElementInfo[], levels: Stor
   const r = rangeOf(view, p.type);
   return { type: p.type, base: p.type === "teto" ? ceilingBase(elements, levels, p.storey, floor) : floor, below: r.below, above: r.above };
 }
+
+/** Níveis de um pavimento para o esquema (Y da cena): piso, forro (se houver), face inferior da laje e piso de cima. */
+export interface StoreyScheme {
+  floor: number;
+  ceiling: number | null;
+  slab: number;
+  next: number;
+}
+
+export function storeyScheme(elements: ElementInfo[], levels: StoreyLevel[], storey: string): StoreyScheme {
+  const floor = floorSubLevels(elements, levels, storey)[0];
+  const slab = ceilingBase(elements, levels, storey, floor);
+  const { next } = levelOf(levels, storey);
+  // Forro: a face inferior mais comum (por área) dos forros entre o piso e a laje.
+  const ceilings: { y: number; w: number }[] = [];
+  for (const e of elements) {
+    if (e.ifcType !== "IFCCOVERING" || !e.bbox || !/CEILING/i.test(e.predefinedType ?? "")) continue;
+    const y = e.bbox.min[1];
+    if (y > floor + 1.8 && y < slab - 0.05) ceilings.push({ y, w: footprint(e) });
+  }
+  const c = groups(ceilings).sort((a, b) => b.w - a.w)[0];
+  return { floor, ceiling: c ? c.y : null, slab, next: Math.max(next, slab + 0.1) };
+}

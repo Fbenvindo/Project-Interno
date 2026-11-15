@@ -2626,3 +2626,37 @@ h3 {
   background: var(--input-bg);
   color: var(--text);
 }
+
+.height-ask {
+  padding: 6px 8px;
+  margin: 4px 0;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.level-scheme {
+  padding: 8px 10px 4px;
+  border-top: 1px solid var(--border);
+}
+
+.height-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  font-weight: 600;
+}
+.height-field input {
+  font-size: 15px;
+  font-weight: 600;
+}
+.height-field small {
+  font-weight: 400;
+}

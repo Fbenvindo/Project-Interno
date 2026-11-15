@@ -17,6 +17,9 @@ import { AssemblyEditor } from "../locacao/AssemblyEditor";
 import { fmtCoord, toMap, type Georef } from "../../../core/georef";
 import { pointSize } from "../../../core/points";
 import type { PointsStore } from "../locacao/usePointsStore";
+import { changeRunsHeight, networkAtLevel, runLevel } from "../../../core/runHeight";
+import { storeyScheme } from "../../../core/plan/levels";
+import { LevelScheme } from "./LevelScheme";
 
 interface Props {
   selection: number[];
@@ -603,12 +606,73 @@ function RunRows({
   };
   const setParam = (name: string, v: string) => store.updateRuns(ids, (r) => ({ params: { ...r.params, [name]: v } }), `param:${name}`);
 
+  // ---- Altura (parte horizontal do trecho, acima do piso) ----------------------------------------
+  const heightOf = (r: Run) => {
+    const y = runLevel(r);
+    return y == null ? null : Math.round((y - floorOf(r)) * 1000) / 1000;
+  };
+  const height = common(runs, (r) => heightOf(r));
+  /** Trechos da rede ligada (na mesma altura) aos selecionados. */
+  const network = useMemo(() => [...new Set(runs.flatMap((r) => networkAtLevel(store.runs, r.id)))], [runs, store.runs]);
+  const [pendingHeight, setPendingHeight] = useState<number | null>(null);
+  useEffect(() => setPendingHeight(null), [ids.join(",")]);
+  const applyHeight = (target: number, scope: "trecho" | "rede") => {
+    store.mutate((cur) => {
+      let list = cur.runs;
+      for (const r of runs) {
+        const h = heightOf(r);
+        if (h == null) continue;
+        const group = scope === "rede" ? networkAtLevel(list, r.id) : [r.id];
+        list = changeRunsHeight(list, group, target - h);
+        if (scope === "rede") break; // a rede inteira já mudou junto
+      }
+      return { ...cur, runs: list };
+    });
+    setPendingHeight(null);
+  };
+  const askHeight = (v: number) => (network.length > ids.length ? setPendingHeight(v) : applyHeight(v, "trecho"));
+  const schemeStorey = storey.varies ? null : storey.value;
+  const scheme = useMemo(() => (schemeStorey && schemeStorey !== "—" ? storeyScheme(model.elements, model.storeyLevels, schemeStorey) : null), [model, schemeStorey]);
+  const marks = useMemo(() => {
+    const seen = new Map<string, { y: number; label: string }>();
+    for (const r of runs) {
+      const y = runLevel(r);
+      if (y == null) continue;
+      const k = y.toFixed(2);
+      if (!seen.has(k)) seen.set(k, { y, label: runs.length === 1 ? r.tag : RUN_TYPE_BY_ID[r.typeId].label });
+    }
+    return [...seen.values()].slice(0, 4);
+  }, [runs]);
+
   return (
     <>
       <Group title="Restrições">
         <Row label="Pavimento">
           <RO>{storey.varies ? VARIES : storey.value}</RO>
         </Row>
+        <Row label="Altura (m)">
+          <NumberCell value={height.value} varies={height.varies} onCommit={askHeight} step={0.05} />
+        </Row>
+        {pendingHeight != null && (
+          <tr>
+            <td colSpan={2}>
+              <div className="height-ask">
+                <div className="small">Alterar a altura para {formatNumber(pendingHeight, 2)} m em:</div>
+                <div className="btn-row wrap tight">
+                  <button className="btn small" onClick={() => applyHeight(pendingHeight, "trecho")}>
+                    Só {ids.length > 1 ? "os trechos selecionados" : "este trecho"}
+                  </button>
+                  <button className="btn small primary" onClick={() => applyHeight(pendingHeight, "rede")}>
+                    Toda a rede ligada ({network.length} trechos)
+                  </button>
+                  <button className="btn small" onClick={() => setPendingHeight(null)}>
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            </td>
+          </tr>
+        )}
         {conduits && (
           <Row label="Instalação">
             <SelectCell
@@ -692,6 +756,13 @@ function RunRows({
           </Row>
         )}
       </Group>
+      {scheme && schemeStorey && (
+        <tr>
+          <td colSpan={2}>
+            <LevelScheme scheme={scheme} marks={marks} storey={schemeStorey} />
+          </td>
+        </tr>
+      )}
     </>
   );
 }
