@@ -2,10 +2,9 @@
 //
 // Criar: linha, arco, círculo, elipse, quadrado, retângulo, triângulo, poligonal, texto,
 // cotas ortogonal, inclinada e angular, marcador de coordenada.
-// Modificar: copiar, mover, recortar, colar, apagar, estender, conectar — todos começam por
-// uma seleção (vários elementos, por clique ou janela) e, antes de concluí-la, o app
-// pergunta se o usuário deseja remover algum elemento da seleção. Apagar é direto: com
-// seleção, apaga na hora; sem seleção, apaga o que for selecionado ao concluir (Enter).
+// Modificar: copiar, mover, recortar, colar, apagar, estender, conectar — sem perguntas: com
+// algo já selecionado, o comando segue direto (apagar e recortar na hora; copiar e mover
+// pedem o ponto base); sem seleção, selecione (clique ou janela) e Enter conclui.
 // Geral: corte pelos elementos selecionados, corte por linha e vista 3D no local indicado.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -222,15 +221,14 @@ export function useDraftTool(a: Args) {
     setDesvioStart(null);
     if (!isMeasureCmd(cmd)) (setMeasures([]), setMeasures3d([]));
     if (NEEDS_SELECTION.has(cmd)) argsRef.current.setSelection(editable(argsRef.current.selection));
-    // Apagar com algo já selecionado: apaga na hora e volta a Selecionar.
-    if (cmd === "apagar") {
-      const ids = editable(argsRef.current.selection);
-      if (ids.length) {
-        const k = deleteSelection(argsRef.current.store, ids);
+    // Com algo já selecionado, o comando segue direto (sem pedir a seleção de novo).
+    if (NEEDS_SELECTION.has(cmd) && editable(argsRef.current.selection).length) {
+      if (cmd === "apagar") {
+        const k = deleteSelection(argsRef.current.store, editable(argsRef.current.selection));
         argsRef.current.setSelection([]);
         argsRef.current.onNotice?.(deletedText(k));
         argsRef.current.onDone();
-      }
+      } else executeRef.current();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmd, n]);
@@ -435,12 +433,14 @@ export function useDraftTool(a: Args) {
     }
   };
 
+  const executeRef = useRef(execute);
+  executeRef.current = execute;
+
   const finishSelection = () => {
     if (!count) return setMessage("Selecione ao menos um elemento.");
     setMessage(null);
-    // Apagar não pergunta nada: apaga a seleção.
-    if (cmd === "apagar") return execute();
-    setPhase("confirmar");
+    // Sem perguntas: concluída a seleção, o comando segue.
+    execute();
   };
 
   /** Pergunta a seção da vista criada e, escolhida, salva e abre. */
@@ -466,15 +466,7 @@ export function useDraftTool(a: Args) {
           { label: "Cancelar", run: () => (setPending(null), setMessage("Criação cancelada.")) },
         ],
       }
-    : NEEDS_SELECTION.has(cmd) && phase === "confirmar"
-      ? {
-          text: `${count} elemento(s) selecionado(s). Deseja remover algum elemento da seleção?`,
-          options: [
-            { label: "Sim, remover", run: () => setPhase("remover") },
-            { label: "Não, concluir", primary: true, run: execute },
-          ],
-        }
-      : null;
+    : null;
 
   const toggle = (id: number, remove: boolean) => {
     const cur = argsRef.current.selection;
