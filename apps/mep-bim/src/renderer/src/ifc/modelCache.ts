@@ -1,9 +1,11 @@
 // Cache dos modelos IFC já processados (geometria, elementos, propriedades), no IndexedDB
 // deste computador. A chave é o conteúdo do arquivo (SHA-256) e a versão do leitor: se o
 // IFC mudar, ou o app passar a ler de outro jeito, o modelo é processado de novo.
-// Funciona tanto na interface quanto no Web Worker.
+// Funciona tanto na interface quanto no Web Worker. A geometria é guardada bloco a bloco
+// (um registro por bloco, uma transação por vez), para não duplicar a memória ao gravar.
 import type { IfcData } from "../../../ifc/loadIfc";
 import { IFC_DATA_VERSION } from "../../../ifc/ifcDataVersion";
+import { chunkBytes, type MeshChunk } from "../../../ifc/meshChunks";
 
 const DB = "smarteasybim-modelos";
 const DATA = "dados";
@@ -17,7 +19,11 @@ export interface CacheEntry {
   name: string;
   bytes: number;
   usedAt: number;
+  /** Quantos blocos de geometria (registros `${key}#${i}`). */
+  chunks?: number;
 }
+
+const chunkKey = (key: string, i: number) => `${key}#${i}`;
 
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -52,10 +58,9 @@ export async function cacheKey(bytes: Uint8Array): Promise<string> {
   return `v${IFC_DATA_VERSION}-${Array.from(hash, (b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** Tamanho aproximado dos dados (as malhas são quase tudo). */
+/** Tamanho aproximado dos dados (a geometria é quase tudo). */
 export function dataBytes(d: IfcData): number {
-  const g = d.geometry;
-  return g.positions.byteLength + g.normals.byteLength + g.indices.byteLength + g.ids.length * 40 + d.elements.length * 400 + d.propertyGroups.length * 300;
+  return chunkBytes(d.geometry) + d.elements.length * 400 + d.propertyGroups.length * 300;
 }
 
 export async function cacheGet(key: string): Promise<IfcData | null> {
@@ -63,11 +68,25 @@ export async function cacheGet(key: string): Promise<IfcData | null> {
     const db = await open();
     try {
       const tx = db.transaction([DATA, META], "readwrite");
-      const data = (await request(tx.objectStore(DATA).get(key))) as IfcData | undefined;
       const meta = (await request(tx.objectStore(META).get(key))) as CacheEntry | undefined;
-      if (data && meta) tx.objectStore(META).put({ ...meta, usedAt: Date.now() });
+      if (!meta) {
+        await done(tx);
+        return null;
+      }
+      const base = (await request(tx.objectStore(DATA).get(key))) as Omit<IfcData, "geometry"> | undefined;
+      const geometry: MeshChunk[] = [];
+      for (let i = 0; i < (meta.chunks ?? 0); i++) {
+        const c = (await request(tx.objectStore(DATA).get(chunkKey(key, i)))) as MeshChunk | undefined;
+        if (!c) break;
+        geometry.push(c);
+      }
+      if (!base || geometry.length !== (meta.chunks ?? 0)) {
+        await done(tx);
+        return null;
+      }
+      tx.objectStore(META).put({ ...meta, usedAt: Date.now() });
       await done(tx);
-      return data ?? null;
+      return { ...base, geometry };
     } finally {
       db.close();
     }
@@ -78,27 +97,38 @@ export async function cacheGet(key: string): Promise<IfcData | null> {
 }
 
 /**
- * Grava e libera espaço pelos limites. `onCopied` é chamado assim que o IndexedDB copiou os
- * dados (a partir daí as malhas podem ser transferidas), antes de terminar a gravação.
+ * Grava em etapas (dados gerais e depois cada bloco de geometria, uma transação por vez), sem
+ * travar a interface por muito tempo nem copiar o modelo inteiro de uma vez. O índice é gravado
+ * por último: uma gravação interrompida não é usada. Modelos maiores que o limite não entram.
  */
-export async function cachePut(key: string, name: string, d: IfcData, onCopied: () => void = () => {}): Promise<void> {
-  let copied = false;
+export async function cachePut(key: string, name: string, d: IfcData): Promise<boolean> {
+  const bytes = dataBytes(d);
+  if (bytes > CACHE_MAX_BYTES) return false;
   try {
     const db = await open();
     try {
-      const tx = db.transaction([DATA, META], "readwrite");
-      tx.objectStore(DATA).put(d, key);
-      tx.objectStore(META).put({ key, name, bytes: dataBytes(d), usedAt: Date.now() } satisfies CacheEntry);
-      copied = true;
-      onCopied();
+      const { geometry, ...base } = d;
+      let tx = db.transaction(DATA, "readwrite");
+      tx.objectStore(DATA).put(base, key);
+      await done(tx);
+      for (let i = 0; i < geometry.length; i++) {
+        tx = db.transaction(DATA, "readwrite");
+        tx.objectStore(DATA).put(geometry[i], chunkKey(key, i));
+        await done(tx);
+        // Deixa a interface respirar entre um bloco e outro.
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      tx = db.transaction(META, "readwrite");
+      tx.objectStore(META).put({ key, name, bytes, usedAt: Date.now(), chunks: geometry.length } satisfies CacheEntry);
       await done(tx);
       await evict(db);
+      return true;
     } finally {
       db.close();
     }
   } catch (e) {
     console.warn("Não foi possível gravar o modelo no cache:", e);
-    if (!copied) onCopied();
+    return false;
   }
 }
 
@@ -121,8 +151,10 @@ export function entriesToEvict(entries: CacheEntry[], maxBytes = CACHE_MAX_BYTES
 async function evict(db: IDBDatabase) {
   const tx = db.transaction([DATA, META], "readwrite");
   const all = (await request(tx.objectStore(META).getAll())) as CacheEntry[];
+  const byKey = new Map(all.map((e) => [e.key, e]));
   for (const key of entriesToEvict(all)) {
     tx.objectStore(DATA).delete(key);
+    for (let i = 0; i < (byKey.get(key)?.chunks ?? 0); i++) tx.objectStore(DATA).delete(chunkKey(key, i));
     tx.objectStore(META).delete(key);
   }
   await done(tx);

@@ -6,7 +6,7 @@ import { pointProperties, pointSize, pointToElement, type PlacedPoint } from "..
 import type { Circuit } from "../../core/circuits";
 import type { Discipline, ElementInfo, Vec3 } from "../../core/types";
 import type { LoadedModel } from "../../ifc/loadIfc";
-import { loadIfcModel, warmIfcWorker } from "./ifc/ifcLoader";
+import { cancelIfcLoad, loadIfcModel, warmIfcWorker } from "./ifc/ifcLoader";
 import { cacheClear, cacheList } from "./ifc/modelCache";
 import { deletedText, deleteSelection } from "./desenho/deleteSelection";
 import { desktop, openIfc } from "./platform";
@@ -504,7 +504,13 @@ export function App() {
       return loaded;
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "Leitura cancelada.") return null;
+      setError(
+        /allocation failed|out of memory|memory access out of bounds|Cannot enlarge memory|Aborted\(/i.test(msg)
+          ? `memória insuficiente para este IFC (${msg}). Feche outros programas (Revit, navegador) e tente de novo; para arquivos muito grandes, exporte o IFC por partes (por pavimento ou disciplina).`
+          : msg,
+      );
       return null;
     } finally {
       setProgress(null);
@@ -2008,6 +2014,9 @@ export function App() {
                 <div className="spinner" />
                 <div className="progress-text">
                   {progress}
+                  <button className="btn small" onClick={cancelIfcLoad} title="Interromper a leitura do IFC">
+                    Cancelar
+                  </button>
                   {progressFrac != null && progressFrac > 0 && progressFrac < 1 && (
                     <div className="progress-bar">
                       <div style={{ width: `${Math.round(progressFrac * 100)}%` }} />

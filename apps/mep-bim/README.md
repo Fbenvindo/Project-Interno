@@ -411,7 +411,10 @@ O traçado proposto aparece em verde antes de gerar. Cada trecho sobe do ponto a
   - O cache reconhece o arquivo pelo conteúdo (SHA-256): se o IFC mudar, é processado de novo. Também é refeito quando uma versão nova do app passa a ler o IFC de outro jeito.
   - O cache tem limite de 3 GB e 12 modelos. Ao passar disso, saem os modelos usados há mais tempo.
   - **Arquivo › Desempenho › Limpar cache de modelos** mostra os modelos guardados e o espaço ocupado, e apaga o cache.
-- **Geometria em blocos contínuos:** as malhas de todos os elementos vão do leitor para a interface e para o cache em poucos blocos, sem cópia.
+- **Geometria em blocos de até ~64 MB:** cada elemento é escrito direto nos blocos durante a leitura, sem cópias intermediárias. Os blocos vão do leitor para a interface sem cópia, e o cache os grava um a um em segundo plano, depois de o modelo aparecer.
+- **Memória do leitor devolvida:** o leitor IFC (WebAssembly) não devolve a memória que usou, então é reiniciado depois de cada arquivo processado ou de um erro. O arquivo IFC também é solto assim que o leitor o abre.
+- **Cancelar** na tela de carregamento interrompe a leitura. Falta de memória aparece como mensagem clara, com a orientação de fechar outros programas ou exportar o IFC por partes.
+- Num IFC de teste de 150 MB (cerca de 120 mil elementos), o pico de memória caiu de 2,5 GB para 1,6 GB. IFCs na faixa de 1 GB ainda podem passar do limite do leitor (4 GB de WebAssembly) e precisam ser exportados por partes.
 
 Num IFC de teste com 40 pavimentos e cerca de 29 mil elementos (34 MB):
 - **Antes:** 5,8 s para abrir, com a janela travada por cerca de 4,3 s.

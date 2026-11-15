@@ -470,6 +470,11 @@ select {
   flex-direction: column;
   gap: 6px;
 }
+.progress-text .btn {
+  align-self: flex-start;
+  padding: 2px 12px;
+  font-size: 12px;
+}
 .progress-bar {
   width: 260px;
   height: 4px;

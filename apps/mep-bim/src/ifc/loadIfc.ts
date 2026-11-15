@@ -27,6 +27,7 @@ import { chainSegments, cutMesh, type P2 } from "../core/plan/section";
 import { ccw, polygonArea, type Space } from "../core/spaces";
 import type { BBox, ElementInfo, PropertyGroup, PropertyValue } from "../core/types";
 import { compoundToDegrees, EMPTY_GEOREF, type Georef } from "../core/georef";
+import { MeshChunkBuilder, meshesOfChunks, type MeshChunk, type MeshPart } from "./meshChunks";
 
 export interface ElementMesh {
   expressID: number;
@@ -70,8 +71,8 @@ export interface IfcData {
   schema: string;
   unitToMeters: number;
   elements: ElementInfo[];
-  /** Malhas de todos os elementos em poucos blocos contínuos (rápidos de transferir e guardar). */
-  geometry: PackedMeshes;
+  /** Malhas de todos os elementos em blocos de tamanho limitado (rápidos de transferir e guardar). */
+  geometry: MeshChunk[];
   storeys: string[];
   storeyLevels: StoreyLevel[];
   spaces: Space[];
@@ -86,61 +87,6 @@ export interface IfcData {
 
 export { IFC_DATA_VERSION } from "./ifcDataVersion";
 
-export interface PackedMeshes {
-  ids: Int32Array;
-  /** RGBA de cada malha. */
-  colors: Float32Array;
-  /** Início de cada malha em positions/normals (em floats) e em indices; n+1 valores. */
-  vertexStart: Uint32Array;
-  indexStart: Uint32Array;
-  positions: Float32Array;
-  normals: Float32Array;
-  indices: Uint32Array;
-}
-
-export function packMeshes(meshes: ElementMesh[]): PackedMeshes {
-  const n = meshes.length;
-  const vertexStart = new Uint32Array(n + 1);
-  const indexStart = new Uint32Array(n + 1);
-  for (let i = 0; i < n; i++) {
-    vertexStart[i + 1] = vertexStart[i] + meshes[i].positions.length;
-    indexStart[i + 1] = indexStart[i] + meshes[i].indices.length;
-  }
-  const g: PackedMeshes = {
-    ids: new Int32Array(n),
-    colors: new Float32Array(n * 4),
-    vertexStart,
-    indexStart,
-    positions: new Float32Array(vertexStart[n]),
-    normals: new Float32Array(vertexStart[n]),
-    indices: new Uint32Array(indexStart[n]),
-  };
-  meshes.forEach((m, i) => {
-    g.ids[i] = m.expressID;
-    g.colors.set(m.color, i * 4);
-    g.positions.set(m.positions, vertexStart[i]);
-    g.normals.set(m.normals, vertexStart[i]);
-    g.indices.set(m.indices, indexStart[i]);
-  });
-  return g;
-}
-
-/** Malhas como vistas dos blocos (sem copiar). */
-export function unpackMeshes(g: PackedMeshes): ElementMesh[] {
-  const out: ElementMesh[] = [];
-  for (let i = 0; i < g.ids.length; i++) {
-    const c = g.colors;
-    out.push({
-      expressID: g.ids[i],
-      positions: g.positions.subarray(g.vertexStart[i], g.vertexStart[i + 1]),
-      normals: g.normals.subarray(g.vertexStart[i], g.vertexStart[i + 1]),
-      indices: g.indices.subarray(g.indexStart[i], g.indexStart[i + 1]),
-      color: [c[i * 4], c[i * 4 + 1], c[i * 4 + 2], c[i * 4 + 3]],
-    });
-  }
-  return out;
-}
-
 /** Modelo pronto para o app a partir dos dados extraídos (do worker ou do cache). */
 export function modelFromData(d: IfcData): LoadedModel {
   const byElement = new Map(d.propertiesOf);
@@ -149,7 +95,7 @@ export function modelFromData(d: IfcData): LoadedModel {
     schema: d.schema,
     unitToMeters: d.unitToMeters,
     elements: d.elements,
-    meshes: unpackMeshes(d.geometry),
+    meshes: meshesOfChunks(d.geometry),
     storeys: d.storeys,
     storeyLevels: d.storeyLevels,
     spaces: d.spaces,
@@ -170,10 +116,16 @@ export function loadIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn =
 
 const SYSTEM_GROUP_TYPES = new Set(["IFCSYSTEM", "IFCDISTRIBUTIONSYSTEM", "IFCDISTRIBUTIONCIRCUIT", "IFCBUILDINGSYSTEM"]);
 
-/** Lê o IFC e devolve os dados do app; o modelo é fechado no web-ifc ao final. */
-export function extractIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn = () => {}): IfcData {
+/**
+ * Lê o IFC e devolve os dados do app; o modelo é fechado no web-ifc ao final. `input` pode
+ * ser um objeto { bytes }: depois de o web-ifc ler o arquivo, a referência é solta (num IFC
+ * de 1 GB isso libera 1 GB enquanto a geometria é gerada).
+ */
+export function extractIfc(api: IfcAPI, input: Uint8Array | { bytes: Uint8Array | null }, onProgress: ProgressFn = () => {}): IfcData {
   onProgress("Lendo arquivo IFC", 0);
-  const modelID = api.OpenModel(bytes, { COORDINATE_TO_ORIGIN: true, CIRCLE_SEGMENTS: 16 });
+  const holder = input instanceof Uint8Array ? { bytes: input as Uint8Array | null } : input;
+  const modelID = api.OpenModel(holder.bytes!, { COORDINATE_TO_ORIGIN: true, CIRCLE_SEGMENTS: 16 });
+  holder.bytes = null;
   if (modelID < 0) throw new Error("Não foi possível abrir o arquivo IFC.");
 
   const typeName = (id: number) => api.GetNameFromTypeCode(api.GetLineType(modelID, id)).toUpperCase();
@@ -183,11 +135,11 @@ export function extractIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressF
   const refs = (attr: unknown): number[] => (Array.isArray(attr) ? attr.map((a) => val(a)).filter((v) => typeof v === "number") : []);
 
   // ---- Geometria -----------------------------------------------------------
-  onProgress("Gerando geometria", 0.05);
-  const meshes: ElementMesh[] = [];
-  const buildMesh = (flat: FlatMesh): ElementMesh => {
-    const parts: { pos: Float32Array; nor: Float32Array; idx: Uint32Array }[] = [];
-    let color: ElementMesh["color"] = [0.8, 0.8, 0.8, 1];
+  // Cada elemento é escrito direto nos blocos de geometria (sem malhas intermediárias).
+  onProgress("Gerando geometria", 0);
+  const partsOf = (flat: FlatMesh): { color: number[]; parts: MeshPart[] } => {
+    const parts: MeshPart[] = [];
+    let color = [0.8, 0.8, 0.8, 1];
     const n = flat.geometries.size();
     for (let i = 0; i < n; i++) {
       const placed = flat.geometries.get(i);
@@ -195,22 +147,31 @@ export function extractIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressF
       const geom = api.GetGeometry(modelID, placed.geometryExpressID);
       const verts = api.GetVertexArray(geom.GetVertexData(), geom.GetVertexDataSize());
       const index = api.GetIndexArray(geom.GetIndexData(), geom.GetIndexDataSize());
-      parts.push({ ...transform(verts, placed.flatTransformation), idx: Uint32Array.from(index) });
+      parts.push({ verts, index, matrix: placed.flatTransformation });
       geom.delete();
     }
-    return { expressID: flat.expressID, ...merge(parts), color };
+    return { color, parts };
   };
-  // Progresso pelo número de produtos com geometria (aproximado).
-  let total = 0;
-  try {
-    total = api.GetAllLines(modelID).size();
-  } catch {
-    total = 0;
-  }
+  const buildMesh = (flat: FlatMesh): ElementMesh => {
+    const { color, parts } = partsOf(flat);
+    const pieces = parts.map((p) => ({ ...transform(p.verts, Array.from(p.matrix ?? IDENTITY16)), idx: Uint32Array.from(p.index) }));
+    return { expressID: flat.expressID, ...merge(pieces), color: color as ElementMesh["color"] };
+  };
+  const builder = new MeshChunkBuilder();
+  const t0 = Date.now();
+  let lastReport = 0;
   api.StreamAllMeshes(modelID, (flat) => {
-    meshes.push(buildMesh(flat));
-    if (meshes.length % 500 === 0) onProgress(`Gerando geometria (${meshes.length.toLocaleString("pt-BR")} elementos)`, 0.05 + 0.5 * Math.min(1, total ? (meshes.length * 20) / total : 0));
+    const { color, parts } = partsOf(flat);
+    builder.add(flat.expressID, color, parts);
+    const now = Date.now();
+    if (now - lastReport > 400) {
+      lastReport = now;
+      const mb = Math.round(builder.chunks.length * 64 * 3);
+      onProgress(`Gerando geometria: ${builder.count.toLocaleString("pt-BR")} elementos · ${Math.round((now - t0) / 1000)} s${mb ? ` · ~${mb.toLocaleString("pt-BR")} MB` : ""}`, 0);
+    }
   });
+  const geometry = builder.done();
+  const meshes = meshesOfChunks(geometry);
 
   // ---- Unidades e coordenadas ------------------------------------------------
   const unitToMeters = readLengthUnit();
@@ -439,7 +400,7 @@ export function extractIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressF
     schema,
     unitToMeters,
     elements,
-    geometry: packMeshes(meshes),
+    geometry,
     storeys,
     storeyLevels,
     spaces,
@@ -575,6 +536,8 @@ function propertyValue(p: any): PropertyValue {
   }
   return null;
 }
+
+const IDENTITY16 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
 /** Aplica a matriz 4x4 (column-major) do web-ifc ao array intercalado [x,y,z,nx,ny,nz]. */
 function transform(verts: Float32Array, m: number[]): { pos: Float32Array; nor: Float32Array } {
