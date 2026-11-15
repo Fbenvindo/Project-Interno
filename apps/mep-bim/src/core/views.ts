@@ -68,6 +68,12 @@ export interface ViewDef {
   /** Vigas em projeção e o texto de cada uma (podem ser ocultados separadamente). */
   showBeams?: boolean;
   showBeamText?: boolean;
+  /**
+   * Plantas de pavimento: faixa de visualização em relação ao nível base (m). Piso: base no piso
+   * da arquitetura; abaixo só instalações, acima tudo. Teto: base na face inferior da laje de
+   * teto; abaixo tudo, acima só instalações.
+   */
+  range?: { below: number; above: number };
 }
 
 export const DEFAULT_LABELS: PlanLabels = { tags: true, circuits: true, power: true, sizes: true };
@@ -78,39 +84,63 @@ export const newViewId = (kind: ViewKind) => `${kind}-${Date.now().toString(36)}
 export type PlanType = "piso" | "teto";
 export const PLAN_TYPE_LABEL: Record<PlanType, string> = { piso: "Planta de piso", teto: "Planta de teto" };
 
+/** Alturas padrão da faixa de visualização (m abaixo e acima do nível base). */
+export const DEFAULT_RANGE: Record<PlanType, { below: number; above: number }> = {
+  piso: { below: 1.0, above: 1.5 },
+  teto: { below: 1.5, above: 0.2 },
+};
+export const rangeOf = (v: Pick<ViewDef, "range"> | null, type: PlanType) => ({ ...DEFAULT_RANGE[type], ...(v?.range ?? {}) });
+
 /**
- * Plantas de cada pavimento, de piso e de teto, em Trabalho e em Documentação: existem para
- * todos os pavimentos sem precisar criá-las. Chaves no navegador: "trab:", "trab-teto:",
- * "doc:" e "doc-teto:" + pavimento.
+ * Plantas de cada pavimento (e de cada nível de laje do pavimento), de piso e de teto, em
+ * Trabalho e em Documentação: existem para todos os pavimentos sem precisar criá-las. Id:
+ * prefixo + pavimento (+ "::n" para o n-ésimo nível de laje, a partir do segundo).
  */
-export const docPlanId = (storey: string, type: PlanType = "piso") => `${type === "teto" ? "doc-teto" : "doc-planta"}:${storey}`;
-/** Plantas de documentação de pavimento (piso ou teto) pelo id. */
-export const isDocPlanId = (id: string) => id.startsWith("doc-planta:") || id.startsWith("doc-teto:");
-export function docPlanOfId(views: ViewDef[], id: string): ViewDef | null {
-  if (id.startsWith("doc-planta:")) return docPlanOf(views, id.slice(11), "piso");
-  if (id.startsWith("doc-teto:")) return docPlanOf(views, id.slice(9), "teto");
+const FLOOR_PREFIX = {
+  trabalho: { piso: "trab-planta", teto: "trab-teto" },
+  documentacao: { piso: "doc-planta", teto: "doc-teto" },
+} as const;
+export function floorPlanId(section: ViewSection, type: PlanType, storey: string, sub = 0): string {
+  return `${FLOOR_PREFIX[section][type]}:${storey}${sub > 0 ? `::${sub}` : ""}`;
+}
+export function parseFloorPlanId(id: string): { section: ViewSection; type: PlanType; storey: string; sub: number } | null {
+  const i = id.indexOf(":");
+  if (i < 0) return null;
+  const pre = id.slice(0, i);
+  for (const section of ["trabalho", "documentacao"] as const)
+    for (const type of ["piso", "teto"] as const)
+      if (FLOOR_PREFIX[section][type] === pre) {
+        const rest = id.slice(i + 1);
+        const m = /::(\d+)$/.exec(rest);
+        return { section, type, storey: m ? rest.slice(0, m.index) : rest, sub: m ? Number(m[1]) : 0 };
+      }
   return null;
 }
+export const isFloorPlanId = (id: string) => parseFloorPlanId(id) != null;
+export const docPlanId = (storey: string, type: PlanType = "piso", sub = 0) => floorPlanId("documentacao", type, storey, sub);
+/** Plantas de documentação de pavimento (piso ou teto) pelo id. */
+export const isDocPlanId = (id: string) => parseFloorPlanId(id)?.section === "documentacao";
 
-/** Planta de documentação de um pavimento: id fixo, criada com valores padrão quando ainda não existe. */
-export function docPlanOf(views: ViewDef[], storey: string, type: PlanType = "piso"): ViewDef {
-  const id = docPlanId(storey, type);
-  return (
-    views.find((v) => v.id === id) ?? {
-      id,
-      name: `${type === "teto" ? "Planta de teto" : "Planta"} — ${storey}`,
-      kind: "planta",
-      section: "documentacao",
-      storey,
-      scale: 50,
-      cutHeight: 1.2,
-      refDisciplines: [],
-      background: true,
-      halftoneBackground: true,
-      labels: DEFAULT_LABELS,
-      planType: type,
-    }
-  );
+/** Planta de pavimento pelo id (com os valores padrão se ainda não foi alterada). */
+export function floorPlanOfId(views: ViewDef[], id: string, levelLabel?: string): ViewDef | null {
+  const p = parseFloorPlanId(id);
+  return p ? floorPlanOf(views, p.section, p.type, p.storey, p.sub, levelLabel) : null;
+}
+export const docPlanOfId = (views: ViewDef[], id: string) => (isDocPlanId(id) ? floorPlanOfId(views, id) : null);
+
+/** Planta de pavimento: id fixo, criada com valores padrão quando ainda não existe. */
+export function floorPlanOf(views: ViewDef[], section: ViewSection, type: PlanType, storey: string, sub = 0, levelLabel?: string): ViewDef {
+  const id = floorPlanId(section, type, storey, sub);
+  const found = views.find((v) => v.id === id);
+  if (found) return found;
+  const name = `${type === "teto" ? "Planta de teto" : "Planta"} — ${storey}${levelLabel ? ` (${levelLabel})` : sub ? ` (nível ${sub + 1})` : ""}`;
+  const base: ViewDef = { id, name, kind: "planta", section, storey, scale: 50, cutHeight: 1.2, labels: DEFAULT_LABELS, planType: type, range: { ...DEFAULT_RANGE[type] } };
+  return section === "documentacao" ? { ...base, refDisciplines: [], background: true, halftoneBackground: true } : base;
+}
+
+/** Planta de documentação de um pavimento. */
+export function docPlanOf(views: ViewDef[], storey: string, type: PlanType = "piso", sub = 0, levelLabel?: string): ViewDef {
+  return floorPlanOf(views, "documentacao", type, storey, sub, levelLabel);
 }
 
 /** Lê vistas de arquivos antigos (vistas 3D sem tipo nem seção). */

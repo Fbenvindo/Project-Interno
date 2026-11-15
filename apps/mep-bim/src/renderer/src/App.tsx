@@ -25,10 +25,11 @@ import { FolhaPanel } from "./planta/FolhaPanel";
 import { renderSheetViews, type SheetFormat, type SheetViewport } from "../../core/plan/sheet";
 import { boundsOf } from "../../core/plan/build";
 import type { PlanDrawing } from "../../core/plan/drawing";
-import { beamOptions, docPlanOf, docPlanOfId, isDocPlanId, viewFilter, type PlanType, type ViewDef } from "../../core/views";
+import { beamOptions, docPlanOf, floorPlanOf, floorPlanOfId, isFloorPlanId, parseFloorPlanId, rangeOf, viewFilter, type PlanType, type ViewDef } from "../../core/views";
 import { newSheetId, viewDrawing, viewSubtitle, viewTitle, type ModelContext, type SheetDef } from "../../core/viewDrawing";
 import { sectionFrame } from "../../core/plan/elevation";
-import { parsePlanKey, PLAN_PREFIX, VistasBrowser } from "./shell/VistasBrowser";
+import { floorKey, parseFloorKey, parsePlanKey, PLAN_PREFIX, VistasBrowser, type FloorEntry } from "./shell/VistasBrowser";
+import { floorSubLevels, planRangeOf } from "../../core/plan/levels";
 import { VistaPanel } from "./shell/VistaPanel";
 import { connectedPairs, runElements, runFittings, runIdOfElement, segmentIndexOf, runProperties, runSegments, RUN_TYPE_BY_ID, segmentElementId, fittingElementId } from "../../core/runs";
 import { usePointsStore } from "./locacao/usePointsStore";
@@ -73,6 +74,8 @@ type TabView = Exclude<View, "vazio">;
 const TABS: TabView[] = ["planta", "3d", "prancha", "fluxograma"];
 const TAB_LABEL: Record<TabView, string> = { planta: "Planta", "3d": "Vista 3D", prancha: "Prancha", fluxograma: "Fluxograma" };
 const IDENTITY_CS = new CoordinateSystem();
+/** Cota em metros com sinal (ex.: "+0,45"). */
+const fmtLevel = (z: number) => `${z >= 0 ? "+" : "−"}${Math.abs(z).toFixed(2).replace(".", ",")}`;
 type Theme = "claro" | "escuro";
 
 const THEME_KEY = "smarteasybim.tema";
@@ -158,6 +161,8 @@ export function App() {
 
   // Pavimento ativo (planta e prancha), vista 3D isolada e cortes.
   const [storey, setStorey] = useState<string>("");
+  /** Nível de laje aberto em cada pavimento (0 = o primeiro). */
+  const [subByStorey, setSubByStorey] = useState<Record<string, number>>({});
   const [storeyView, setStoreyView] = useState<string | null>(null);
   const [editorCut, setEditorCut] = useState(1.2);
   const [section, setSection] = useState<SectionState>(NO_SECTION);
@@ -192,7 +197,7 @@ export function App() {
   const [snapshots, setSnapshots] = useState<Map<string, { href: string; aspect: number }>>(() => new Map());
   /** Vista pelo id (as plantas de documentação existem mesmo sem terem sido alteradas). */
   const resolveView = useCallback(
-    (id: string): ViewDef | null => store.views.find((v) => v.id === id) ?? docPlanOfId(store.views, id),
+    (id: string): ViewDef | null => store.views.find((v) => v.id === id) ?? floorPlanOfId(store.views, id),
     [store.views],
   );
   const view3dDef = view3dId ? (store.views.find((v) => v.id === view3dId) ?? null) : null;
@@ -283,13 +288,23 @@ export function App() {
 
   const titleBlocks = useTitleBlocks();
   const activeSheet = store.sheets.find((x) => x.id === sheetId) ?? null;
+  /** Pavimentos do navegador: um por pavimento e por nível de laje (quando o pavimento tem mais de um). */
+  const floorEntries = useMemo<FloorEntry[]>(() => {
+    if (!model) return [];
+    const out: FloorEntry[] = [];
+    for (const st of model.storeys) {
+      const subs = floorSubLevels(model.elements, model.storeyLevels, st);
+      subs.forEach((y, i) => out.push({ storey: st, sub: i, levelLabel: subs.length > 1 ? fmtLevel(model.coordinates.worldToIfc([0, y, 0])[2]) : null }));
+    }
+    return out;
+  }, [model]);
   /** Vistas de documentação que podem ir para as folhas. */
   const docViews = useMemo(
     () => [
-      ...(model?.storeys ?? []).flatMap((st) => [docPlanOf(store.views, st, "piso"), docPlanOf(store.views, st, "teto")]),
-      ...store.views.filter((v) => v.section === "documentacao" && !isDocPlanId(v.id)),
+      ...floorEntries.flatMap((f) => [docPlanOf(store.views, f.storey, "piso", f.sub, f.levelLabel ?? undefined), docPlanOf(store.views, f.storey, "teto", f.sub, f.levelLabel ?? undefined)]),
+      ...store.views.filter((v) => v.section === "documentacao" && !isFloorPlanId(v.id)),
     ],
-    [model, store.views],
+    [floorEntries, store.views],
   );
   const sheetRender = useMemo(() => {
     if (view !== "prancha" || !model || !activeSheet) return null;
@@ -908,13 +923,18 @@ export function App() {
   }, [model, storeyLevel]);
   // ---- Abrir vistas ----------------------------------------------------------------------
   // Planta do pavimento aberta: seção (trabalho/documentação) e tipo (piso/teto) pela chave.
-  const floorPlan = parsePlanKey(`${planKey}:${storey}`);
+  const floorPlan = parsePlanKey(planKey);
   const planTypeOpen: PlanType = floorPlan?.type ?? "piso";
+  const subLevel = subByStorey[storey] ?? 0;
+  const floorEntry = floorEntries.find((f) => f.storey === storey && f.sub === subLevel) ?? null;
   const activeViewDef: ViewDef | null = floorPlan
-    ? floorPlan.section === "trabalho"
-      ? null
-      : docPlanOf(store.views, storey, floorPlan.type)
+    ? floorPlanOf(store.views, floorPlan.section, floorPlan.type, storey, floorEntry?.sub ?? 0, floorEntry?.levelLabel ?? undefined)
     : resolveView(planKey.slice(5));
+  /** Faixa de visualização da planta de pavimento aberta (nível base, abaixo e acima). */
+  const planRange = useMemo(
+    () => (model && activeViewDef && floorPlan ? planRangeOf(activeViewDef, model.elements, model.storeyLevels) : undefined),
+    [model, activeViewDef, floorPlan?.section, floorPlan?.type],
+  );
   /** Grava a vista (as plantas de documentação passam a existir no projeto na primeira alteração). */
   const updateView = useCallback(
     (def: ViewDef) => store.setViews((l) => (l.some((x) => x.id === def.id) ? l.map((x) => (x.id === def.id ? def : x)) : [...l, def]), def.id),
@@ -940,7 +960,11 @@ export function App() {
       if (v.kind === "3d") return open3D(v);
       if (v.kind === "fluxograma") return openFlowRef.current(v);
       if (v.storey && model?.storeys.includes(v.storey)) setStorey(v.storey);
-      setPlanKey(v.id.startsWith("doc-planta:") ? "doc" : v.id.startsWith("doc-teto:") ? "doc-teto" : `view:${v.id}`);
+      const fp = parseFloorPlanId(v.id);
+      if (fp) {
+        setSubByStorey((m) => ({ ...m, [fp.storey]: fp.sub }));
+        setPlanKey(PLAN_PREFIX[fp.section][fp.type]);
+      } else setPlanKey(`view:${v.id}`);
       setView("planta");
     },
     [open3D, model],
@@ -970,10 +994,12 @@ export function App() {
   );
   const openKey = useCallback(
     (key: string) => {
-      const fp = parsePlanKey(key);
-      if (fp) {
-        setStorey(fp.storey);
-        setPlanKey(PLAN_PREFIX[fp.section][fp.type]);
+      // Pavimento: abre a planta de piso de Trabalho (piso/teto e seção pelos botões da barra).
+      const fk = parseFloorKey(key);
+      if (fk) {
+        setStorey(fk.storey);
+        setSubByStorey((m) => ({ ...m, [fk.storey]: fk.sub }));
+        setPlanKey("trab");
         setView("planta");
         return;
       }
@@ -1746,13 +1772,13 @@ export function App() {
               {browserOpen && (
                 <div className="dock-body">
                   <VistasBrowser
-                    storeys={model.storeys}
+                    floors={floorEntries}
                     views={store.views}
                     sheets={store.sheets}
                     active={
                       view === "planta"
                         ? floorPlan
-                          ? `${planKey}:${storey}`
+                          ? floorKey(storey, subLevel)
                           : planKey
                         : view === "3d"
                           ? view3dId && `view:${view3dId}`
@@ -1831,7 +1857,9 @@ export function App() {
                 {!closedTabs.includes("planta") && (
                   <span className={`view-tab-wrap ${view === "planta" ? "active" : ""}`}>
                     <button className={`view-tab ${view === "planta" ? "active" : ""}`} onClick={() => setView("planta")}>
-                      {activeViewDef && planKey.startsWith("view:") ? activeViewDef.name : `${planTypeOpen === "teto" ? "Planta de teto" : "Planta de piso"} · ${storey}`}
+                      {activeViewDef && planKey.startsWith("view:")
+                        ? activeViewDef.name
+                        : `${planTypeOpen === "teto" ? "Planta de teto" : "Planta de piso"} · ${storey}${floorEntry?.levelLabel ? ` (${floorEntry.levelLabel})` : ""}`}
                     </button>
                     <button className="tab-close" title="Fechar esta aba" aria-label="Fechar planta" onClick={() => closeTab("planta")}>
                       ×
@@ -1909,7 +1937,42 @@ export function App() {
                 </div>
               </>
             )}
-            {model && view === "planta" && activeViewDef?.kind !== "corte" && (
+            {model && view === "planta" && floorPlan && activeViewDef && planRange && (
+              <div className="range-inputs" title="Faixa de visualização em relação ao nível base">
+                <span className="muted small" title={floorPlan.type === "teto" ? "Face inferior da laje de teto" : "Nível do piso da arquitetura"}>
+                  base {fmtLevel(model.coordinates.worldToIfc([0, planRange.base, 0])[2])}
+                </span>
+                {(["below", "above"] as const).map((k) => (
+                  <label
+                    key={k}
+                    className="cut-input"
+                    title={
+                      k === "below"
+                        ? floorPlan.type === "piso"
+                          ? "Corte inferior: instalações abaixo do piso até esta altura"
+                          : "Corte inferior: todos os elementos abaixo da laje até esta altura"
+                        : floorPlan.type === "piso"
+                          ? "Corte superior: todos os elementos acima do piso até esta altura"
+                          : "Corte superior: instalações acima da face inferior da laje até esta altura"
+                    }
+                  >
+                    {k === "below" ? "inferior" : "superior"}
+                    <input
+                      type="number"
+                      step={0.05}
+                      min={0}
+                      value={rangeOf(activeViewDef, floorPlan.type)[k]}
+                      onChange={(e) => {
+                        const v = Math.max(0, Number(e.target.value) || 0);
+                        updateView({ ...activeViewDef, range: { ...rangeOf(activeViewDef, floorPlan.type), [k]: v } });
+                      }}
+                    />
+                    m
+                  </label>
+                ))}
+              </div>
+            )}
+            {model && view === "planta" && !floorPlan && activeViewDef?.kind !== "corte" && (
               <label className="cut-input" title="Altura do plano de corte acima do piso">
                 corte
                 <input
@@ -1976,6 +2039,7 @@ export function App() {
                 viewDef={activeViewDef}
                 projectDisciplines={store.disciplines}
                 beams={beamOptions(activeViewDef ?? { ...workDisplay, planType: planTypeOpen })}
+                range={planRange}
                 onMoveBy={(d) => moveRef.current(planDeltaToScene(d[0], d[1]), `${Math.hypot(d[0], d[1]).toFixed(2).replace(".", ",")} m`)}
               />
             )}

@@ -15,6 +15,7 @@ import { assemblyKey } from "../devices";
 import { draftPrims, type DraftEntity } from "../draft";
 import { pointSize } from "../points";
 import { BEAM_COLOR, BEAM_OPACITY, COLUMN_FILL, COLUMN_TYPES, isLayout, LAYOUT_GRAY, minAreaRect, WALL_FILL } from "./style";
+import type { PlanRange } from "./levels";
 import { BOX_LABEL, INSTALL_LABEL, INSTALL_ZONE, isApparent, type BoxKind, type PullBox } from "../conduits";
 
 export interface PlanLabels {
@@ -52,6 +53,12 @@ export interface PlanInput {
    * as do pavimento de cima. `text` = largura × altura (cm) em cada viga.
    */
   beams?: BeamOptions;
+  /**
+   * Faixa de visualização (plantas de pavimento). Piso: corte em base + acima; abaixo da base só
+   * instalações. Teto: corte em base − abaixo; acima da base só instalações. Sem faixa, vale o
+   * corte em `cutHeight` com o pavimento inteiro.
+   */
+  range?: PlanRange;
 }
 
 export interface BeamOptions {
@@ -89,8 +96,16 @@ export function buildPlan(input: PlanInput): PlanDrawing {
   const idx = levels.findIndex((s) => s.name === storey);
   const level = idx >= 0 ? levels[idx].level : 0;
   const nextLevel = idx >= 0 && idx < levels.length - 1 ? levels[idx + 1].level : Infinity;
-  const cutY = level + input.cutHeight;
-  const inStorey = (y: number) => y >= level - 0.05 && y < nextLevel - 0.05;
+  const R = input.range;
+  const cutY = R ? (R.type === "piso" ? R.base + R.above : R.base - R.below) : level + input.cutHeight;
+  // Faixas: instalações (abaixo e acima) e demais elementos (só acima no piso, só abaixo no teto).
+  const mepLo = R ? R.base - R.below : -Infinity;
+  const mepHi = R ? R.base + R.above : Infinity;
+  const archLo = R ? (R.type === "piso" ? R.base : R.base - R.below) : -Infinity;
+  const archHi = R ? (R.type === "piso" ? R.base + R.above : R.base) : Infinity;
+  const inStorey = R ? (y: number) => y >= mepLo - 0.02 && y <= mepHi + 0.02 : (y: number) => y >= level - 0.05 && y < nextLevel - 0.05;
+  /** Faixa vertical [lo, hi] dentro da faixa de instalações. */
+  const inMepRange = (lo: number, hi: number) => (R ? hi >= mepLo - 0.02 && lo <= mepHi + 0.02 : inStorey(lo));
 
   const plan = (v: Vec3): P2 => {
     const p = cs.worldToIfc(v);
@@ -104,6 +119,7 @@ export function buildPlan(input: PlanInput): PlanDrawing {
 
   const prims: Prim[] = [];
   const legend = new Map<string, LegendItem>();
+  const bo = input.beams;
 
   // ---- Modelo IFC cortado ---------------------------------------------------------
   for (const e of input.elements) {
@@ -113,17 +129,33 @@ export function buildPlan(input: PlanInput): PlanDrawing {
     const isMep = MEP_DISCIPLINES.includes(e.discipline);
     // Elementos MEP do IFC: corte na meia altura do próprio elemento (mostra o percurso).
     let y = cutY;
+    let projected = false;
+    const lo = e.bbox.min[1];
+    const hi = e.bbox.max[1];
     if (isMep) {
-      if (!inStorey(e.bbox.min[1])) continue;
-      y = (e.bbox.min[1] + e.bbox.max[1]) / 2;
-    } else if (e.bbox.min[1] > cutY || e.bbox.max[1] < cutY) continue;
+      if (R) {
+        if (!inMepRange(lo, hi)) continue;
+        y = (Math.max(lo, mepLo) + Math.min(hi, mepHi)) / 2;
+      } else {
+        if (!inStorey(lo)) continue;
+        y = (lo + hi) / 2;
+      }
+    } else if (lo > cutY || hi < cutY) {
+      // Com faixa: o que está inteiro dentro dela (sem cruzar o corte) aparece em projeção.
+      if (!R || e.ifcType === "IFCBEAM") continue; // vigas: projeção própria (tracejada), abaixo
+      const a = Math.max(lo, archLo);
+      const b = Math.min(hi, archHi);
+      if (b - a < 0.01) continue;
+      y = (a + b) / 2;
+      projected = true;
+    }
     const segs = cutMesh(mesh.positions, mesh.indices, y).map(({ a, b }): [P2, P2] => [plan(a), plan(b)]);
     if (!segs.length) continue;
     const prefix = LAYER_PREFIX[e.discipline];
     // Layout e equipamentos da arquitetura (inclusive louças e metais): cinza, sempre.
     const layout = isLayout(e.ifcType);
     const color = layout ? LAYOUT_GRAY : PRINT_COLOR[e.discipline];
-    const poche = !isMep && POCHE_TYPES.has(e.ifcType);
+    const poche = !isMep && !projected && POCHE_TYPES.has(e.ifcType);
     const weight = layout ? PEN.vista : isMep ? PEN.mep : poche ? PEN.corte : OPENING_TYPES.has(e.ifcType) ? PEN.porta : PEN.vista;
     const layer = layout ? "ARQ-LAYOUT" : isMep ? `${prefix}-IFC` : poche ? `${prefix}-CORTE` : `${prefix}-ELEMENTOS`;
     const pocheFill = COLUMN_TYPES.has(e.ifcType) ? COLUMN_FILL : WALL_FILL;
@@ -135,14 +167,13 @@ export function buildPlan(input: PlanInput): PlanDrawing {
         weight,
         fill: poche && ch.closed ? pocheFill : null,
         layer,
-        color: isMep || layout ? color : "#222222",
+        color: isMep || layout ? color : projected ? "#666666" : "#222222",
         id: e.expressID,
       });
     }
   }
 
   // ---- Vigas (projeção tracejada, verde com 50% de transparência) ---------------------------
-  const bo = input.beams;
   if (bo?.show && input.disciplines.has("estrutura")) {
     // Piso: vigas da laje deste pavimento (topo junto ao nível). Teto: as do pavimento de cima.
     const ref = bo.mode === "teto" ? (Number.isFinite(nextLevel) ? nextLevel : level + 3) : level;
@@ -184,7 +215,9 @@ export function buildPlan(input: PlanInput): PlanDrawing {
   };
 
   for (const p of input.points) {
-    if (p.storey !== storey) continue;
+    // Com faixa: os pontos pela altura (inclusive os do pavimento de baixo, junto à laje);
+    // sem faixa: os do pavimento.
+    if (R ? !inStorey(p.position[1]) : p.storey !== storey) continue;
     const def = COMPONENT_BY_ID[p.componentId];
     if (!input.disciplines.has(def.discipline)) continue;
     const sym = p.assembly ? assemblySymbol(p.assembly, p.height) : symbolFor(def);
@@ -269,7 +302,7 @@ export function buildPlan(input: PlanInput): PlanDrawing {
 
     segs.forEach((s, i) => {
       const lowY = Math.min(s.start[1], s.end[1]);
-      if (!inStorey(storeyProbeY(run, lowY))) return;
+      if (R ? !inMepRange(lowY, Math.max(s.start[1], s.end[1])) : !inStorey(storeyProbeY(run, lowY))) return;
       const a = plan(s.start);
       const b = plan(s.end);
       const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -338,7 +371,7 @@ export function buildPlan(input: PlanInput): PlanDrawing {
   // ---- Caixas de passagem -------------------------------------------------------------------
   if (input.disciplines.has("eletrica")) {
     for (const b of input.boxes ?? []) {
-      if (!inStorey(storeyProbeY(b, b.position[1]))) continue;
+      if (!inStorey(R ? b.position[1] : storeyProbeY(b, b.position[1]))) continue;
       const color = PRINT_COLOR.eletrica;
       const horiz = Math.hypot(b.dir[0], b.dir[2]) > 0.3;
       const r = horiz ? planDir([b.dir[0], 0, b.dir[2]]) : ([1, 0] as P2);

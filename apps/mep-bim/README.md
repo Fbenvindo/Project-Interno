@@ -246,7 +246,16 @@ Fora de qualquer comando, o app está sempre em **Selecionar**, em todas as vist
 - A edição continua no arquivo de projeto (.json). O IFC é a entrega.
 
 **Vistas**, no navegador *Vistas e folhas* (coluna da esquerda):
-- **Plantas de piso e de teto:** em Trabalho e em Documentação, todo pavimento já tem a sua **Planta de piso** (vigas da laje de baixo) e a sua **Planta de teto** (vigas do pavimento de cima), sem precisar criá-las. Elas ficam no navegador em *Plantas › Planta de piso* e *Plantas › Planta de teto*. Na barra de vistas, **Piso/Teto** e **Trabalho/Documentação** alternam a planta aberta. As plantas de teto de documentação também podem ir para as folhas.
+- **Navegador de vistas:** *Pavimentos* (um item por pavimento e, se o pavimento tem lajes em níveis diferentes, um por nível, com a cota, ex.: "TÉRREO (+0,45)"), *Ampliações*, *Cortes*, *Vistas 3D*, *Fluxogramas* e *Folhas*. As vistas de documentação levam a marca "doc". Clicar num pavimento abre a **planta de piso de Trabalho**. Na barra de vistas, **Piso/Teto** e **Trabalho/Documentação** trocam a planta.
+- **Faixa de visualização das plantas de pavimento:** na barra de vistas (base, inferior e superior) e nas Propriedades, para cada planta.
+
+  | | Planta de piso | Planta de teto |
+  |---|---|---|
+  | Nível base | piso da arquitetura (topo da laje do pavimento) | face inferior da laje de teto |
+  | Corte inferior (padrão) | 1,00 m: só as instalações abaixo do piso | 1,50 m: todos os elementos e as instalações abaixo da laje (o plano de corte fica aqui) |
+  | Corte superior (padrão) | 1,50 m: todos os elementos acima do piso (o plano de corte fica aqui) | 0,20 m: só as instalações acima da face inferior da laje |
+
+  Paredes e pilares cruzados pelo plano de corte saem hachurados; o resto dentro da faixa sai em projeção (contorno cinza). Pontos e trechos entram pela altura, inclusive os de outro pavimento junto à laje.
 - **Trabalho:** tudo visível (modelo, vínculos e todas as disciplinas).
 - **Documentação:** só as disciplinas do projeto. Outras disciplinas podem entrar como informação, em meio-tom. A arquitetura/estrutura fica como fundo (em meio-tom, por padrão). É isto que vai para as folhas. Cada pavimento tem a sua planta de documentação, e um botão na barra de vistas alterna entre *Trabalho* e *Documentação*.
 - **Ampliações** (Geral › Ampliação): retângulo da planta em escala maior, 1:25 por padrão.

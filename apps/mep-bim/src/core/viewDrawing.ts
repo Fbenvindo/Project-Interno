@@ -14,7 +14,8 @@ import type { PlacedPoint, StoreyLevel } from "./points";
 import type { Run } from "./runs";
 import type { Space } from "./spaces";
 import type { Discipline, ElementInfo } from "./types";
-import { applyHalftone, beamOptions, clipPrims, DEFAULT_LABELS, filterLegend, viewFilter, viewMarkers, type ViewDef } from "./views";
+import { applyHalftone, beamOptions, clipPrims, DEFAULT_LABELS, filterLegend, parseFloorPlanId, rangeOf, viewFilter, viewMarkers, type ViewDef } from "./views";
+import { planRangeOf } from "./plan/levels";
 
 export interface ModelContext {
   elements: ElementInfo[];
@@ -74,6 +75,7 @@ export function viewDrawing(view: ViewDef, ctx: ModelContext): PlanDrawing | nul
       drafts: ctx.drafts,
       draftView: view.section === "trabalho" && view.kind === "planta" ? null : view.id,
       beams: beamOptions(view),
+      range: view.kind === "planta" ? planRangeOf(view, ctx.elements, ctx.storeyLevels) : undefined,
     });
     let prims = applyHalftone(d.prims, f);
     if (view.section === "documentacao" && view.workNotes)
@@ -88,7 +90,13 @@ export function viewDrawing(view: ViewDef, ctx: ModelContext): PlanDrawing | nul
 
 export function viewSubtitle(view: ViewDef): string {
   const s = `ESCALA 1:${view.scale}`;
-  if (view.kind === "planta") return `${s} · corte a ${(view.cutHeight ?? 1.2).toFixed(2).replace(".", ",")} m do piso`;
+  const fp = parseFloorPlanId(view.id);
+  const n = (v: number) => v.toFixed(2).replace(".", ",");
+  if (fp) {
+    const r = rangeOf(view, fp.type);
+    return `${s} · ${fp.type === "teto" ? "planta de teto: base na laje de teto" : "planta de piso: base no piso"}, ${n(r.below)} m abaixo e ${n(r.above)} m acima`;
+  }
+  if (view.kind === "planta") return `${s} · corte a ${n(view.cutHeight ?? 1.2)} m do piso`;
   if (view.kind === "corte" && view.cut) return `${s} · profundidade ${view.cut.depth.toFixed(1).replace(".", ",")} m`;
   if (view.kind === "3d" || view.kind === "fluxograma") return "SEM ESCALA";
   return s;

@@ -234,22 +234,23 @@ describe("planta: vigas, pilares e layout", () => {
 });
 
 describe("plantas de piso e de teto de cada pavimento", () => {
-  it("documentação: ids, nomes e tipo; chaves do navegador", async () => {
-    const { docPlanOf, docPlanOfId, isDocPlanId } = await import("../src/core/views");
-    const { parsePlanKey, planKeyOf, viewIdOfKey } = await import("../src/renderer/src/shell/VistasBrowser");
+  it("ids por seção, tipo, pavimento e nível de laje; faixa padrão", async () => {
+    const { docPlanOf, floorPlanOf, floorPlanOfId, isDocPlanId, isFloorPlanId, parseFloorPlanId, rangeOf } = await import("../src/core/views");
+    const { floorKey, parseFloorKey } = await import("../src/renderer/src/shell/VistasBrowser");
     const piso = docPlanOf([], "Térreo");
     const teto = docPlanOf([], "Térreo", "teto");
     expect(piso.id).toBe("doc-planta:Térreo");
     expect(teto.id).toBe("doc-teto:Térreo");
-    expect(teto.planType).toBe("teto");
     expect(teto.name).toBe("Planta de teto — Térreo");
     expect(isDocPlanId(teto.id) && isDocPlanId(piso.id)).toBe(true);
-    expect(docPlanOfId([], "doc-teto:1º Pavimento")?.planType).toBe("teto");
-    expect(parsePlanKey("trab-teto:1º Pavimento")).toEqual({ section: "trabalho", type: "teto", storey: "1º Pavimento" });
-    expect(parsePlanKey("doc:Térreo")).toEqual({ section: "documentacao", type: "piso", storey: "Térreo" });
-    expect(parsePlanKey("view:x")).toBeNull();
-    expect(planKeyOf("documentacao", "teto", "Térreo")).toBe("doc-teto:Térreo");
-    expect(viewIdOfKey("doc-teto:Térreo")).toBe("doc-teto:Térreo");
-    expect(viewIdOfKey("trab:Térreo")).toBeNull();
+    const trab = floorPlanOf([], "trabalho", "teto", "Pavimento #12", 1, "+0,45");
+    expect(trab.id).toBe("trab-teto:Pavimento #12::1");
+    expect(trab.name).toBe("Planta de teto — Pavimento #12 (+0,45)");
+    expect(isFloorPlanId(trab.id) && !isDocPlanId(trab.id)).toBe(true);
+    expect(parseFloorPlanId(trab.id)).toEqual({ section: "trabalho", type: "teto", storey: "Pavimento #12", sub: 1 });
+    expect(floorPlanOfId([], "doc-teto:1º Pavimento")?.planType).toBe("teto");
+    expect(rangeOf(piso, "piso")).toEqual({ below: 1, above: 1.5 });
+    expect(rangeOf(teto, "teto")).toEqual({ below: 1.5, above: 0.2 });
+    expect(parseFloorKey(floorKey("TÉRREO", 2))).toEqual({ storey: "TÉRREO", sub: 2 });
   });
 });

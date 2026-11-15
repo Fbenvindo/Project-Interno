@@ -4,7 +4,7 @@ import type { PlanLabels } from "../../../core/plan/build";
 import type { Discipline } from "../../../core/types";
 import type { SheetDef } from "../../../core/viewDrawing";
 import { DEFAULT_LABELS, primaryDisciplines, SECTION_LABEL, type ViewDef } from "../../../core/views";
-import { isDocPlanId } from "../../../core/views";
+import { isFloorPlanId, parseFloorPlanId, rangeOf } from "../../../core/views";
 
 const SCALES = [10, 20, 25, 50, 75, 100, 125, 200];
 
@@ -54,6 +54,12 @@ function BeamControls({ value, onChange, fixedType }: { value: BeamFields; onCha
   );
 }
 
+/** O que cada faixa mostra, por tipo de planta. */
+function rangeHint(type: "piso" | "teto", k: "below" | "above"): string {
+  if (type === "piso") return k === "below" ? "Base no piso da arquitetura. Abaixo dela: só as instalações, até esta altura." : "Acima do piso: todos os elementos, até esta altura (plano de corte).";
+  return k === "below" ? "Base na face inferior da laje de teto. Abaixo dela: todos os elementos e as instalações, até esta altura (plano de corte)." : "Acima da face inferior da laje: só as instalações, até esta altura.";
+}
+
 export function VistaPanel({ view, storey, projectDisciplines, available, sheets, onChange, onAddToSheet, onShow3D, onSaveCamera, workDisplay, onWorkDisplay }: Props) {
   if (!view)
     return (
@@ -68,6 +74,7 @@ export function VistaPanel({ view, storey, projectDisciplines, available, sheets
       </div>
     );
   const set = (patch: Partial<ViewDef>) => onChange({ ...view, ...patch });
+  const floor = parseFloorPlanId(view.id);
   const doc = view.section === "documentacao";
   const primary = new Set(primaryDisciplines(projectDisciplines));
   const refs = view.refDisciplines ?? [];
@@ -89,7 +96,7 @@ export function VistaPanel({ view, storey, projectDisciplines, available, sheets
           <tr>
             <th>Seção</th>
             <td>
-              <select value={view.section} onChange={(e) => set({ section: e.target.value as ViewDef["section"] })} disabled={isDocPlanId(view.id)}>
+              <select value={view.section} onChange={(e) => set({ section: e.target.value as ViewDef["section"] })} disabled={isFloorPlanId(view.id)}>
                 <option value="trabalho">Trabalho (tudo visível)</option>
                 <option value="documentacao">Documentação (folhas)</option>
               </select>
@@ -109,7 +116,22 @@ export function VistaPanel({ view, storey, projectDisciplines, available, sheets
               </td>
             </tr>
           )}
-          {(view.kind === "planta" || view.kind === "ampliacao") && (
+          {floor &&
+            (["below", "above"] as const).map((k) => (
+              <tr key={k} title={rangeHint(floor.type, k)}>
+                <th>{k === "below" ? "Corte inferior (m)" : "Corte superior (m)"}</th>
+                <td>
+                  <input
+                    type="number"
+                    step={0.05}
+                    min={0}
+                    value={rangeOf(view, floor.type)[k]}
+                    onChange={(e) => set({ range: { ...rangeOf(view, floor.type), [k]: Math.max(0, Number(e.target.value) || 0) } })}
+                  />
+                </td>
+              </tr>
+            ))}
+          {!floor && (view.kind === "planta" || view.kind === "ampliacao") && (
             <tr>
               <th>Altura de corte (m)</th>
               <td>
@@ -174,7 +196,7 @@ export function VistaPanel({ view, storey, projectDisciplines, available, sheets
         </>
       )}
 
-      {(view.kind === "planta" || view.kind === "ampliacao") && <BeamControls value={view} onChange={(v) => set(v)} fixedType={isDocPlanId(view.id)} />}
+      {(view.kind === "planta" || view.kind === "ampliacao") && <BeamControls value={view} onChange={(v) => set(v)} fixedType={isFloorPlanId(view.id)} />}
       {view.kind !== "3d" && (
         <>
           <div className="field-label">Textos</div>
