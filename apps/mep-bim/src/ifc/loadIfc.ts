@@ -196,12 +196,37 @@ export function extractIfc(api: IfcAPI, input: Uint8Array | { bytes: Uint8Array 
     for (const child of refs(rel.RelatedElements)) if (!parent.has(child)) parent.set(child, owner);
   }
 
+  /** Cota (Z do IFC, unidade do projeto) pelo posicionamento: soma as cotas da cadeia de IfcLocalPlacement. */
+  const placementZ = (pid: number | null | undefined): number | null => {
+    let z = 0;
+    let cur = pid;
+    let any = false;
+    for (let guard = 0; cur != null && guard < 30; guard++) {
+      try {
+        const lp = line(cur);
+        const rel = val(lp.RelativePlacement);
+        const loc = rel != null ? val(line(rel).Location) : null;
+        const coords = loc != null ? line(loc).Coordinates : null;
+        if (Array.isArray(coords) && coords.length > 2) {
+          z += Number(val(coords[2])) || 0;
+          any = true;
+        }
+        cur = val(lp.PlacementRelTo);
+      } catch {
+        break;
+      }
+    }
+    return any ? z : null;
+  };
   const storeyInfo = new Map<number, { name: string; elevation: number }>();
   for (const sid of idsOf(IFCBUILDINGSTOREY)) {
     const s = line(sid);
+    // A cota que vale é a do posicionamento (a mesma que posiciona a geometria); o atributo
+    // Elevation às vezes vem relativo ao edifício ou absoluto, conforme o exportador.
+    const z = placementZ(val(s.ObjectPlacement));
     storeyInfo.set(sid, {
       name: val(s.Name) || val(s.LongName) || `Pavimento #${sid}`,
-      elevation: Number(val(s.Elevation) ?? 0),
+      elevation: z ?? Number(val(s.Elevation) ?? 0),
     });
   }
   const storeyOf = (id: number): string | null => {
@@ -370,10 +395,21 @@ export function extractIfc(api: IfcAPI, input: Uint8Array | { bytes: Uint8Array 
 
   const sortedStoreys = [...storeyInfo.values()].sort((a, b) => a.elevation - b.elevation);
   const storeys = sortedStoreys.map((s) => s.name);
-  const storeyLevels = sortedStoreys.map((s) => ({
-    name: s.name,
-    level: coordinates.ifcToWorld([0, 0, s.elevation * unitToMeters])[1],
-  }));
+  // Conferência pela geometria: se a cota do pavimento ficar muito longe da base dos seus
+  // elementos (exportação com cotas inconsistentes), vale a base dos elementos.
+  const bottoms = new Map<string, number[]>();
+  for (const e of elements) {
+    if (!e.storey || !e.bbox) continue;
+    const l = bottoms.get(e.storey) ?? [];
+    l.push(e.bbox.min[1]);
+    bottoms.set(e.storey, l);
+  }
+  const storeyLevels = sortedStoreys.map((s) => {
+    const level = coordinates.ifcToWorld([0, 0, s.elevation * unitToMeters])[1];
+    const b = (bottoms.get(s.name) ?? []).sort((x, y) => x - y);
+    const median = b.length ? b[Math.floor(b.length / 2)] : null;
+    return { name: s.name, level: median != null && Math.abs(median - level) > 10 ? median : level };
+  });
   // ---- Propriedades: cada conjunto lido uma vez, compartilhado pelos elementos ----------
   onProgress("Lendo propriedades", 0.9);
   const propertyGroups: PropertyGroup[] = [];

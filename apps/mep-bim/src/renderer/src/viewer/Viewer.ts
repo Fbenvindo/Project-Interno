@@ -158,6 +158,10 @@ export class Viewer {
     this.controls.screenSpacePanning = true;
     this.applyMouseButtons();
     this.controls.addEventListener("change", () => this.requestRender());
+    // Modelos grandes: enquanto a câmera se move, elementos pequenos somem e a resolução baixa;
+    // ao parar, tudo volta.
+    this.controls.addEventListener("start", () => this.setMoving(true));
+    this.controls.addEventListener("end", () => this.setMoving(false));
 
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.6));
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
@@ -330,9 +334,9 @@ export class Viewer {
     // Blocos primeiro: as malhas passam a ser vistas dos blocos (sem duplicar a memória).
     this.batches.add(fresh, (m) => this.colorsOf(m.expressID)!);
     for (const m of fresh) {
+      // Sem normais: este Mesh serve à seleção; se for desenhado (destaque), elas são calculadas.
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", new THREE.BufferAttribute(m.positions, 3));
-      geometry.setAttribute("normal", new THREE.BufferAttribute(m.normals, 3));
       geometry.setIndex(new THREE.BufferAttribute(m.indices, 1));
       geometry.computeBoundingBox();
       geometry.computeBoundingSphere();
@@ -983,8 +987,10 @@ export class Viewer {
         const special = this.highlighted.has(id) || (!this.ghosted && this.selected.has(id));
         const shown = e.mesh.visible;
         this.batches.setShown(id, shown && !special);
-        if (shown && special) e.mesh.layers.enable(0);
-        else e.mesh.layers.disable(0);
+        if (shown && special) {
+          if (!e.mesh.geometry.getAttribute("normal")) e.mesh.geometry.computeVertexNormals();
+          e.mesh.layers.enable(0);
+        } else e.mesh.layers.disable(0);
       }
     }
     this.batches.setGhost(this.ghosted);
@@ -1039,6 +1045,28 @@ export class Viewer {
     const box = new THREE.Box3().setFromObject(this.modelGroup);
     const grid = this.scene.getObjectByName("grid");
     if (grid && !box.isEmpty()) grid.position.set((box.min.x + box.max.x) / 2, box.min.y - 0.01, (box.min.z + box.max.z) / 2);
+  }
+
+  private moving = false;
+  private movingTimer = 0;
+  private setMoving(on: boolean) {
+    clearTimeout(this.movingTimer);
+    if (!on) {
+      // Espera o fim da inércia (amortecimento) antes de voltar ao detalhe completo.
+      this.movingTimer = window.setTimeout(() => this.applyMoving(false), 250);
+      return;
+    }
+    this.applyMoving(true);
+  }
+  private applyMoving(on: boolean) {
+    const heavy = this.batches.triangles > 1_500_000;
+    const want = on && heavy;
+    if (want === this.moving) return;
+    this.moving = want;
+    this.batches.setSmallHidden(want);
+    this.renderer.setPixelRatio(want ? 1 : Math.min(window.devicePixelRatio, 2));
+    this.resize();
+    this.requestRender();
   }
 
   private resize() {

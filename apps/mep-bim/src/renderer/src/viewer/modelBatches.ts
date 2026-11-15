@@ -13,6 +13,8 @@ const BATCH_INDICES = 12 * 1024 * 1024;
 
 interface Batch {
   mesh: THREE.Mesh;
+  /** Elementos pequenos (mobiliário, louças, acessórios): escondidos enquanto a câmera se move. */
+  small: boolean;
   index: THREE.BufferAttribute;
   color: THREE.BufferAttribute;
   /** Faixas do índice alteradas desde o último envio à placa. */
@@ -32,6 +34,50 @@ interface Slot {
 }
 
 export type RGBA = [number, number, number, number];
+
+/** Diagonal (m) abaixo da qual o elemento conta como pequeno. */
+const SMALL_DIAGONAL = 1.0;
+const EMPTY = new Float32Array(0);
+
+function diagonal(p: Float32Array): number {
+  let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+  for (let i = 0; i < p.length; i += 3) {
+    const x = p[i], y = p[i + 1], z = p[i + 2];
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+    if (z < z0) z0 = z;
+    if (z > z1) z1 = z;
+  }
+  return Math.hypot(x1 - x0, y1 - y0, z1 - z0);
+}
+
+/** Normais compactadas (Int8 normalizado) a partir das normais da malha ou, sem elas, das faces. */
+function packNormals(m: ElementMesh, out: Int8Array, at: number) {
+  const n = m.normals;
+  if (n.length === m.positions.length) {
+    for (let i = 0; i < n.length; i++) out[at + i] = Math.max(-127, Math.min(127, Math.round(n[i] * 127)));
+    return;
+  }
+  const p = m.positions;
+  const idx = m.indices;
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t] * 3, b = idx[t + 1] * 3, c = idx[t + 2] * 3;
+    const ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2];
+    const vx = p[c] - p[a], vy = p[c + 1] - p[a + 1], vz = p[c + 2] - p[a + 2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx = Math.round((nx / len) * 127);
+    ny = Math.round((ny / len) * 127);
+    nz = Math.round((nz / len) * 127);
+    for (const v of [a, b, c]) {
+      out[at + v] = nx;
+      out[at + v + 1] = ny;
+      out[at + v + 2] = nz;
+    }
+  }
+}
 
 export class ModelBatches {
   readonly group = new THREE.Group();
@@ -54,17 +100,19 @@ export class ModelBatches {
    * malha passam a ser vistas do bloco (a memória original pode ser liberada).
    */
   add(meshes: ElementMesh[], colorOf: (m: ElementMesh) => RGBA) {
-    const opaque: ElementMesh[] = [];
-    const transparent: ElementMesh[] = [];
+    const lists: Record<string, ElementMesh[]> = { o: [], t: [], os: [], ts: [] };
     for (const m of meshes) {
       if (!m.positions.length || this.slots.has(m.expressID)) continue;
-      (colorOf(m)[3] < 0.999 ? transparent : opaque).push(m);
+      const k = (colorOf(m)[3] < 0.999 ? "t" : "o") + (diagonal(m.positions) < SMALL_DIAGONAL ? "s" : "");
+      lists[k].push(m);
     }
-    this.build(opaque, false, colorOf);
-    this.build(transparent, true, colorOf);
+    this.build(lists.o, false, false, colorOf);
+    this.build(lists.t, true, false, colorOf);
+    this.build(lists.os, false, true, colorOf);
+    this.build(lists.ts, true, true, colorOf);
   }
 
-  private build(list: ElementMesh[], transparent: boolean, colorOf: (m: ElementMesh) => RGBA) {
+  private build(list: ElementMesh[], transparent: boolean, small: boolean, colorOf: (m: ElementMesh) => RGBA) {
     let i = 0;
     while (i < list.length) {
       // Quantas malhas cabem neste bloco (uma malha maior que o bloco vai sozinha).
@@ -80,24 +128,25 @@ export class ModelBatches {
         j++;
       }
       const pos = new Float32Array(floats);
-      const nor = new Float32Array(floats);
+      const nor = new Int8Array(floats);
       const col = new Uint8Array((floats / 3) * 4);
       const ind = new Uint32Array(idx);
       const geometry = new THREE.BufferGeometry();
       const index = new THREE.BufferAttribute(ind, 1);
       const color = new THREE.BufferAttribute(col, 4, true);
       const mesh = new THREE.Mesh(geometry, transparent ? this.transparentMat : this.opaqueMat);
-      const batch: Batch = { mesh, index, color, dirty: false, live: 0 };
+      const batch: Batch = { mesh, small, index, color, dirty: false, live: 0 };
       let vo = 0;
       let io = 0;
       for (let k = i; k < j; k++) {
         const m = list[k];
         const v0 = vo / 3;
         pos.set(m.positions, vo);
-        nor.set(m.normals, vo);
-        // As malhas do app passam a apontar para o bloco (mesmos valores, sem cópia extra).
+        packNormals(m, nor, vo);
+        // As malhas do app passam a apontar para o bloco (mesmos valores, sem cópia extra); as
+        // normais ficam só no bloco, compactadas (o Mesh de seleção calcula as suas se precisar).
         m.positions = pos.subarray(vo, vo + m.positions.length);
-        m.normals = nor.subarray(vo, vo + m.normals.length);
+        m.normals = EMPTY;
         for (let t = 0; t < m.indices.length; t++) ind[io + t] = m.indices[t] + v0;
         const slot: Slot = { batch, v0, vCount: m.positions.length / 3, i0: io, local: m.indices, shown: true };
         this.slots.set(m.expressID, slot);
@@ -107,7 +156,7 @@ export class ModelBatches {
         io += m.indices.length;
       }
       geometry.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-      geometry.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+      geometry.setAttribute("normal", new THREE.BufferAttribute(nor, 3, true));
       geometry.setAttribute("color", color);
       geometry.setIndex(index);
       geometry.computeBoundingBox();
@@ -157,6 +206,18 @@ export class ModelBatches {
         b.index.needsUpdate = true;
         b.dirty = false;
       }
+  }
+
+  /** Esconde (true) ou mostra os blocos de elementos pequenos (durante o movimento da câmera). */
+  setSmallHidden(hidden: boolean) {
+    for (const b of this.batches) if (b.small) b.mesh.visible = !hidden;
+  }
+
+  /** Total de triângulos nos blocos (para decidir se vale simplificar durante o movimento). */
+  get triangles() {
+    let n = 0;
+    for (const b of this.batches) n += b.index.count / 3;
+    return n;
   }
 
   /** Modo "resto translúcido" (interferências): os blocos usam o material fantasma. */

@@ -55,3 +55,18 @@ describe("dados do IFC para o worker e o cache", () => {
     expect(entriesToEvict([e("grande", 500, 5), e("b", 10, 3)], 100, 10)).toEqual(["b"]);
   });
 });
+
+describe("cotas dos pavimentos", () => {
+  it("vêm do posicionamento (a Elevation do IFC pode estar errada ou absoluta)", async () => {
+    const text = readFileSync(join(__dirname, "..", "samples", "exemplo-mep.ifc"), "latin1");
+    // Exportação com Elevation absoluta (+584,275 m) e posicionamento relativo, como em alguns arquivos do Revit.
+    const shifted = text.replace(/(IFCBUILDINGSTOREY\([^;]*,)([\d.]+)\);/g, (_, a, e) => `${a}${Number(e) + 584275}.);`);
+    expect(shifted).not.toBe(text);
+    const api = new IfcAPI();
+    await api.Init();
+    const ok = extractIfc(api, new Uint8Array(Buffer.from(text, "latin1")));
+    const bad = extractIfc(api, new Uint8Array(Buffer.from(shifted, "latin1")));
+    expect(bad.storeyLevels.map((s) => s.level.toFixed(3))).toEqual(ok.storeyLevels.map((s) => s.level.toFixed(3)));
+    expect(ok.storeyLevels.map((s) => Math.round(s.level * 100) / 100)).toEqual([ok.storeyLevels[0].level, ok.storeyLevels[0].level + 3].map((v) => Math.round(v * 100) / 100));
+  });
+});
