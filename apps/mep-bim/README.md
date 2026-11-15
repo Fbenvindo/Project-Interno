@@ -402,6 +402,20 @@ O traçado proposto aparece em verde antes de gerar. Cada trecho sobe do ponto a
 - Os trechos entram nos quantitativos (metros por tipo e bitola, curvas e tês), nas interferências, no arquivo de projeto (`.locacao.json`, versão 2) e no **IFC exportado** (`IfcPipeSegment`/`IfcCableCarrierSegment` com `Qto_*` de comprimento, conexões `IfcPipeFitting`/`IfcCableCarrierFitting` e `Pset_MEP_Tracado`).
 - As conexões com equipamentos usam o **centro** do ponto locado. Dois trechos que chegam ao mesmo equipamento são considerados ligados entre si.
 
+### Desempenho com modelos grandes
+
+- **Leitura em segundo plano:** o IFC é lido num processo separado da interface (Web Worker). A janela continua respondendo e mostra o andamento (etapas e barra de progresso).
+- **Cache dos modelos:** na primeira abertura, o modelo já processado (geometria, elementos, propriedades, pavimentos, ambientes e coordenadas) fica guardado neste computador. Nas próximas aberturas do mesmo arquivo, inclusive dos vínculos, ele é carregado do cache sem reprocessar o IFC. A barra de status mostra "Processado em x s" ou "Aberto do cache em x s".
+  - O cache reconhece o arquivo pelo conteúdo (SHA-256): se o IFC mudar, é processado de novo. Também é refeito quando uma versão nova do app passa a ler o IFC de outro jeito.
+  - O cache tem limite de 3 GB e 12 modelos. Ao passar disso, saem os modelos usados há mais tempo.
+  - **Arquivo › Desempenho › Limpar cache de modelos** mostra os modelos guardados e o espaço ocupado, e apaga o cache.
+- **Geometria em blocos contínuos:** as malhas de todos os elementos vão do leitor para a interface e para o cache em poucos blocos, sem cópia.
+
+Num IFC de teste com 40 pavimentos e cerca de 29 mil elementos (34 MB):
+- **Antes:** 5,8 s para abrir, com a janela travada por cerca de 4,3 s.
+- **Primeira abertura agora:** cerca de 7 s, com a janela respondendo; a pausa mais longa foi de cerca de 1,6 s, ao montar o 3D e as listas.
+- **Reabrindo pelo cache:** cerca de 3,4 s, dos quais 0,3 s para ler o modelo; o resto é a montagem da cena.
+
 ### Como a disciplina é definida
 
 1. Tipos IFC que já definem a disciplina (duto = HVAC, luminária = elétrica, sprinkler = incêndio…).
@@ -488,7 +502,7 @@ apps/mep-bim/
 
 ## Limitações conhecidas
 
-- A leitura do IFC roda na thread da interface: modelos muito grandes (centenas de MB) travam a janela durante o carregamento.
+- Modelos muito grandes (centenas de MB) ainda levam tempo na primeira abertura (a janela não trava; as seguintes vêm do cache). A memória necessária cresce com a geometria do modelo.
 - Interferências por caixa envolvente: rápido, mas trechos inclinados ou curvos geram falsos positivos.
 - A queda de tensão não substitui a verificação por **capacidade de condução de corrente** (NBR 5410, tabelas 36–39), que ainda não está implementada.
 - Traçado: a rota automática é ortogonal e não desvia de obstáculos (as interferências mostram onde ajustar). Ao mudar a bitola, a geometria acompanha, mas a declividade não é recalculada. Redução de bitola entre trechos ainda não gera peça de redução.

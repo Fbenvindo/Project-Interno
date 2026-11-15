@@ -9,6 +9,8 @@ export default defineConfig({
     root: "src/renderer",
     base: "./",
     plugins: [react()],
+    // Worker do leitor IFC como módulo ES (usa import dinâmico do web-ifc).
+    worker: { format: "es" },
     // web-ifc-api.js traz as classes de todo o schema IFC (~6 MB); carregado do disco.
     build: { chunkSizeWarningLimit: 8000, rollupOptions: { input: resolve(__dirname, "src/renderer/index.html") } },
   },

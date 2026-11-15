@@ -7,5 +7,6 @@ export default defineConfig({
   root: "src/renderer",
   base: "./",
   plugins: [react()],
+  worker: { format: "es" },
   server: { port: 5180 },
 });

@@ -62,10 +62,116 @@ export interface LoadedModel {
 
 export type ProgressFn = (stage: string, fraction: number) => void;
 
-const SYSTEM_GROUP_TYPES = new Set(["IFCSYSTEM", "IFCDISTRIBUTIONSYSTEM", "IFCDISTRIBUTIONCIRCUIT", "IFCBUILDINGSYSTEM"]);
+/**
+ * Tudo o que o app usa de um IFC, em dados puros (sem a API do web-ifc): pode ir de um
+ * Web Worker para a interface e ser guardado no cache sem reprocessar o arquivo.
+ */
+export interface IfcData {
+  schema: string;
+  unitToMeters: number;
+  elements: ElementInfo[];
+  /** Malhas de todos os elementos em poucos blocos contínuos (rápidos de transferir e guardar). */
+  geometry: PackedMeshes;
+  storeys: string[];
+  storeyLevels: StoreyLevel[];
+  spaces: Space[];
+  /** Matriz de coordenação do web-ifc (cena ⇄ IFC). */
+  coordination: number[];
+  georef: Georef;
+  systems: string[];
+  /** Conjuntos de propriedades (sem repetição) e quais pertencem a cada elemento. */
+  propertyGroups: PropertyGroup[];
+  propertiesOf: [number, number[]][];
+}
+
+export { IFC_DATA_VERSION } from "./ifcDataVersion";
+
+export interface PackedMeshes {
+  ids: Int32Array;
+  /** RGBA de cada malha. */
+  colors: Float32Array;
+  /** Início de cada malha em positions/normals (em floats) e em indices; n+1 valores. */
+  vertexStart: Uint32Array;
+  indexStart: Uint32Array;
+  positions: Float32Array;
+  normals: Float32Array;
+  indices: Uint32Array;
+}
+
+export function packMeshes(meshes: ElementMesh[]): PackedMeshes {
+  const n = meshes.length;
+  const vertexStart = new Uint32Array(n + 1);
+  const indexStart = new Uint32Array(n + 1);
+  for (let i = 0; i < n; i++) {
+    vertexStart[i + 1] = vertexStart[i] + meshes[i].positions.length;
+    indexStart[i + 1] = indexStart[i] + meshes[i].indices.length;
+  }
+  const g: PackedMeshes = {
+    ids: new Int32Array(n),
+    colors: new Float32Array(n * 4),
+    vertexStart,
+    indexStart,
+    positions: new Float32Array(vertexStart[n]),
+    normals: new Float32Array(vertexStart[n]),
+    indices: new Uint32Array(indexStart[n]),
+  };
+  meshes.forEach((m, i) => {
+    g.ids[i] = m.expressID;
+    g.colors.set(m.color, i * 4);
+    g.positions.set(m.positions, vertexStart[i]);
+    g.normals.set(m.normals, vertexStart[i]);
+    g.indices.set(m.indices, indexStart[i]);
+  });
+  return g;
+}
+
+/** Malhas como vistas dos blocos (sem copiar). */
+export function unpackMeshes(g: PackedMeshes): ElementMesh[] {
+  const out: ElementMesh[] = [];
+  for (let i = 0; i < g.ids.length; i++) {
+    const c = g.colors;
+    out.push({
+      expressID: g.ids[i],
+      positions: g.positions.subarray(g.vertexStart[i], g.vertexStart[i + 1]),
+      normals: g.normals.subarray(g.vertexStart[i], g.vertexStart[i + 1]),
+      indices: g.indices.subarray(g.indexStart[i], g.indexStart[i + 1]),
+      color: [c[i * 4], c[i * 4 + 1], c[i * 4 + 2], c[i * 4 + 3]],
+    });
+  }
+  return out;
+}
+
+/** Modelo pronto para o app a partir dos dados extraídos (do worker ou do cache). */
+export function modelFromData(d: IfcData): LoadedModel {
+  const byElement = new Map(d.propertiesOf);
+  return {
+    modelID: -1,
+    schema: d.schema,
+    unitToMeters: d.unitToMeters,
+    elements: d.elements,
+    meshes: unpackMeshes(d.geometry),
+    storeys: d.storeys,
+    storeyLevels: d.storeyLevels,
+    spaces: d.spaces,
+    coordinates: new CoordinateSystem(d.coordination),
+    georef: d.georef,
+    systems: d.systems,
+    getProperties: (id) => (byElement.get(id) ?? []).map((i) => d.propertyGroups[i]),
+    close: () => {},
+  };
+}
 
 /** Abre o modelo e extrai tudo o que o app precisa. `api` já deve estar inicializada. */
 export function loadIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn = () => {}): LoadedModel {
+  return modelFromData(extractIfc(api, bytes, onProgress));
+}
+
+
+
+const SYSTEM_GROUP_TYPES = new Set(["IFCSYSTEM", "IFCDISTRIBUTIONSYSTEM", "IFCDISTRIBUTIONCIRCUIT", "IFCBUILDINGSYSTEM"]);
+
+/** Lê o IFC e devolve os dados do app; o modelo é fechado no web-ifc ao final. */
+export function extractIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn = () => {}): IfcData {
   onProgress("Lendo arquivo IFC", 0);
   const modelID = api.OpenModel(bytes, { COORDINATE_TO_ORIGIN: true, CIRCLE_SEGMENTS: 16 });
   if (modelID < 0) throw new Error("Não foi possível abrir o arquivo IFC.");
@@ -77,7 +183,7 @@ export function loadIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn =
   const refs = (attr: unknown): number[] => (Array.isArray(attr) ? attr.map((a) => val(a)).filter((v) => typeof v === "number") : []);
 
   // ---- Geometria -----------------------------------------------------------
-  onProgress("Gerando geometria", 0.1);
+  onProgress("Gerando geometria", 0.05);
   const meshes: ElementMesh[] = [];
   const buildMesh = (flat: FlatMesh): ElementMesh => {
     const parts: { pos: Float32Array; nor: Float32Array; idx: Uint32Array }[] = [];
@@ -94,7 +200,17 @@ export function loadIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn =
     }
     return { expressID: flat.expressID, ...merge(parts), color };
   };
-  api.StreamAllMeshes(modelID, (flat) => meshes.push(buildMesh(flat)));
+  // Progresso pelo número de produtos com geometria (aproximado).
+  let total = 0;
+  try {
+    total = api.GetAllLines(modelID).size();
+  } catch {
+    total = 0;
+  }
+  api.StreamAllMeshes(modelID, (flat) => {
+    meshes.push(buildMesh(flat));
+    if (meshes.length % 500 === 0) onProgress(`Gerando geometria (${meshes.length.toLocaleString("pt-BR")} elementos)`, 0.05 + 0.5 * Math.min(1, total ? (meshes.length * 20) / total : 0));
+  });
 
   // ---- Unidades e coordenadas ------------------------------------------------
   const unitToMeters = readLengthUnit();
@@ -295,22 +411,43 @@ export function loadIfc(api: IfcAPI, bytes: Uint8Array, onProgress: ProgressFn =
     name: s.name,
     level: coordinates.ifcToWorld([0, 0, s.elevation * unitToMeters])[1],
   }));
+  // ---- Propriedades: cada conjunto lido uma vez, compartilhado pelos elementos ----------
+  onProgress("Lendo propriedades", 0.9);
+  const propertyGroups: PropertyGroup[] = [];
+  const groupIndex = new Map<string, number>();
+  const propertiesOf: [number, number[]][] = [];
+  for (const id of [...elements.map((e) => e.expressID), ...spaces.map((s) => s.expressID)]) {
+    const list: number[] = [];
+    for (const { id: pid, fromType } of psetsByElement.get(id) ?? []) {
+      const key = `${pid}${fromType ? "t" : ""}`;
+      let k = groupIndex.get(key);
+      if (k === undefined) {
+        const g = readPropertyDefinition(pid, fromType);
+        k = g && g.values.length ? propertyGroups.push(g) - 1 : -1;
+        groupIndex.set(key, k);
+      }
+      if (k >= 0) list.push(k);
+    }
+    if (list.length) propertiesOf.push([id, list]);
+  }
+  const georef = safeGeoref();
+  const schema = api.GetModelSchema(modelID);
+  api.CloseModel(modelID);
   onProgress("Concluído", 1);
 
   return {
-    modelID,
-    schema: api.GetModelSchema(modelID),
+    schema,
     unitToMeters,
     elements,
-    meshes,
+    geometry: packMeshes(meshes),
     storeys,
     storeyLevels,
     spaces,
-    coordinates,
-    georef: safeGeoref(),
+    coordination: Array.from(coordinates.toJSON()),
+    georef,
     systems: [...systemNames].sort((a, b) => a.localeCompare(b, "pt-BR")),
-    getProperties,
-    close: () => api.CloseModel(modelID),
+    propertyGroups,
+    propertiesOf,
   };
 
   function safeGeoref(): Georef {

@@ -202,6 +202,8 @@ app.whenReady().then(() => {
     const headers = new Headers(response.headers);
     if (filePath.endsWith(".html")) headers.set("Content-Security-Policy", CSP);
     if (filePath.endsWith(".wasm")) headers.set("Content-Type", "application/wasm");
+    // Workers em módulo (leitor IFC) exigem o tipo JavaScript.
+    if (filePath.endsWith(".js")) headers.set("Content-Type", "text/javascript");
     return new Response(response.body, { status: response.status, headers });
   });
 

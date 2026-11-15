@@ -47,6 +47,7 @@ export type ActionId =
   | "salvarProjeto"
   | "salvarProjetoComo"
   | "exportarIfc"
+  | "limparCache"
   | "temaClaro"
   | "temaEscuro"
   | "cores"
@@ -165,6 +166,10 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
         { key: "tema-claro", label: "Branco", icon: "sol", action: "temaClaro" },
         { key: "tema-escuro", label: "Preto", icon: "lua", action: "temaEscuro" },
       ],
+    },
+    {
+      label: "Desempenho",
+      buttons: [{ key: "limpar-cache", label: "Limpar cache de modelos", icon: "importar", action: "limparCache" }],
     },
   ],
   criar: [

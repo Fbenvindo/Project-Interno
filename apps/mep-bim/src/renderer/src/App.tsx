@@ -5,8 +5,10 @@ import { sizeMeters } from "../../core/placement";
 import { pointProperties, pointSize, pointToElement, type PlacedPoint } from "../../core/points";
 import type { Circuit } from "../../core/circuits";
 import type { Discipline, ElementInfo, Vec3 } from "../../core/types";
-import { loadIfc, type LoadedModel } from "../../ifc/loadIfc";
-import { desktop, getIfcApi, openIfc } from "./platform";
+import type { LoadedModel } from "../../ifc/loadIfc";
+import { loadIfcModel, warmIfcWorker } from "./ifc/ifcLoader";
+import { cacheClear, cacheList } from "./ifc/modelCache";
+import { desktop, openIfc } from "./platform";
 import { Viewer, type ColorMode } from "./viewer/Viewer";
 import { QuantitiesPanel } from "./components/QuantitiesPanel";
 import { ClashPanel } from "./components/ClashPanel";
@@ -124,6 +126,9 @@ export function App() {
   const linkSlot = useRef(1);
   const [fileName, setFileName] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
+  const [progressFrac, setProgressFrac] = useState<number | null>(null);
+  /** Como o último modelo foi aberto (do cache ou processado, e o tempo). */
+  const [loadNote, setLoadNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [selection, setSelection] = useState<number[]>([]);
@@ -434,6 +439,12 @@ export function App() {
     if (import.meta.env.DEV) Object.assign(window, { __mep: { viewer: viewerRef.current, model, store } });
   }, [model, store]);
 
+  // Leitor IFC em segundo plano pronto antes do primeiro arquivo.
+  useEffect(() => {
+    const t = setTimeout(warmIfcWorker, 300);
+    return () => clearTimeout(t);
+  }, []);
+
   const dirtyRef = useRef(false);
   dirtyRef.current = store.dirty && !store.isEmpty;
 
@@ -446,7 +457,6 @@ export function App() {
     // Deixa a interface pintar a mensagem antes do processamento pesado.
     await new Promise((r) => setTimeout(r, 30));
     try {
-      const api = await getIfcApi();
       modelRef.current?.close();
       // Vínculos do modelo anterior são descartados com ele.
       setLinkData((cur) => {
@@ -454,7 +464,15 @@ export function App() {
         return new Map();
       });
       setLinkStatus({});
-      const loaded = loadIfc(api, file.data, (stage) => setProgress(stage));
+      setProgressFrac(null);
+      const { model: loaded, info } = await loadIfcModel(file, (stage, f) => {
+        setProgress(stage);
+        setProgressFrac(f);
+      });
+      const secs = info.ms < 100 ? "menos de 0,1" : (info.ms / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 });
+      setLoadNote(info.fromCache ? `Aberto do cache em ${secs} s` : `Processado em ${secs} s`);
+      setProgress("Montando a vista 3D");
+      await new Promise((r) => setTimeout(r, 20));
       modelRef.current = loaded;
       const disciplineOf = new Map(loaded.elements.map((e) => [e.expressID, e.discipline]));
       const byId = new Map(loaded.elements.map((e) => [e.expressID, e]));
@@ -484,6 +502,7 @@ export function App() {
       return null;
     } finally {
       setProgress(null);
+      setProgressFrac(null);
     }
   }, []);
 
@@ -513,8 +532,7 @@ export function App() {
       setLinkStatus((s) => ({ ...s, [id]: "carregando" }));
       await new Promise((r) => setTimeout(r, 20));
       try {
-        const api = await getIfcApi();
-        const raw = loadIfc(api, file.data);
+        const { model: raw } = await loadIfcModel(file);
         const meta = linksRef.current.find((m) => m.id === id);
         const data = prepareLink(id, linkSlot.current++, raw, host, meta?.align ?? DEFAULT_ALIGN, georefRef.current.map);
         setLinkData((cur) => new Map(cur).set(id, data));
@@ -792,6 +810,16 @@ export function App() {
           return void files.saveAs();
         case "exportarIfc":
           return void files.exportIfc(false);
+        case "limparCache":
+          return void (async () => {
+            const list = await cacheList();
+            if (!list.length) return window.alert("O cache de modelos está vazio.");
+            const mb = list.reduce((t, e) => t + e.bytes, 0) / 1024 ** 2;
+            const names = list.map((e) => `• ${e.name}`).join("\n");
+            if (!window.confirm(`Cache de modelos: ${list.length} IFC(s), cerca de ${mb.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} MB.\n\n${names}\n\nOs IFCs voltam a ser processados na próxima abertura. Limpar?`)) return;
+            await cacheClear();
+            window.alert("Cache de modelos limpo.");
+          })();
         case "temaClaro":
           return setTheme("claro");
         case "temaEscuro":
@@ -1930,7 +1958,14 @@ export function App() {
             {progress && (
               <div className="overlay">
                 <div className="spinner" />
-                {progress}
+                <div className="progress-text">
+                  {progress}
+                  {progressFrac != null && progressFrac > 0 && progressFrac < 1 && (
+                    <div className="progress-bar">
+                      <div style={{ width: `${Math.round(progressFrac * 100)}%` }} />
+                    </div>
+                  )}
+                </div>
               </div>
             )}
             {error && (
@@ -1953,7 +1988,7 @@ export function App() {
 
       <footer className="status-bar">
         <span className={`dot ${progress ? "busy" : model ? "ok" : ""}`} />
-        <span>{progress ?? (model ? "Pronto" : "Sem modelo")}</span>
+        <span title={loadNote ?? undefined}>{progress ?? (model ? `Pronto${loadNote ? ` · ${loadNote}` : ""}` : "Sem modelo")}</span>
         {model && (
           <>
             <span className="sep" />

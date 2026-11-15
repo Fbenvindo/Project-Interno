@@ -9,9 +9,9 @@ import { analyzeIfcElements, ifcComponentId, type IfcElementDef, type IfcUsage }
 import { COMPONENT_BY_ID, COMPONENT_GROUPS, COMPONENTS, MOUNTING_LABEL, type ComponentDef, type Mounting } from "../../../core/library";
 import { DISCIPLINE_BY_ID } from "../../../core/disciplines";
 import type { PlacedPoint } from "../../../core/points";
-import { loadIfc } from "../../../ifc/loadIfc";
+import { loadIfcModel } from "../ifc/ifcLoader";
 import { designComponentId, type ElementDesign } from "../../../core/elementDesign";
-import { getIfcApi, openIfc, openTextFile, saveFile } from "../platform";
+import { openIfc, openTextFile, saveFile } from "../platform";
 import {
   deleteDesign,
   exportDesigns,
@@ -88,8 +88,7 @@ export function BibliotecaPanel({ points, onPlace, choices, onChoices, onEditDes
     setBusy(true);
     setMessage(`Analisando ${file.name}…`);
     try {
-      const api = await getIfcApi();
-      const model = loadIfc(api, file.data);
+      const { model } = await loadIfcModel(file);
       let elements: IfcElementDef[];
       try {
         elements = analyzeIfcElements(model);
