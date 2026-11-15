@@ -90,6 +90,8 @@ export { IFC_DATA_VERSION } from "./ifcDataVersion";
 /** Modelo pronto para o app a partir dos dados extraídos (do worker ou do cache). */
 export function modelFromData(d: IfcData): LoadedModel {
   const byElement = new Map(d.propertiesOf);
+  // Só as propriedades ficam presas ao modelo (não o IfcData inteiro com os blocos de geometria).
+  const groups = d.propertyGroups;
   return {
     modelID: -1,
     schema: d.schema,
@@ -102,7 +104,7 @@ export function modelFromData(d: IfcData): LoadedModel {
     coordinates: new CoordinateSystem(d.coordination),
     georef: d.georef,
     systems: d.systems,
-    getProperties: (id) => (byElement.get(id) ?? []).map((i) => d.propertyGroups[i]),
+    getProperties: (id) => (byElement.get(id) ?? []).map((i) => groups[i]),
     close: () => {},
   };
 }

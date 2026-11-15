@@ -7,6 +7,7 @@ import type { SurfaceHit } from "../../../core/placement";
 import { segmentBasis, type Profile } from "../../../core/runs";
 import type { Vec3 } from "../../../core/types";
 import type { ElementMesh } from "../../../ifc/loadIfc";
+import { ModelBatches, type RGBA } from "./modelBatches";
 
 export type ColorMode = "ifc" | "disciplina";
 
@@ -61,7 +62,10 @@ interface Entry {
   layer: "model" | ExtraLayer;
 }
 
-/** Visualizador 3D: um THREE.Mesh por elemento IFC ou ponto locado, com seleção, filtros e locação. */
+/** Camada dos Mesh de cada elemento do modelo: usados na seleção, não desenhados (os blocos desenham). */
+const PICK_LAYER = 1;
+
+/** Visualizador 3D: modelo IFC em blocos (um THREE.Mesh por elemento para seleção), pontos locados, filtros e locação. */
 export class Viewer {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
@@ -90,6 +94,10 @@ export class Viewer {
   private selectionMaterial = new THREE.MeshLambertMaterial({ color: 0x00e5ff, emissive: 0x004455, side: THREE.DoubleSide });
   private highlightMaterial = new THREE.MeshLambertMaterial({ color: 0xff2d55, emissive: 0x440011, side: THREE.DoubleSide });
   private ghostMaterial = new THREE.MeshLambertMaterial({ color: 0x9aa4b2, transparent: true, opacity: 0.08, depthWrite: false });
+  /** Modelo desenhado em blocos; o Mesh de cada elemento só é desenhado em destaque. */
+  private batches = new ModelBatches(this.ghostMaterial);
+  /** Cores de cada elemento do modelo nos dois modos (IFC e disciplina). */
+  private modelColors = new Map<number, { ifc: RGBA; disc: RGBA }>();
   private previewOk = new THREE.MeshLambertMaterial({ color: 0x2fbf71, emissive: 0x0c3a20, transparent: true, opacity: 0.75 });
   private previewBad = new THREE.MeshLambertMaterial({ color: 0xef5350, emissive: 0x3a0c0c, transparent: true, opacity: 0.6 });
   private colorMode: ColorMode = "disciplina";
@@ -155,6 +163,9 @@ export class Viewer {
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
     sun.position.set(30, 50, 20);
     this.scene.add(sun);
+    // Os Mesh de cada elemento ficam na camada de seleção (não desenhados); os blocos desenham o modelo.
+    this.raycaster.layers.enableAll();
+    this.scene.add(this.batches.group);
     this.scene.add(this.modelGroup, this.pointsGroup, this.runsGroup, this.previewGroup, this.staticPreviewGroup, this.spacesGroup, this.measureGroup);
     this.measureGroup.renderOrder = 999;
     this.measureLabelsEl = document.createElement("div");
@@ -307,24 +318,39 @@ export class Viewer {
 
   /** Acrescenta malhas de modelo (vínculos IFC) sem limpar a cena; opacity < 1 deixa transparente. */
   addModelMeshes(meshes: ElementMesh[], disciplineColorOf: (expressID: number) => string, opacity = 1) {
-    for (const m of meshes) {
-      if (!m.positions.length || this.entries.has(m.expressID)) continue;
+    const fresh = meshes.filter((m) => m.positions.length && !this.entries.has(m.expressID));
+    for (const m of fresh) {
+      const alpha = Math.min(m.color[3], opacity);
+      const dc = new THREE.Color(disciplineColorOf(m.expressID));
+      this.modelColors.set(m.expressID, {
+        ifc: [m.color[0], m.color[1], m.color[2], alpha],
+        disc: [dc.r, dc.g, dc.b, m.color[3] < 1 ? Math.min(0.4, opacity) : opacity],
+      });
+    }
+    // Blocos primeiro: as malhas passam a ser vistas dos blocos (sem duplicar a memória).
+    this.batches.add(fresh, (m) => this.colorsOf(m.expressID)!);
+    for (const m of fresh) {
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", new THREE.BufferAttribute(m.positions, 3));
       geometry.setAttribute("normal", new THREE.BufferAttribute(m.normals, 3));
       geometry.setIndex(new THREE.BufferAttribute(m.indices, 1));
       geometry.computeBoundingBox();
       geometry.computeBoundingSphere();
-      const alpha = Math.min(m.color[3], opacity);
-      const ifcMaterial = this.material(m.color[0], m.color[1], m.color[2], alpha);
-      const disciplineColor = new THREE.Color(disciplineColorOf(m.expressID));
-      const disciplineMaterial = this.material(disciplineColor.r, disciplineColor.g, disciplineColor.b, m.color[3] < 1 ? Math.min(0.4, opacity) : opacity);
+      const c = this.modelColors.get(m.expressID)!;
+      const ifcMaterial = this.material(c.ifc[0], c.ifc[1], c.ifc[2], c.ifc[3]);
+      const disciplineMaterial = this.material(c.disc[0], c.disc[1], c.disc[2], c.disc[3]);
       const mesh = new THREE.Mesh(geometry, this.colorMode === "ifc" ? ifcMaterial : disciplineMaterial);
       mesh.userData.expressID = m.expressID;
+      mesh.layers.set(PICK_LAYER);
       this.modelGroup.add(mesh);
       this.entries.set(m.expressID, { mesh, ifcMaterial, disciplineMaterial, layer: "model" });
     }
     this.setVisible(this.visible);
+  }
+
+  private colorsOf(id: number): RGBA | null {
+    const c = this.modelColors.get(id);
+    return c ? (this.colorMode === "ifc" ? c.ifc : c.disc) : null;
   }
 
   /** Remove malhas de modelo (vínculo desligado ou removido). */
@@ -335,6 +361,8 @@ export class Viewer {
       this.modelGroup.remove(e.mesh);
       e.mesh.geometry.dispose();
       this.entries.delete(id);
+      this.modelColors.delete(id);
+      this.batches.remove([id]);
       this.selected.delete(id);
       this.highlighted.delete(id);
     }
@@ -344,6 +372,8 @@ export class Viewer {
   clear() {
     for (const { mesh, layer } of this.entries.values()) if (layer === "model") mesh.geometry.dispose();
     this.modelGroup.clear();
+    this.batches.clear();
+    this.modelColors.clear();
     this.pointsGroup.clear();
     this.runsGroup.clear();
     this.entries.clear();
@@ -533,6 +563,7 @@ export class Viewer {
 
   setColorMode(mode: ColorMode) {
     this.colorMode = mode;
+    this.batches.recolor((id) => this.colorsOf(id));
     this.refreshMaterials();
   }
 
@@ -947,7 +978,17 @@ export class Viewer {
       else if (this.selected.has(id)) mat = this.selectionMaterial;
       e.mesh.material = mat;
       e.mesh.renderOrder = mat === this.ghostMaterial ? 1 : 0;
+      if (e.layer === "model" && this.batches.has(id)) {
+        // Em destaque: some do bloco e o Mesh do elemento é desenhado com o material de destaque.
+        const special = this.highlighted.has(id) || (!this.ghosted && this.selected.has(id));
+        const shown = e.mesh.visible;
+        this.batches.setShown(id, shown && !special);
+        if (shown && special) e.mesh.layers.enable(0);
+        else e.mesh.layers.disable(0);
+      }
     }
+    this.batches.setGhost(this.ghosted);
+    this.batches.flush();
     this.requestRender();
   }
 
