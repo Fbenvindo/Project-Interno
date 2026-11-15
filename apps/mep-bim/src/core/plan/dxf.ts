@@ -34,7 +34,7 @@ export function exportDxf(drawing: PlanDrawing, opts: DxfOptions = {}): string {
   const out: string[] = [];
   const g = (code: number, value: string | number) => out.push(String(code), typeof value === "number" ? n(value) : value);
 
-  const layers = [...new Set(drawing.prims.map((p) => p.layer))].sort();
+  const layers = [...new Set(drawing.prims.filter((p) => !p.layer.endsWith("-VAOS")).map((p) => p.layer))].sort();
   const paper = geo ? drawing.scale / 1000 : drawing.scale; // 1 mm de papel em unidades do DXF
   const dash = 2 * paper; // 2 mm de papel
   const gap = 1 * paper;
@@ -111,7 +111,8 @@ export function exportDxf(drawing: PlanDrawing, opts: DxfOptions = {}): string {
   // Entidades
   g(0, "SECTION");
   g(2, "ENTITIES");
-  for (const p of drawing.prims) entity(p);
+  // Máscaras dos vãos (preenchimento branco sobre a parede) não vão para o DXF.
+  for (const p of drawing.prims) if (!p.layer.endsWith("-VAOS")) entity(p);
   g(0, "ENDSEC");
   g(0, "EOF");
   return out.join("\r\n") + "\r\n";

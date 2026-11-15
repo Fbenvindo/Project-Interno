@@ -255,7 +255,8 @@ Fora de qualquer comando, o app está sempre em **Selecionar**, em todas as vist
   | Corte inferior (padrão) | 1,00 m: só as instalações abaixo do piso | 1,50 m: todos os elementos e as instalações abaixo da laje (o plano de corte fica aqui) |
   | Corte superior (padrão) | 1,50 m: todos os elementos acima do piso (o plano de corte fica aqui) | 0,20 m: só as instalações acima da face inferior da laje |
 
-  Paredes e pilares cruzados pelo plano de corte saem hachurados. O que está dentro da faixa sem cruzar o corte sai em projeção vista de cima (contorno cinza): tampo das mesas, assento e encosto das cadeiras, bancadas. Pontos e trechos entram pela altura, inclusive os de outro pavimento junto à laje.
+  Paredes e pilares cruzados pelo plano de corte saem hachurados. O que está dentro da faixa sem cruzar o corte sai em **projeção vista de cima, só com o que fica visível** (contorno cinza). O app monta um mapa de alturas da planta: o tampo da mesa esconde os pés e a estrutura, e a mesa esconde a parte da cadeira que fica embaixo dela.
+  **Portas e janelas (venezianas)** do pavimento aparecem nas plantas de piso e de teto, mesmo que o plano de corte passe acima ou abaixo delas: o vão fica aberto na parede (sem a parede de cima) e a peça é desenhada. Pontos e trechos entram pela altura, inclusive os de outro pavimento junto à laje.
 - **Portas** (plantas de piso): folha aberta a 90° e arco de abertura.
   - **Lado da abertura:** o lado da folha, como no Revit. A folha fechada fica encostada no batente do lado para onde a porta abre; o app acha essa face na geometria da porta. Sem folha reconhecível: para dentro do ambiente (IfcSpace) e, por fim, a orientação do IFC.
   - **Dobradiça:** pelo tipo de abertura do IFC (à esquerda, à direita, folha dupla, folhas opostas).

@@ -124,3 +124,46 @@ describe("portas: arco só nas que abrem", () => {
     expect(isSwingDoor(d("Porta de giro 80x210"), 0, { none: true })).toBe(false);
   });
 });
+
+describe("projeção vista de cima com linhas ocultas", () => {
+  it("só o tampo da mesa aparece; a cadeira some onde fica embaixo da mesa", async () => {
+    const { visibleTopEdges } = await import("../src/core/plan/projection");
+    const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number) => {
+      const c = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]];
+      const faces = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [2, 3, 7, 6], [1, 2, 6, 5], [0, 4, 7, 3]];
+      const pos: number[] = [];
+      const idx: number[] = [];
+      for (const f of faces) {
+        const b = pos.length / 3;
+        for (const k of f) pos.push(...c[k]);
+        idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+      }
+      return { pos, idx };
+    };
+    const merge = (parts: { pos: number[]; idx: number[] }[]) => {
+      const pos: number[] = [];
+      const idx: number[] = [];
+      for (const p of parts) {
+        const b = pos.length / 3;
+        pos.push(...p.pos);
+        idx.push(...p.idx.map((i) => i + b));
+      }
+      return { positions: new Float32Array(pos), indices: new Uint32Array(idx) };
+    };
+    const mesa = merge([box(0, 1.6, 0.72, 0.75, 0, 0.8), box(0.05, 0.1, 0, 0.72, 0.05, 0.1), box(1.5, 1.55, 0, 0.72, 0.05, 0.1), box(0.05, 0.1, 0, 0.72, 0.7, 0.75), box(1.5, 1.55, 0, 0.72, 0.7, 0.75)]);
+    // Assento da cadeira (0,45 m): metade sob a mesa (z de 0,5 a 1,1; a mesa vai até 0,8).
+    const cadeira = merge([box(0.6, 1.0, 0.42, 0.45, 0.5, 1.1)]);
+    const vis = visibleTopEdges([
+      { id: 1, ...mesa },
+      { id: 2, ...cadeira },
+    ]);
+    const m = vis.get(1)!;
+    expect(m.length).toBeGreaterThan(0);
+    // Nada da mesa abaixo do tampo (pés, face de baixo do tampo).
+    expect(m.every((s) => Math.min(s.a[1], s.b[1]) > 0.74)).toBe(true);
+    // Cadeira: só a parte fora da mesa (z > 0,8).
+    const c = vis.get(2)!;
+    expect(c.length).toBeGreaterThan(0);
+    expect(c.every((s) => Math.min(s.a[2], s.b[2]) > 0.78)).toBe(true);
+  });
+});

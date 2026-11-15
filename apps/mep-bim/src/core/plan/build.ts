@@ -8,7 +8,8 @@ import type { PlacedPoint, StoreyLevel } from "../points";
 import { runFittings, runSegments, RUN_TYPE_BY_ID, segmentElementId, storeyProbeY, type Run } from "../runs";
 import type { Discipline, ElementInfo, Vec3 } from "../types";
 import { LAYER_PREFIX, PEN, PRINT_COLOR, type LegendItem, type PlanDrawing, type Prim, type SymbolPrim } from "./drawing";
-import { chainSegments, cutMesh, topOutline, type P2 } from "./section";
+import { chainSegments, cutMesh, type P2 } from "./section";
+import { visibleTopEdges } from "./projection";
 import { centroid, pointInPolygon, type Space } from "../spaces";
 import { assemblySymbol, LEGEND_LINE, RISER_DOWN, RISER_UP, symbolFor, TEE_MARK } from "./symbols";
 import { assemblyKey } from "../devices";
@@ -135,11 +136,46 @@ export function buildPlan(input: PlanInput): PlanDrawing {
   const bo = input.beams;
 
   // ---- Modelo IFC cortado ---------------------------------------------------------
+  /** Elementos em projeção (vistos de cima, com linhas ocultas removidas no fim). */
+  const projQueue: { e: ElementInfo; mesh: TriangleMesh }[] = [];
+  /** Portas e janelas (venezianas) do pavimento: sempre visíveis, com o vão aberto na parede. */
+  const openings: { e: ElementInfo; mesh: TriangleMesh }[] = [];
+  const nextFloor = levels.find((l) => l.level > level + 1.8)?.level ?? level + 3.5;
+  const pushElement = (e: ElementInfo, raw: { a: Vec3; b: Vec3 }[], projected: boolean) => {
+    const segs = raw.map(({ a, b }): [P2, P2] => [plan(a), plan(b)]);
+    if (!segs.length) return;
+    const isMep = MEP_DISCIPLINES.includes(e.discipline);
+    const prefix = LAYER_PREFIX[e.discipline];
+    // Layout e equipamentos da arquitetura (inclusive louças e metais): cinza, sempre.
+    const layout = isLayout(e.ifcType);
+    const color = layout ? LAYOUT_GRAY : PRINT_COLOR[e.discipline];
+    const poche = !isMep && !projected && POCHE_TYPES.has(e.ifcType);
+    const weight = layout ? PEN.vista : isMep ? PEN.mep : poche ? PEN.corte : OPENING_TYPES.has(e.ifcType) ? PEN.porta : PEN.vista;
+    const layer = layout ? "ARQ-LAYOUT" : isMep ? `${prefix}-IFC` : poche ? `${prefix}-CORTE` : `${prefix}-ELEMENTOS`;
+    const pocheFill = COLUMN_TYPES.has(e.ifcType) ? COLUMN_FILL : WALL_FILL;
+    for (const ch of chainSegments(segs)) {
+      prims.push({
+        t: "poly",
+        pts: ch.points,
+        closed: ch.closed,
+        weight,
+        fill: poche && ch.closed ? pocheFill : null,
+        layer,
+        color: isMep || layout ? color : projected ? "#666666" : "#222222",
+        id: e.expressID,
+      });
+    }
+  };
   for (const e of input.elements) {
     if (!input.disciplines.has(e.discipline) || !e.bbox) continue;
     const mesh = input.meshes.get(e.expressID);
     if (!mesh) continue;
     const isMep = MEP_DISCIPLINES.includes(e.discipline);
+    // Portas e janelas do pavimento (piso ou teto): tratadas à parte, sempre visíveis.
+    if (!isMep && OPENING_TYPES.has(e.ifcType)) {
+      if (e.bbox.min[1] >= level - 0.2 && e.bbox.min[1] < nextFloor - 0.3) openings.push({ e, mesh });
+      continue;
+    }
     // Elementos MEP do IFC: corte na meia altura do próprio elemento (mostra o percurso).
     let y = cutY;
     let projected = false;
@@ -162,30 +198,33 @@ export function buildPlan(input: PlanInput): PlanDrawing {
       y = (a + b) / 2;
       projected = true;
     }
-    // Em projeção: o contorno visto de cima (tampo da mesa, assento da cadeira…); cortado: a seção.
-    const segs = (projected ? topOutline(mesh.positions, mesh.indices) : cutMesh(mesh.positions, mesh.indices, y)).map(({ a, b }): [P2, P2] => [plan(a), plan(b)]);
-    if (!segs.length) continue;
-    const prefix = LAYER_PREFIX[e.discipline];
-    // Layout e equipamentos da arquitetura (inclusive louças e metais): cinza, sempre.
-    const layout = isLayout(e.ifcType);
-    const color = layout ? LAYOUT_GRAY : PRINT_COLOR[e.discipline];
-    const poche = !isMep && !projected && POCHE_TYPES.has(e.ifcType);
-    const weight = layout ? PEN.vista : isMep ? PEN.mep : poche ? PEN.corte : OPENING_TYPES.has(e.ifcType) ? PEN.porta : PEN.vista;
-    const layer = layout ? "ARQ-LAYOUT" : isMep ? `${prefix}-IFC` : poche ? `${prefix}-CORTE` : `${prefix}-ELEMENTOS`;
-    const pocheFill = COLUMN_TYPES.has(e.ifcType) ? COLUMN_FILL : WALL_FILL;
-    for (const ch of chainSegments(segs)) {
-      prims.push({
-        t: "poly",
-        pts: ch.points,
-        closed: ch.closed,
-        weight,
-        fill: poche && ch.closed ? pocheFill : null,
-        layer,
-        color: isMep || layout ? color : projected ? "#666666" : "#222222",
-        id: e.expressID,
-      });
+    if (projected) {
+      projQueue.push({ e, mesh });
+      continue;
     }
-    // Portas: folha aberta a 90° e arco de abertura (não nas plantas de teto).
+    pushElement(e, cutMesh(mesh.positions, mesh.indices, y), false);
+  }
+
+  // Projeção vista de cima: só o que fica visível (o tampo esconde os pés da mesa, a mesa esconde a cadeira embaixo).
+  if (projQueue.length) {
+    const vis = visibleTopEdges(
+      projQueue.map(({ e, mesh }) => ({ id: e.expressID, positions: mesh.positions, indices: mesh.indices })),
+      archHi,
+    );
+    for (const { e } of projQueue) pushElement(e, vis.get(e.expressID) ?? [], true);
+  }
+
+  // Portas e janelas: o vão aparece aberto na parede (sem a parede de cima) e a peça é desenhada
+  // mesmo se o plano de corte passar acima ou abaixo dela; arco de abertura nas plantas de piso.
+  for (const { e, mesh } of openings) {
+    const pts: P2[] = [];
+    for (let i = 0; i < mesh.positions.length; i += 3) pts.push(plan([mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]]));
+    const rect = minAreaRect(pts);
+    if (rect) prims.push({ t: "poly", pts: rect.corners, closed: true, weight: 0.01, fill: "#ffffff", layer: "ARQ-VAOS", color: "#ffffff", id: e.expressID });
+    const lo = e.bbox!.min[1];
+    const hi = e.bbox!.max[1];
+    const yCut = cutY > lo + 0.05 && cutY < hi - 0.05 ? cutY : (lo + hi) / 2;
+    pushElement(e, cutMesh(mesh.positions, mesh.indices, yCut), false);
     if (e.ifcType === "IFCDOOR" && e.frame && R?.type !== "teto") prims.push(...doorSwing(e, mesh.positions, mesh.indices, plan, input.spaces ?? [], input.doors?.[e.globalId], R ? R.base : level));
   }
 

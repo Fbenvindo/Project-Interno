@@ -200,7 +200,8 @@ export function applyHalftone(prims: Prim[], f: ViewFilter): Prim[] {
   if (!f.halftone.size && !f.halftoneBackground) return prims;
   return prims.map((p) => {
     const d = disciplineOfLayer(p.layer);
-    if (!d || p.layer.includes("VIGAS")) return p;
+    // Vigas têm cor própria; os vãos (máscara branca das portas) continuam brancos.
+    if (!d || p.layer.includes("VIGAS") || p.layer.endsWith("-VAOS")) return p;
     if (f.halftone.has(d)) return { ...p, color: HALF, ...("fill" in p && p.fill ? { fill: HALF_FILL } : {}) } as Prim;
     if (f.halftoneBackground && BACKGROUND.includes(d)) return { ...p, color: HALF_BG, ...("fill" in p && p.fill ? { fill: HALF_FILL } : {}) } as Prim;
     return p;
