@@ -108,10 +108,14 @@ export interface Run {
  * Cota usada para achar o pavimento de um ponto do trecho: eletrodutos na laje ou
  * aparentes no teto pertencem ao pavimento de baixo; embutidos no piso, ao próprio piso.
  */
-export function storeyProbeY(run: Pick<Run, "install">, y: number): number {
+export function storeyProbeY(run: Pick<Run, "install"> & { typeId?: string }, y: number): number {
   const mode = run.install?.mode;
+  // Gás em cobre "na laje" fica no contrapiso do próprio pavimento.
+  if (mode === "laje" && run.typeId === "gas-cobre") return y + 0.2;
   if (mode === "laje" || mode === "laje-aparente" || mode === "entreforro") return y - 0.4;
-  if (mode === "piso" || mode === "canaleta") return y + 0.1;
+  // Na terra a rede fica até ~60 cm abaixo do piso acabado: ainda é do pavimento.
+  if (mode === "piso") return y + 1.0;
+  if (mode === "canaleta") return y + 0.1;
   return y;
 }
 

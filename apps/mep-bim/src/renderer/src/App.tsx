@@ -1532,7 +1532,7 @@ export function App() {
         );
       case "instalacoes": {
         const counts: Partial<Record<InstallMode, number>> = {};
-        for (const r of store.runs) if (isConduitRun(r)) counts[(r.install ?? DEFAULT_INSTALL).mode] = (counts[(r.install ?? DEFAULT_INSTALL).mode] ?? 0) + 1;
+        for (const r of store.runs) if (isConduitRun(r) || r.install) counts[(r.install ?? DEFAULT_INSTALL).mode] = (counts[(r.install ?? DEFAULT_INSTALL).mode] ?? 0) + 1;
         return (
           <InstalacoesPanel
             settings={store.installSettings}
@@ -1540,7 +1540,8 @@ export function App() {
             counts={counts}
             onApply={() => {
               if (!slabAt) return;
-              const conduits = store.runs.filter(isConduitRun);
+              // Todas as redes com forma de instalação (as de altura livre ficam onde estão).
+              const conduits = store.runs.filter((r) => (isConduitRun(r) || r.install) && r.install?.mode !== "livre");
               const changes = new Map(
                 conduits.map((r) => {
                   const name = storeyAt(runFloorProbeY(r), model.storeyLevels);
@@ -1550,7 +1551,7 @@ export function App() {
                 }),
               );
               store.updateRuns([...changes.keys()], (r) => changes.get(r.id)!);
-              files.setMessage(`${changes.size} eletroduto(s) levados às cotas das medidas atuais.`);
+              files.setMessage(`${changes.size} trecho(s) levados às cotas das medidas atuais.`);
             }}
           />
         );

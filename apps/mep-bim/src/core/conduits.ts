@@ -14,8 +14,9 @@ import type { ElementInfo, PropertyGroup, Vec3 } from "./types";
  * alvenaria — embutido na alvenaria; alvenaria-aparente — aparente fixado na alvenaria;
  * entreforro — aparente no entreforro; laje-aparente — aparente fixado sob a laje; laje — embutido na laje.
  */
-export type InstallMode = "piso" | "canaleta" | "alvenaria" | "alvenaria-aparente" | "entreforro" | "laje-aparente" | "laje";
+export type InstallMode = "piso" | "canaleta" | "alvenaria" | "alvenaria-aparente" | "entreforro" | "laje-aparente" | "laje" | "livre";
 
+/** Formas de instalação dos eletrodutos (a altura livre, informada pelo usuário, vale para todas as redes). */
 export const INSTALL_MODES: InstallMode[] = ["piso", "canaleta", "alvenaria", "alvenaria-aparente", "entreforro", "laje-aparente", "laje"];
 
 export interface ConduitInstall {
@@ -28,6 +29,8 @@ export interface ConduitInstall {
   matrix?: { cols: number; rows: number };
   /** Piso interno com tubos acima de 1": caixa em alvenaria (padrão) ou caixa na parede. */
   floorLarge?: "alvenaria" | "parede";
+  /** Altura livre: eixo acima do piso (m), informada pelo usuário. */
+  height?: number;
 }
 
 export const INSTALL_LABEL: Record<InstallMode, string> = {
@@ -38,6 +41,7 @@ export const INSTALL_LABEL: Record<InstallMode, string> = {
   entreforro: "aparente no entreforro",
   "laje-aparente": "aparente na laje",
   laje: "embutido na laje",
+  livre: "altura livre (informada)",
 };
 
 /** Onde fica a instalação (para o pavimento e para o estilo na planta). */
@@ -49,6 +53,7 @@ export const INSTALL_ZONE: Record<InstallMode, "piso" | "parede" | "teto"> = {
   entreforro: "teto",
   "laje-aparente": "teto",
   laje: "teto",
+  livre: "teto",
 };
 
 /** Instalações aparentes (eletroduto rígido, caixas de sobrepor ou conduletes). */
@@ -64,24 +69,107 @@ export function normalizeInstall(raw: unknown): ConduitInstall | undefined {
     const { apparentRef, ...rest } = r;
     return { ...rest, mode: apparentRef === "entreforro" ? "entreforro" : "laje-aparente" };
   }
-  return INSTALL_MODES.includes(r.mode as InstallMode) ? (r as ConduitInstall) : undefined;
+  return [...INSTALL_MODES, "livre"].includes(r.mode as InstallMode) ? (r as ConduitInstall) : undefined;
 }
 
 /** Eletrodutos (segmentos de eletroduto, não eletrocalhas). */
 export const isConduitType = (t: RunType) => t.segmentType === "IFCCABLECARRIERSEGMENT" && t.segmentPredefined === "CONDUITSEGMENT";
 export const isConduitRun = (r: Run) => isConduitType(RUN_TYPE_BY_ID[r.typeId]);
 
-/** Flexíveis (PVC/PEAD corrugado) só embutidos ou em canaleta; aparente exige rígido. */
+/** Flexíveis (PVC/PEAD corrugado) só embutidos ou em canaleta; aparente exige rígido. Demais redes: as formas da família. */
 export function typeAllowed(t: RunType, mode: InstallMode): boolean {
-  if (!isConduitType(t)) return true;
+  if (!isConduitType(t)) return allowedModes(t).includes(mode);
   return isApparent(mode) ? !t.flexible : true;
+}
+
+// ---- Regras por família de rede --------------------------------------------------------------
+
+/** Família de regras: elétrica e sistemas (eletrodutos, eletrocalhas), hidráulica/incêndio/gás e ar condicionado. */
+export type RunFamily = "eletrica" | "hidraulica" | "hvac";
+export const familyOf = (t: RunType): RunFamily => (t.discipline === "eletrica" || t.discipline === "telecom" ? "eletrica" : t.discipline === "hvac" ? "hvac" : "hidraulica");
+/** Esgoto e águas pluviais (mais fundos na terra). */
+const isGravity = (t: RunType) => t.systemType === "SEWAGE" || t.systemType === "STORMWATER";
+
+/**
+ * Formas de instalação de cada rede. Nada fica "solto" no meio do pavimento: a altura vem da
+ * forma de instalação, a não ser que o usuário escolha a altura livre.
+ * - Eletrodutos: as sete formas; eletrocalhas: aparentes (teto, entreforro, parede).
+ * - Hidráulica e incêndio: aparente no teto, entreforro, terra, parede; laje só para gás em
+ *   cobre (no contrapiso).
+ * - Ar condicionado: como a hidráulica, sem rede no piso.
+ */
+export function allowedModes(t: RunType): InstallMode[] {
+  if (isConduitType(t)) return [...INSTALL_MODES, "livre"];
+  const f = familyOf(t);
+  if (f === "eletrica") return ["laje-aparente", "entreforro", "alvenaria-aparente", "livre"];
+  if (f === "hvac") return ["laje-aparente", "entreforro", "alvenaria", "livre"];
+  return ["laje-aparente", "entreforro", "piso", "alvenaria", ...(t.id === "gas-cobre" ? (["laje"] as InstallMode[]) : []), "livre"];
+}
+
+/** Nome da forma de instalação para a rede (tubulações usam termos próprios). */
+export function modeLabel(t: RunType, mode: InstallMode): string {
+  if (mode === "laje-aparente") return "aparente no teto (sob a laje)";
+  if (familyOf(t) !== "eletrica" || !isConduitType(t)) {
+    if (mode === "piso") return "embutido na terra (sob o piso)";
+    if (mode === "laje") return "no contrapiso (gás em cobre)";
+    if (mode === "alvenaria") return "embutido na parede";
+    if (mode === "alvenaria-aparente") return "aparente na parede";
+  }
+  if (mode === "piso") return "embutido no piso (terra)";
+  return INSTALL_LABEL[mode];
+}
+
+/** Forma de instalação inicial de cada rede. */
+export function defaultInstallFor(t: RunType): ConduitInstall {
+  return isConduitType(t) ? DEFAULT_INSTALL : { mode: "laje-aparente", layout: "horizontal" };
+}
+
+/** Instalação em parede: a altura acompanha as conexões (curvas, caixas pelo centro). */
+export const isWallMode = (m: InstallMode) => m === "alvenaria" || m === "alvenaria-aparente" || m === "canaleta";
+
+/** Meia altura da seção (mm): diâmetro/2 ou altura/2 nas retangulares. */
+const halfSection = (t: RunType, size: RunSize) => (t.profile === "retangular" ? size.height : size.width) / 2;
+
+/**
+ * Cota (Y) do eixo dos trechos horizontais de qualquer rede, pela forma de instalação e pelas
+ * medidas do empreendimento. Elétrica: regras dos eletrodutos. Hidráulica/incêndio/gás e ar
+ * condicionado: teto com a face superior a 20 cm da laje, terra 60 cm (esgoto e pluvial) ou
+ * 30 cm (demais) abaixo do piso, contrapiso (gás em cobre).
+ */
+export function runElevation(t: RunType, install: ConduitInstall, floorY: number, slabUnderside: number, size: RunSize, settings: InstallSettings = DEFAULT_INSTALL_SETTINGS): number {
+  const r = halfSection(t, size);
+  if (install.mode === "livre") return floorY + (install.height ?? 2.8);
+  if (familyOf(t) === "eletrica") return conduitElevation(install, floorY, slabUnderside, r * 2, settings);
+  const n = settings.redes;
+  switch (install.mode) {
+    case "laje-aparente":
+      return slabUnderside - ((familyOf(t) === "hvac" ? n.tetoHvac : n.tetoHidraulica) + r) / 1000;
+    case "piso":
+      return floorY - ((isGravity(t) ? n.terraEsgoto : n.terra) + r) / 1000;
+    case "laje":
+      return floorY - (n.contrapiso + r) / 1000;
+    default:
+      return conduitElevation(install, floorY, slabUnderside, r * 2, settings);
+  }
+}
+
+/** Afastamento (mm) da face superior da rede à laje no teto, por família (o que o usuário muda vale para as próximas). */
+export function ceilingClearance(t: RunType, s: InstallSettings): number {
+  const f = familyOf(t);
+  return f === "eletrica" ? s.lajeAparente.afastamento : f === "hvac" ? s.redes.tetoHvac : s.redes.tetoHidraulica;
+}
+export function withCeilingClearance(t: RunType, s: InstallSettings, mm: number): InstallSettings {
+  const v = Math.max(0, Math.round(mm));
+  const f = familyOf(t);
+  if (f === "eletrica") return { ...s, lajeAparente: { ...s.lajeAparente, afastamento: v } };
+  return { ...s, redes: { ...s.redes, ...(f === "hvac" ? { tetoHvac: v } : { tetoHidraulica: v }) } };
 }
 
 // ---- Medidas do empreendimento ------------------------------------------------------------------
 
 /** Medidas de cada forma de instalação (mm), definidas por empreendimento. */
 export interface InstallSettings {
-  /** Embutido no piso: eixo abaixo do piso acabado. */
+  /** Embutido no piso (terra): face superior do tubo abaixo do piso acabado. */
   piso: { profundidade: number };
   /** Canaleta de piso (eixo abaixo do piso) ou perimetral na parede (altura do eixo e afastamento da face). */
   canaleta: { local: "piso" | "parede"; profundidade: number; altura: number; afastamento: number };
@@ -91,27 +179,30 @@ export interface InstallSettings {
   alvenariaAparente: { altura: number; afastamento: number };
   /** Entreforro: eixo a uma distância abaixo da laje, ou acima do forro (forro na altura informada). */
   entreforro: { referencia: "laje" | "forro"; distancia: number; forroAltura: number };
-  /** Aparente na laje: folga entre o tubo e a face inferior da laje. */
+  /** Aparente no teto: da face superior do tubo à face inferior da laje. */
   lajeAparente: { afastamento: number };
-  /** Embutido na laje: eixo acima da face inferior da laje. */
+  /** Embutido na laje: face inferior do tubo acima da face inferior da laje. */
   laje: { profundidade: number };
+  /** Hidráulica, incêndio, gás e ar condicionado (mm): face superior abaixo da laje (teto) e abaixo do piso (terra, contrapiso). */
+  redes: { tetoHidraulica: number; tetoHvac: number; terraEsgoto: number; terra: number; contrapiso: number };
 }
 
 export const DEFAULT_INSTALL_SETTINGS: InstallSettings = {
-  piso: { profundidade: 50 },
+  piso: { profundidade: 600 },
   canaleta: { local: "piso", profundidade: 40, altura: 300, afastamento: 25 },
   alvenaria: { altura: 300, profundidade: 30 },
   alvenariaAparente: { altura: 300, afastamento: 5 },
   entreforro: { referencia: "laje", distancia: 150, forroAltura: 2600 },
-  lajeAparente: { afastamento: 10 },
-  laje: { profundidade: 50 },
+  lajeAparente: { afastamento: 100 },
+  laje: { profundidade: 30 },
+  redes: { tetoHidraulica: 200, tetoHvac: 200, terraEsgoto: 600, terra: 300, contrapiso: 20 },
 };
 
 /** Completa as medidas de um arquivo (campos que faltarem ficam com o padrão). */
 export function withInstallDefaults(s: Partial<InstallSettings> | null | undefined): InstallSettings {
   const d = DEFAULT_INSTALL_SETTINGS;
   const m = <K extends keyof InstallSettings>(k: K): InstallSettings[K] => ({ ...d[k], ...(s?.[k] ?? {}) });
-  return { piso: m("piso"), canaleta: m("canaleta"), alvenaria: m("alvenaria"), alvenariaAparente: m("alvenariaAparente"), entreforro: m("entreforro"), lajeAparente: m("lajeAparente"), laje: m("laje") };
+  return { piso: m("piso"), canaleta: m("canaleta"), alvenaria: m("alvenaria"), alvenariaAparente: m("alvenariaAparente"), entreforro: m("entreforro"), lajeAparente: m("lajeAparente"), laje: m("laje"), redes: m("redes") };
 }
 
 /** Afastamento do eixo em relação ao piso ou à face da laje, quando embutido (m) — padrão. */
@@ -126,7 +217,7 @@ export function conduitElevation(install: ConduitInstall, floorY: number, slabUn
   const r = sizeMm / 2;
   switch (install.mode) {
     case "piso":
-      return floorY - s.piso.profundidade / 1000;
+      return floorY - (s.piso.profundidade + r) / 1000;
     case "canaleta":
       return s.canaleta.local === "parede" ? floorY + s.canaleta.altura / 1000 : floorY - s.canaleta.profundidade / 1000;
     case "alvenaria":
@@ -138,7 +229,9 @@ export function conduitElevation(install: ConduitInstall, floorY: number, slabUn
     case "laje-aparente":
       return slabUnderside - (r + s.lajeAparente.afastamento) / 1000;
     case "laje":
-      return slabUnderside + s.laje.profundidade / 1000;
+      return slabUnderside + (s.laje.profundidade + r) / 1000;
+    case "livre":
+      return floorY + (install.height ?? 2.8);
   }
 }
 
@@ -158,7 +251,7 @@ export function wallOffset(install: ConduitInstall, sizeMm: number, settings: In
 export function installSummary(mode: InstallMode, s: InstallSettings = DEFAULT_INSTALL_SETTINGS): string {
   switch (mode) {
     case "piso":
-      return `eixo ${s.piso.profundidade} mm abaixo do piso acabado`;
+      return `face superior ${s.piso.profundidade} mm abaixo do piso acabado`;
     case "canaleta":
       return s.canaleta.local === "parede" ? `canaleta na parede, eixo a ${s.canaleta.altura} mm do piso` : `canaleta de piso, eixo ${s.canaleta.profundidade} mm abaixo do piso`;
     case "alvenaria":
@@ -168,9 +261,28 @@ export function installSummary(mode: InstallMode, s: InstallSettings = DEFAULT_I
     case "entreforro":
       return s.entreforro.referencia === "forro" ? `${s.entreforro.distancia} mm acima do forro (forro a ${s.entreforro.forroAltura} mm)` : `eixo ${s.entreforro.distancia} mm abaixo da laje`;
     case "laje-aparente":
-      return `sob a laje, ${s.lajeAparente.afastamento} mm de folga`;
+      return `face superior ${s.lajeAparente.afastamento} mm abaixo da laje`;
     case "laje":
-      return `eixo ${s.laje.profundidade} mm acima da face inferior da laje`;
+      return `face inferior ${s.laje.profundidade} mm acima da face inferior da laje`;
+    case "livre":
+      return "na altura informada";
+  }
+}
+
+/** Resumo da forma de instalação para a rede (eletrodutos e eletrocalhas: medidas da elétrica). */
+export function modeSummary(t: RunType, mode: InstallMode, s: InstallSettings = DEFAULT_INSTALL_SETTINGS): string {
+  const f = familyOf(t);
+  if (f === "eletrica" || mode === "entreforro" || mode === "livre") return installSummary(mode, s);
+  const n = s.redes;
+  switch (mode) {
+    case "laje-aparente":
+      return `face superior ${f === "hvac" ? n.tetoHvac : n.tetoHidraulica} mm abaixo da laje`;
+    case "piso":
+      return `face superior ${isGravity(t) ? n.terraEsgoto : n.terra} mm abaixo do piso acabado`;
+    case "laje":
+      return `no contrapiso, face superior ${n.contrapiso} mm abaixo do piso acabado`;
+    default:
+      return "acompanha as conexões (curvas e conexões)";
   }
 }
 
@@ -640,13 +752,15 @@ export function applyInstall(
   let t = RUN_TYPE_BY_ID[run.typeId];
   let size = run.size;
   let typeId = run.typeId;
-  if (!typeAllowed(t, install.mode)) {
+  if (isConduitType(t) && !typeAllowed(t, install.mode)) {
     t = RUN_TYPE_BY_ID["eletroduto-pvc"];
     typeId = t.id;
     size = t.sizes.find((s) => s.width >= run.size.width - 1e-6) ?? t.sizes[t.sizes.length - 1];
   }
-  const y = conduitElevation(install, ctx.floorY, ctx.slabUnderside, size.width, ctx.settings);
   const atPoint = (p: Vec3) => ctx.points.some((q) => distance(q.position, p) < 0.25);
+  // Parede: acompanha as conexões (a ponta num ponto locado, pelo centro da caixa); demais: a cota da instalação.
+  const wallEnd = isWallMode(install.mode) ? [run.vertices[0], run.vertices[run.vertices.length - 1]].find(atPoint) : undefined;
+  const y = wallEnd ? wallEnd[1] : runElevation(t, install, ctx.floorY, ctx.slabUnderside, size, ctx.settings);
   const v = run.vertices;
   const vertices: Vec3[] = [];
   v.forEach((p, i) => {

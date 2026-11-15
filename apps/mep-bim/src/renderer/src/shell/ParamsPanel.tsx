@@ -2,7 +2,7 @@
 // (Restrições, disciplina, Dimensões, Identidade, Dados IFC) editáveis para os
 // objetos criados no app e somente leitura para os elementos do IFC.
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { applyInstall, boxIndexOf, DEFAULT_INSTALL, INSTALL_LABEL, INSTALL_MODES, isConduitRun, isConduitType, runFloorProbeY, typeAllowed, type ConduitInstall, type InstallMode } from "../../../core/conduits";
+import { allowedModes, applyInstall, boxIndexOf, defaultInstallFor, DEFAULT_INSTALL, isConduitRun, isConduitType, modeLabel, runFloorProbeY, typeAllowed, withCeilingClearance, type ConduitInstall, type InstallMode } from "../../../core/conduits";
 import { DISCIPLINE_BY_ID, getTypeLabel } from "../../../core/disciplines";
 import { formatNumber } from "../../../core/format";
 import { COMPONENTS, COMPONENT_BY_ID, MOUNTING_LABEL } from "../../../core/library";
@@ -350,7 +350,7 @@ function RunTypeSelector({ runs, store }: { runs: Run[]; store: PointsStore }) {
       <select className="ptype-select" value={same.value ?? ""} onChange={(e) => e.target.value && change(e.target.value)}>
         {same.varies && <option value="">{VARIES}</option>}
         {options.map((t) => {
-          const ok = modes.every((m) => typeAllowed(t, m));
+          const ok = !isConduitType(t) || modes.every((m) => typeAllowed(t, m));
           return (
             <option key={t.id} value={t.id} disabled={!ok}>
               {t.label}
@@ -580,7 +580,8 @@ function RunRows({
   const t0 = types[0];
   const sameType = !common(types, (t) => t.id).varies;
   const conduits = runs.every(isConduitRun);
-  const mode = common(runs, (r) => r.install?.mode ?? "laje");
+  // Trechos antigos de tubulação sem forma de instalação: estavam numa altura livre.
+  const mode = common(runs, (r) => r.install?.mode ?? (isConduitRun(r) ? "laje" : "livre"));
   const size = common(runs, (r) => r.size.label);
   const sys = common(runs, (r) => r.system);
   const slope = common(runs, (r) => r.slope);
@@ -596,7 +597,7 @@ function RunRows({
   const reinstall = (patch: Partial<ConduitInstall>) => {
     const changes = new Map(
       runs.map((r) => {
-        const inst = { ...(r.install ?? DEFAULT_INSTALL), ...patch };
+        const inst = { ...(r.install ?? (isConduitRun(r) ? DEFAULT_INSTALL : defaultInstallFor(RUN_TYPE_BY_ID[r.typeId]))), ...patch };
         const floorY = floorOf(r);
         const mid = r.vertices[Math.floor(r.vertices.length / 2)];
         return [r.id, applyInstall(r, inst, { floorY, slabUnderside: slabAt(mid[0], mid[2], floorY), settings: store.installSettings, points: store.points })];
@@ -617,16 +618,35 @@ function RunRows({
   const [pendingHeight, setPendingHeight] = useState<number | null>(null);
   useEffect(() => setPendingHeight(null), [ids.join(",")]);
   const applyHeight = (target: number, scope: "trecho" | "rede") => {
+    // No teto (aparente sob a laje), a nova distância à laje passa a valer para as próximas redes;
+    // nas demais formas, a altura informada pelo usuário vira altura livre.
+    const first = runs[0];
+    const firstMode = first.install?.mode ?? (isConduitRun(first) ? "laje" : "livre");
+    let clearance: number | null = null;
+    if (firstMode === "laje-aparente") {
+      const t = RUN_TYPE_BY_ID[first.typeId];
+      const floorY = floorOf(first);
+      const mid = first.vertices[Math.floor(first.vertices.length / 2)];
+      const r = (t.profile === "retangular" ? first.size.height : first.size.width) / 2;
+      clearance = (slabAt(mid[0], mid[2], floorY) - floorY - target) * 1000 - r;
+    }
     store.mutate((cur) => {
       let list = cur.runs;
+      const touched = new Set<number>();
       for (const r of runs) {
         const h = heightOf(r);
         if (h == null) continue;
         const group = scope === "rede" ? networkAtLevel(list, r.id) : [r.id];
+        group.forEach((id) => touched.add(id));
         list = changeRunsHeight(list, group, target - h);
         if (scope === "rede") break; // a rede inteira já mudou junto
       }
-      return { ...cur, runs: list };
+      list = list.map((r) => {
+        if (!touched.has(r.id) || r.install?.mode === "laje-aparente") return r;
+        return { ...r, install: { ...(r.install ?? defaultInstallFor(RUN_TYPE_BY_ID[r.typeId])), mode: "livre" as InstallMode, height: target } };
+      });
+      const settings = clearance != null ? withCeilingClearance(RUN_TYPE_BY_ID[first.typeId], cur.installSettings, clearance) : cur.installSettings;
+      return { ...cur, runs: list, installSettings: settings };
     });
     setPendingHeight(null);
   };
@@ -673,13 +693,16 @@ function RunRows({
             </td>
           </tr>
         )}
-        {conduits && (
+        {sameType && (
           <Row label="Instalação">
             <SelectCell
               value={mode.value ?? ""}
               varies={mode.varies}
-              options={INSTALL_MODES.map((m) => [m, INSTALL_LABEL[m].charAt(0).toUpperCase() + INSTALL_LABEL[m].slice(1)])}
-              onChange={(m) => reinstall({ mode: m as InstallMode })}
+              options={allowedModes(t0).map((m) => {
+                const l = modeLabel(t0, m);
+                return [m, l.charAt(0).toUpperCase() + l.slice(1)];
+              })}
+              onChange={(m) => reinstall(m === "livre" ? { mode: "livre", height: height.value ?? 2.8 } : { mode: m as InstallMode })}
             />
           </Row>
         )}

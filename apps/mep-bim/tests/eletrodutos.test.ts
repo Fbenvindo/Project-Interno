@@ -145,15 +145,18 @@ describe("instalação", () => {
 
   it("cota do eixo por instalação, com as medidas do empreendimento", () => {
     const s = DEFAULT_INSTALL_SETTINGS;
-    expect(conduitElevation({ mode: "piso" }, 0, 2.9, 25, s)).toBeCloseTo(-0.05);
+    // Terra: face superior a 60 cm do piso acabado.
+    expect(conduitElevation({ mode: "piso" }, 0, 2.9, 25, s)).toBeCloseTo(-0.6125);
     expect(conduitElevation({ mode: "canaleta" }, 0, 2.9, 25, s)).toBeCloseTo(-0.04);
     expect(conduitElevation({ mode: "canaleta" }, 0, 2.9, 25, { ...s, canaleta: { ...s.canaleta, local: "parede" } })).toBeCloseTo(0.3);
     expect(conduitElevation({ mode: "alvenaria" }, 0, 2.9, 25, { ...s, alvenaria: { altura: 2200, profundidade: 30 } })).toBeCloseTo(2.2);
     expect(conduitElevation({ mode: "alvenaria-aparente" }, 0, 2.9, 25, s)).toBeCloseTo(0.3);
     expect(conduitElevation({ mode: "entreforro" }, 0, 2.9, 40, s)).toBeCloseTo(2.75);
     expect(conduitElevation({ mode: "entreforro" }, 0, 2.9, 40, { ...s, entreforro: { referencia: "forro", distancia: 100, forroAltura: 2600 } })).toBeCloseTo(2.7);
-    expect(conduitElevation({ mode: "laje-aparente" }, 0, 2.9, 40, s)).toBeCloseTo(2.87);
-    expect(conduitElevation({ mode: "laje" }, 0, 2.9, 25, s)).toBeCloseTo(2.95);
+    // Aparente no teto: face superior a 10 cm da laje; embutido na laje: face inferior 3 cm acima da face inferior.
+    expect(conduitElevation({ mode: "laje-aparente" }, 0, 2.9, 40, s)).toBeCloseTo(2.78);
+    expect(conduitElevation({ mode: "laje" }, 0, 2.9, 25, s)).toBeCloseTo(2.9425);
+    expect(conduitElevation({ mode: "livre", height: 1.7 }, 0, 2.9, 25, s)).toBeCloseTo(1.7);
   });
 
   it("parede: embutido fica dentro da parede; aparente e canaleta perimetral, fora", () => {
@@ -168,7 +171,8 @@ describe("instalação", () => {
     expect(normalizeInstall({ mode: "aparente" })?.mode).toBe("laje-aparente");
     expect(normalizeInstall({ mode: "piso", external: true })).toEqual({ mode: "piso", external: true });
     expect(withInstallDefaults({ piso: { profundidade: 80 } }).piso.profundidade).toBe(80);
-    expect(withInstallDefaults({}).laje.profundidade).toBe(50);
+    expect(withInstallDefaults({}).laje.profundidade).toBe(30);
+    expect(withInstallDefaults({}).redes.terraEsgoto).toBe(600);
   });
 
   it("caixa embutida na alvenaria: PVC de embutir", () => {

@@ -31,7 +31,14 @@ import {
   BOX_REASON_LABEL,
   boxElementId,
   boxSizeLabel,
-  conduitElevation,
+  allowedModes,
+  ceilingClearance,
+  defaultInstallFor,
+  isWallMode,
+  modeLabel,
+  modeSummary,
+  runElevation,
+  withCeilingClearance,
   DEFAULT_INSTALL,
   INSTALL_LABEL,
   INSTALL_MODES,
@@ -42,7 +49,6 @@ import {
   pullBoxes,
   runFloorProbeY,
   typeAllowed,
-  installSummary,
   wallOffset,
   type ConduitInstall,
   type InstallMode,
@@ -99,8 +105,6 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
   const [circuit, setCircuit] = useState("");
   const [slope, setSlope] = useState(type.slopeFor?.(size) ?? 0);
   const [workElevation, setWorkElevation] = useState(2.8);
-  /** Eletrodutos: altura escolhida pelo usuário (m acima do piso); null = a da forma de instalação. */
-  const [conduitHeight, setConduitHeight] = useState<number | null>(null);
   const [ortho, setOrtho] = useState(true);
   const [install, setInstall] = useState<ConduitInstall>(DEFAULT_INSTALL);
   const conduit = isConduitType(type);
@@ -122,6 +126,8 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
     setSizeLabel(t.defaultSize);
     setSystem(t.system);
     setSlope(t.slopeFor?.(s) ?? 0);
+    // Cada rede tem as suas formas de instalação: se a atual não vale para ela, usa a padrão.
+    setInstall((cur) => (typeAllowed(t, cur.mode) ? cur : defaultInstallFor(t)));
   };
   const chooseInstall = (next: ConduitInstall) => {
     setInstall(next);
@@ -179,20 +185,24 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
     [pointById, runById],
   );
 
-  /** Cota (Y) do eletroduto horizontal em (x, z) para a instalação escolhida; null para outras redes. */
+  /**
+   * Cota (Y) dos trechos horizontais em (x, z) pela forma de instalação: nada fica solto no meio
+   * do pavimento. Parede: acompanha as conexões (a cota do último vértice, que parte do centro da
+   * caixa); altura livre: a informada pelo usuário.
+   */
   const conduitY = useCallback(
     (x: number, z: number, floorY: number): number | null => {
       const L = live.current;
-      if (!isConduitType(L.type)) return null;
-      if (L.conduitHeight != null) return floorY + L.conduitHeight;
-      return conduitElevation(L.install, floorY, slabAt(x, z, floorY), L.size.width, L.settings);
+      if (L.install.mode === "livre") return floorY + L.workElevation;
+      if (isWallMode(L.install.mode)) return L.draft.length ? L.draft[L.draft.length - 1][1] : null;
+      return runElevation(L.type, L.install, floorY, slabAt(x, z, floorY), L.size, L.settings);
     },
     [slabAt],
   );
   /** Instalação de parede (alvenaria, canaleta perimetral): ponto na face da parede deslocado pela medida do empreendimento. */
   const onWall = useCallback((hit: SurfaceHit | null): Vec3 | null => {
     const L = live.current;
-    if (!hit || !isConduitType(L.type) || Math.abs(hit.normal[1]) > 0.3) return null;
+    if (!hit || !isWallMode(L.install.mode) || Math.abs(hit.normal[1]) > 0.3) return null;
     const off = wallOffset(L.install, L.size.width, L.settings);
     if (off == null) return null;
     return hit.point.map((v, i) => v + hit.normal[i] * off) as Vec3;
@@ -200,11 +210,26 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
 
   // Estado mais recente para os callbacks do visualizador.
   const settings: InstallSettings = store.installSettings;
-  const installHeight = conduit && scheme ? conduitElevation(install, scheme.floor, scheme.slab, size.width, settings) - scheme.floor : null;
-  /** Altura em que a próxima rede será desenhada (m acima do piso). */
-  const newHeight = conduit ? (conduitHeight ?? installHeight) : workElevation;
-  const live = useRef({ type, size, system, circuit, slope, workElevation, conduitHeight, ortho, draft, mode, destination, pickingDestination, install, settings });
-  live.current = { type, size, system, circuit, slope, workElevation, conduitHeight, ortho, draft, mode, destination, pickingDestination, install, settings };
+  /** Altura em que a próxima rede será desenhada (m acima do piso); null na parede (acompanha as conexões). */
+  const newHeight =
+    install.mode === "livre" ? workElevation : isWallMode(install.mode) || !scheme ? null : runElevation(type, install, scheme.floor, scheme.slab, size, settings) - scheme.floor;
+  const live = useRef({ type, size, system, circuit, slope, workElevation, ortho, draft, mode, destination, pickingDestination, install, settings });
+  live.current = { type, size, system, circuit, slope, workElevation, ortho, draft, mode, destination, pickingDestination, install, settings };
+  /**
+   * O usuário mudou a altura: no teto, vira a nova distância à laje (vale para as próximas
+   * redes da família); nas demais formas, passa a altura livre informada.
+   */
+  const setHeight = (h: number) => {
+    if (!Number.isFinite(h)) return;
+    if (install.mode === "laje-aparente" && scheme) {
+      const r = (type.profile === "retangular" ? size.height : size.width) / 2;
+      const clearance = (scheme.slab - scheme.floor - h) * 1000 - r;
+      store.setInstallSettings((cur) => withCeilingClearance(type, cur, clearance));
+      return;
+    }
+    setWorkElevation(h);
+    if (install.mode !== "livre") setInstall({ ...install, mode: "livre", height: h });
+  };
 
   /** Próximo vértice a partir do cursor, com as restrições de desenho. */
   const nextCandidate = useCallback(
@@ -284,7 +309,7 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
         slope: L.slope,
         vertices: L.slope ? applySlope(v, L.slope) : v,
         params: L.type.circuit && L.circuit.trim() ? { Circuito: L.circuit.trim() } : {},
-        ...(isConduitType(L.type) ? { install: { ...L.install } } : {}),
+        install: { ...L.install, ...(L.install.mode === "livre" ? { height: L.workElevation } : {}) },
       };
       store.addRuns([run]);
       setDraft([]);
@@ -323,7 +348,7 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
         slope: L.slope,
         vertices: L.slope ? applySlope(path, L.slope) : path,
         params: L.type.circuit && L.circuit.trim() ? { Circuito: L.circuit.trim() } : {},
-        ...(isConduitType(L.type) ? { install: { ...L.install } } : {}),
+        install: { ...L.install, ...(L.install.mode === "livre" ? { height: L.workElevation } : {}) },
       };
       all = [...all, run];
       created.push(run);
@@ -494,8 +519,8 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
   /** Muda a instalação dos eletrodutos selecionados e os leva para a nova cota. */
   const reinstall = (runs: Run[], patch: Partial<ConduitInstall>) => {
     const changes = new Map(
-      runs.filter(isConduitRun).map((r) => {
-        const inst = { ...(r.install ?? DEFAULT_INSTALL), ...patch };
+      runs.map((r) => {
+        const inst = { ...(r.install ?? defaultInstallFor(RUN_TYPE_BY_ID[r.typeId])), ...patch };
         const floorY = floorAt(runFloorProbeY(r));
         const mid = r.vertices[Math.floor(r.vertices.length / 2)];
         return [r.id, applyInstall(r, inst, { floorY, slabUnderside: slabAt(mid[0], mid[2], floorY), settings, points: store.points })];
@@ -530,24 +555,16 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
       <section className="card">
         {/* Altura da rede: em destaque, antes de desenhar. */}
         <label className="height-field">
-          <span>Altura da rede (m, acima do piso)</span>
-          {conduit ? (
-            <input
-              type="number"
-              step={0.05}
-              value={conduitHeight ?? ""}
-              placeholder={installHeight != null ? `${installHeight.toFixed(2).replace(".", ",")} (pela instalação)` : "pela instalação"}
-              onChange={(e) => setConduitHeight(e.target.value === "" ? null : Number(e.target.value))}
-            />
-          ) : (
-            <input type="number" step={0.05} value={workElevation} onChange={(e) => setWorkElevation(Number(e.target.value))} />
-          )}
+          <span>Altura da rede (m, acima do piso) · {modeLabel(type, install.mode)}</span>
+          <HeightInput value={newHeight} placeholder={isWallMode(install.mode) ? "acompanha as conexões" : ""} onCommit={setHeight} />
           <small className="muted">
-            {conduit
-              ? conduitHeight == null
-                ? "Definida pela forma de instalação abaixo; digite um valor para usar outra altura."
-                : "Altura própria (em vez da forma de instalação). Apague para voltar à da instalação."
-              : "Os trechos horizontais correm nesta altura; depois dá para mudar nas Propriedades."}
+            {install.mode === "laje-aparente"
+              ? `Face superior a ${ceilingClearance(type, settings)} mm da laje. Mudando a altura, a nova distância vale para as próximas redes.`
+              : install.mode === "livre"
+                ? "Altura livre, informada por você."
+                : isWallMode(install.mode)
+                  ? "Na parede, o traçado acompanha as conexões (caixas pelo centro)."
+                  : "Pela forma de instalação. Digitando outra altura, a rede passa a ter altura livre."}
           </small>
         </label>
         <div className="form-grid">
@@ -557,9 +574,9 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
               {GROUPS.filter((g) => RUN_TYPES.some((t) => t.group === g && (!typeIds || typeIds.includes(t.id)))).map((g) => (
                 <optgroup key={g} label={g}>
                   {RUN_TYPES.filter((t) => t.group === g && (!typeIds || typeIds.includes(t.id))).map((t) => (
-                    <option key={t.id} value={t.id} disabled={!typeAllowed(t, install.mode)}>
+                    <option key={t.id} value={t.id} disabled={isConduitType(t) && !typeAllowed(t, install.mode)}>
                       {t.label}
-                      {!typeAllowed(t, install.mode) ? " (só embutido)" : ""}
+                      {isConduitType(t) && !typeAllowed(t, install.mode) ? " (só embutido)" : ""}
                     </option>
                   ))}
                 </optgroup>
@@ -599,7 +616,7 @@ export function TracadoPanel({ model, fileName, store, viewer, selection, onSele
             <option key={s} value={s} />
           ))}
         </datalist>
-        {conduit && <InstallChooser install={install} onChange={chooseInstall} settings={settings} onConfigure={onConfigureInstalls} />}
+        <InstallChooser type={type} install={install} onChange={chooseInstall} settings={settings} onConfigure={onConfigureInstalls} />
         <div className="muted small">
           <span className="swatch" style={{ background: DISCIPLINE_BY_ID[type.discipline].color }} /> {type.material}
           {conduit && (type.flexible ? " · flexível: curvatura livre, curva de 90° só na subida/descida" : " · rígido: curvas de 45° e 90°")}
@@ -912,21 +929,46 @@ function RunEditor({
   );
 }
 
-/** Forma de instalação do eletroduto (piso, parede ou teto), com as medidas do empreendimento. */
-function InstallChooser({ install, onChange, settings, onConfigure }: { install: ConduitInstall; onChange: (i: ConduitInstall) => void; settings: InstallSettings; onConfigure?: () => void }) {
-  const groups: [string, InstallMode[]][] = [
-    ["Piso", ["piso", "canaleta"]],
-    ["Parede", ["alvenaria", "alvenaria-aparente"]],
-    ["Teto", ["entreforro", "laje-aparente", "laje"]],
-  ];
-  const short: Record<InstallMode, string> = {
-    piso: "Embutido no piso",
-    canaleta: "Canaleta",
-    alvenaria: "Embutido na alvenaria",
-    "alvenaria-aparente": "Aparente na alvenaria",
-    entreforro: "Entreforro",
-    "laje-aparente": "Aparente na laje",
-    laje: "Embutido na laje",
+/** Campo de altura (m): grava ao sair do campo ou com Enter. */
+function HeightInput({ value, placeholder, onCommit }: { value: number | null; placeholder?: string; onCommit: (v: number) => void }) {
+  const text = value == null ? "" : (Math.round(value * 1000) / 1000).toString();
+  const [draft, setDraft] = useState(text);
+  useEffect(() => setDraft(text), [text]);
+  const commit = () => {
+    if (draft === text || draft.trim() === "") return setDraft(text);
+    const v = Number(draft.replace(",", "."));
+    if (Number.isFinite(v)) onCommit(v);
+    else setDraft(text);
+  };
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      placeholder={placeholder}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+    />
+  );
+}
+
+/** Forma de instalação da rede (piso, parede, teto ou altura livre), com as medidas do empreendimento. */
+function InstallChooser({ type, install, onChange, settings, onConfigure }: { type: RunType; install: ConduitInstall; onChange: (i: ConduitInstall) => void; settings: InstallSettings; onConfigure?: () => void }) {
+  const allowed = allowedModes(type);
+  const groups: [string, InstallMode[]][] = (
+    [
+      ["Piso", ["piso", "canaleta", "laje"].filter((m) => m !== "laje" || !isConduitType(type))],
+      ["Parede", ["alvenaria", "alvenaria-aparente"]],
+      ["Teto", ["entreforro", "laje-aparente", ...(isConduitType(type) ? ["laje"] : [])]],
+      ["Livre", ["livre"]],
+    ] as [string, InstallMode[]][]
+  )
+    .map(([g, ms]): [string, InstallMode[]] => [g, ms.filter((m) => allowed.includes(m))])
+    .filter(([, ms]) => ms.length);
+  const short = (m: InstallMode) => {
+    const l = modeLabel(type, m);
+    return l.charAt(0).toUpperCase() + l.slice(1);
   };
   return (
     <div className="install-chooser">
@@ -937,7 +979,7 @@ function InstallChooser({ install, onChange, settings, onConfigure }: { install:
           <div className="segmented small">
             {modes.map((m) => (
               <button key={m} className={install.mode === m ? "on" : ""} onClick={() => onChange({ ...install, mode: m })}>
-                {short[m]}
+                {short(m)}
               </button>
             ))}
           </div>
@@ -961,8 +1003,8 @@ function InstallChooser({ install, onChange, settings, onConfigure }: { install:
         </div>
       )}
       <div className="muted small">
-        {installSummary(install.mode, settings)}.{" "}
-        {isApparentMode(install.mode) ? "Só eletroduto rígido (PVC ou aço)." : "PVC/PEAD flexível permitido."}{" "}
+        {modeSummary(type, install.mode, settings)}.{" "}
+        {isConduitType(type) && (isApparentMode(install.mode) ? "Só eletroduto rígido (PVC ou aço)." : "PVC/PEAD flexível permitido.")}{" "}
         {(install.mode === "alvenaria" || install.mode === "alvenaria-aparente" || (install.mode === "canaleta" && settings.canaleta.local === "parede")) &&
           "Clique na face da parede: o traçado acompanha a parede."}{" "}
         {onConfigure && (

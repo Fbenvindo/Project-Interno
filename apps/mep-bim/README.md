@@ -435,6 +435,22 @@ Num IFC de teste com 40 pavimentos e cerca de 29 mil elementos (34 MB):
 - **Primeira abertura agora:** cerca de 7 s, com a janela respondendo; a pausa mais longa foi de cerca de 1,6 s, ao montar o 3D e as listas.
 - **Reabrindo pelo cache:** cerca de 3,4 s, dos quais 0,3 s para ler o modelo; o resto é a montagem da cena.
 
+### Regras de rota das redes (formas de instalação)
+
+Nenhuma rede fica "solta" no meio do pavimento: a altura dos trechos horizontais vem da **forma de instalação**. A altura livre só vale quando o usuário escolhe "Altura livre" ou digita uma altura. As medidas ficam em *Elétrica › Infraestrutura › Instalações* e são salvas no projeto.
+
+| Forma | Elétrica e sistemas (eletrodutos, eletrocalhas) | Hidráulica e incêndio | Ar condicionado |
+|---|---|---|---|
+| Embutida na laje | face inferior 3 cm acima da face inferior da laje (só eletroduto) | só gás em cobre, no contrapiso (face superior 2 cm abaixo do piso) | — |
+| Embutida na terra (sob o piso) | face superior 60 cm abaixo do piso acabado (só eletroduto) | face superior 60 cm (esgoto e pluvial) ou 30 cm (demais) abaixo do piso | não pode |
+| Na parede | acompanha as conexões (curvas, caixas pelo centro) | acompanha as conexões | acompanha as conexões |
+| Aparente no teto | face superior 10 cm abaixo da laje | face superior 20 cm abaixo da laje | face superior 20 cm abaixo da laje |
+
+- **Teto:** quando o usuário muda a altura de uma rede aparente no teto (no Traçado ou nas Propriedades), a nova distância à laje passa a valer para as próximas redes da mesma família.
+- **Demais formas:** digitar outra altura passa a rede para "altura livre".
+- **Trechos antigos de tubulação**, sem forma de instalação, aparecem como "altura livre".
+- **"Atualizar"** (em Instalações) leva as redes existentes, de todas as famílias, às cotas atuais.
+
 ### Altura das redes
 
 - **Ao criar uma rede** (Traçado), o primeiro campo, em destaque, é a **Altura da rede** (m acima do piso). Nas tubulações, eletrocalhas e dutos, é a altura dos trechos horizontais. Nos eletrodutos, vem da forma de instalação (mostrada no campo); digitando um valor, vale esse.

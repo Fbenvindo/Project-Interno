@@ -45,8 +45,8 @@ export function InstalacoesPanel({ settings: s, onChange, counts, onApply }: Pro
       </p>
 
       <h4 className="inst-zone">Piso</h4>
-      <Card mode="piso" counts={counts} note="Contrapiso: o eixo fica abaixo do piso acabado.">
-        <Mm label="Eixo abaixo do piso acabado" value={s.piso.profundidade} onChange={(v) => set("piso", { profundidade: v })} />
+      <Card mode="piso" counts={counts} note="Na terra (sob o piso): a face superior do tubo fica abaixo do piso acabado (padrão 600 mm).">
+        <Mm label="Face superior abaixo do piso acabado" value={s.piso.profundidade} onChange={(v) => set("piso", { profundidade: v })} />
       </Card>
       <Card mode="canaleta" counts={counts} note="Canaleta de piso (embutida) ou perimetral, fixada na parede (rodapé).">
         <label>
@@ -90,12 +90,27 @@ export function InstalacoesPanel({ settings: s, onChange, counts, onApply }: Pro
           <Mm label="Altura do forro (acima do piso)" value={s.entreforro.forroAltura} onChange={(v) => set("entreforro", { forroAltura: v })} />
         )}
       </Card>
-      <Card mode="laje-aparente" counts={counts} note="Fixado sob a laje; o eixo fica a raio + folga da face inferior.">
-        <Mm label="Folga entre o tubo e a laje" value={s.lajeAparente.afastamento} onChange={(v) => set("lajeAparente", { afastamento: v })} />
+      <Card mode="laje-aparente" counts={counts} note="Aparente no teto, fixado sob a laje (padrão 100 mm). Mudando a altura de uma rede no teto, a nova distância passa a valer para as próximas.">
+        <Mm label="Face superior abaixo da laje" value={s.lajeAparente.afastamento} onChange={(v) => set("lajeAparente", { afastamento: v })} />
       </Card>
-      <Card mode="laje" counts={counts} note="Na laje de teto, entre a forma e a armadura.">
-        <Mm label="Eixo acima da face inferior da laje" value={s.laje.profundidade} onChange={(v) => set("laje", { profundidade: v })} />
+      <Card mode="laje" counts={counts} note="Na laje de teto: a face inferior do tubo fica acima da face inferior da laje (padrão 30 mm).">
+        <Mm label="Face inferior acima da face inferior da laje" value={s.laje.profundidade} onChange={(v) => set("laje", { profundidade: v })} />
       </Card>
+
+      <h4 className="inst-zone">Hidráulica, incêndio, gás e ar condicionado</h4>
+      <section className="card inst-card">
+        <h3>Tubulações e dutos</h3>
+        <div className="form-grid">
+          <Mm label="Teto (hidráulica, incêndio, gás): face superior abaixo da laje" value={s.redes.tetoHidraulica} onChange={(v) => set("redes", { tetoHidraulica: v })} />
+          <Mm label="Teto (ar condicionado): face superior abaixo da laje" value={s.redes.tetoHvac} onChange={(v) => set("redes", { tetoHvac: v })} />
+          <Mm label="Terra, esgoto e pluvial: face superior abaixo do piso" value={s.redes.terraEsgoto} onChange={(v) => set("redes", { terraEsgoto: v })} />
+          <Mm label="Terra, demais redes: face superior abaixo do piso" value={s.redes.terra} onChange={(v) => set("redes", { terra: v })} />
+          <Mm label="Contrapiso (gás em cobre): face superior abaixo do piso" value={s.redes.contrapiso} onChange={(v) => set("redes", { contrapiso: v })} />
+        </div>
+        <p className="muted small">
+          Embutido na laje só para gás em cobre (no contrapiso). Ar condicionado não tem rede no piso. Na parede, as tubulações acompanham as conexões.
+        </p>
+      </section>
 
       <section className="card">
         <h3>Resumo</h3>
@@ -110,7 +125,7 @@ export function InstalacoesPanel({ settings: s, onChange, counts, onApply }: Pro
         </ul>
         <div className="btn-row wrap tight">
           <button className="btn primary" disabled={!total} onClick={onApply} title="Leva os eletrodutos já traçados para as cotas das medidas atuais">
-            Atualizar os {total} eletroduto(s) existentes
+            Atualizar os {total} trecho(s) existentes
           </button>
           <button className="btn" onClick={() => onChange(() => DEFAULT_INSTALL_SETTINGS)}>
             Voltar ao padrão
