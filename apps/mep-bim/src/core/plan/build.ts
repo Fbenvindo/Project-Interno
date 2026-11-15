@@ -186,7 +186,7 @@ export function buildPlan(input: PlanInput): PlanDrawing {
       });
     }
     // Portas: folha aberta a 90° e arco de abertura (não nas plantas de teto).
-    if (e.ifcType === "IFCDOOR" && e.frame && R?.type !== "teto") prims.push(...doorSwing(e, mesh.positions, plan, input.spaces ?? [], input.doors?.[e.globalId], R ? R.base : level));
+    if (e.ifcType === "IFCDOOR" && e.frame && R?.type !== "teto") prims.push(...doorSwing(e, mesh.positions, mesh.indices, plan, input.spaces ?? [], input.doors?.[e.globalId], R ? R.base : level));
   }
 
   // ---- Vigas (projeção tracejada, verde com 50% de transparência) ---------------------------
@@ -459,7 +459,39 @@ export function isSwingDoor(e: ElementInfo, floorY: number | null, ov?: DoorOver
   return true;
 }
 
-function doorSwing(e: ElementInfo, positions: Float32Array, plan: (v: Vec3) => P2, spaces: Space[], ov: DoorOverride | undefined, levelY: number | null = null): Prim[] {
+/**
+ * Lado da folha (−1 ou 1, em relação ao meio da espessura) pela geometria: faces grandes
+ * paralelas à parede no meio do vão (a folha fechada, encostada no batente do lado para onde a
+ * porta abre). null se não der para saber.
+ */
+export function leafSide(positions: Float32Array, indices: ArrayLike<number>, o: Vec3, X: Vec3, Y: Vec3, x0: number, x1: number, y0: number, y1: number): 1 | -1 | null {
+  const loc = (i: number): [number, number] => {
+    const d0 = positions[i * 3] - o[0], d1 = positions[i * 3 + 1] - o[1], d2 = positions[i * 3 + 2] - o[2];
+    return [d0 * X[0] + d1 * X[1] + d2 * X[2], d0 * Y[0] + d1 * Y[1] + d2 * Y[2]];
+  };
+  const w = x1 - x0;
+  let sum = 0;
+  let area = 0;
+  for (let t = 0; t < indices.length; t += 3) {
+    const a = indices[t], b = indices[t + 1], c = indices[t + 2];
+    const ux = positions[b * 3] - positions[a * 3], uy = positions[b * 3 + 1] - positions[a * 3 + 1], uz = positions[b * 3 + 2] - positions[a * 3 + 2];
+    const vx = positions[c * 3] - positions[a * 3], vy = positions[c * 3 + 1] - positions[a * 3 + 1], vz = positions[c * 3 + 2] - positions[a * 3 + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const len = Math.hypot(nx, ny, nz);
+    if (!len || Math.abs((nx * Y[0] + ny * Y[1] + nz * Y[2]) / len) < 0.9) continue;
+    const [ax, ay] = loc(a), [bx] = loc(b), [cx] = loc(c);
+    const mx = (ax + bx + cx) / 3;
+    // Só o meio do vão (fora os batentes e alizares).
+    if (mx < x0 + w * 0.2 || mx > x1 - w * 0.2) continue;
+    sum += ay * len;
+    area += len;
+  }
+  if (!area) return null;
+  const leaf = sum / area - (y0 + y1) / 2;
+  return Math.abs(leaf) < 0.01 ? null : leaf > 0 ? 1 : -1;
+}
+
+function doorSwing(e: ElementInfo, positions: Float32Array, indices: ArrayLike<number>, plan: (v: Vec3) => P2, spaces: Space[], ov: DoorOverride | undefined, levelY: number | null = null): Prim[] {
   if (!isSwingDoor(e, levelY, ov)) return [];
   const f = e.frame!;
   const nx = Math.hypot(...f.x) || 1;
@@ -480,14 +512,15 @@ function doorSwing(e: ElementInfo, positions: Float32Array, plan: (v: Vec3) => P
   const op = (e.operation ?? "").toUpperCase();
   if (!(width > 0.4 && width < 4) || /SLIDING|FOLDING|REVOLVING|ROLLINGUP|SWING_FIXED|LIFTING/.test(op)) return [];
   const at = (lx: number, ly: number): P2 => plan([f.o[0] + X[0] * lx + Y[0] * ly, f.o[1], f.o[2] + X[2] * lx + Y[2] * ly]);
-  // Lado da abertura: para dentro do ambiente (IfcSpace). Porta de fachada (ambiente só de um
-  // lado) abre para o ambiente; entre dois ambientes (ou sem ambientes), vale o lado do IFC (+y).
+  // Lado da abertura: o da folha (encostada no batente do lado para onde abre, como no Revit).
+  // Sem folha reconhecível: para dentro do ambiente (IfcSpace); por fim, o +y do IFC.
   const mid = (x0 + x1) / 2;
   const floorY = e.bbox?.min[1] ?? f.o[1];
   const inRoom = (p: P2) => spaces.some((sp) => Math.abs(sp.floorY - floorY) < 1.5 && pointInPolygon(p, sp.polygon));
+  const byLeaf = leafSide(positions, indices, f.o, X, Y, x0, x1, y0, y1);
   const plus = inRoom(at(mid, y1 + 0.6));
   const minus = inRoom(at(mid, y0 - 0.6));
-  let sideIn: 1 | -1 = plus || !minus ? 1 : -1;
+  let sideIn: 1 | -1 = byLeaf ?? (plus || !minus ? 1 : -1);
   if (ov?.flipSide) sideIn = sideIn === 1 ? -1 : 1;
   const other = (s: 1 | -1): 1 | -1 => (s === 1 ? -1 : 1);
   // Folhas: dobradiça à esquerda (x0) ou à direita (x1), invertida pelo ajuste da porta.

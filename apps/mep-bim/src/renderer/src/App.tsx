@@ -961,6 +961,17 @@ export function App() {
     viewerRef.current?.setVisible(all ? null : new Set(visibleElements.map((e) => e.expressID)));
   }, [model, allElements, visibleElements]);
 
+  /** Nome completo da aba (dica ao passar o mouse; as abas encolhem quando falta espaço). */
+  const viewTabTitle = (v: string) =>
+    v === "planta"
+      ? activeViewDef && planKey.startsWith("view:")
+        ? activeViewDef.name
+        : `${planTypeOpen === "teto" ? "Planta de teto" : "Planta de piso"} · ${storey}${floorEntry?.levelLabel ? ` (${floorEntry.levelLabel})` : ""}`
+      : v === "3d"
+        ? "Vista 3D"
+        : v === "prancha"
+          ? "Prancha"
+          : "Fluxograma";
   /** Ids ocultos na planta aberta (visibilidade da vista e geral). */
   const planHidden = useMemo(() => hiddenFor(activeViewDef), [hiddenFor, activeViewDef]);
   /** Grava a vista (as plantas de documentação passam a existir no projeto na primeira alteração). */
@@ -1927,7 +1938,7 @@ export function App() {
               <>
                 {!closedTabs.includes("planta") && (
                   <span className={`view-tab-wrap ${view === "planta" ? "active" : ""}`}>
-                    <button className={`view-tab ${view === "planta" ? "active" : ""}`} onClick={() => setView("planta")}>
+                    <button className={`view-tab ${view === "planta" ? "active" : ""}`} title={viewTabTitle("planta")} onClick={() => setView("planta")}>
                       {activeViewDef && planKey.startsWith("view:")
                         ? activeViewDef.name
                         : `${planTypeOpen === "teto" ? "Planta de teto" : "Planta de piso"} · ${storey}${floorEntry?.levelLabel ? ` (${floorEntry.levelLabel})` : ""}`}
@@ -1939,7 +1950,7 @@ export function App() {
                 )}
                 {!closedTabs.includes("3d") && (
                   <span className={`view-tab-wrap ${view === "3d" ? "active" : ""}`}>
-                    <button className={`view-tab ${view === "3d" ? "active" : ""}`} onClick={() => setView("3d")}>
+                    <button className={`view-tab ${view === "3d" ? "active" : ""}`} title={viewTabTitle("3d")} onClick={() => setView("3d")}>
                       3D · {view3dDef ? view3dDef.name : (storeyView ?? "Modelo completo")}
                     </button>
                     <button className="tab-close" title="Fechar esta aba" aria-label="Fechar vista 3D" onClick={() => closeTab("3d")}>
@@ -1949,7 +1960,7 @@ export function App() {
                 )}
                 {!closedTabs.includes("prancha") && (
                   <span className={`view-tab-wrap ${view === "prancha" ? "active" : ""}`}>
-                    <button className={`view-tab ${view === "prancha" ? "active" : ""}`} onClick={() => chooseTool({ kind: "pranchas" })}>
+                    <button className={`view-tab ${view === "prancha" ? "active" : ""}`} title={viewTabTitle("prancha")} onClick={() => chooseTool({ kind: "pranchas" })}>
                       Prancha{activeSheet && view === "prancha" ? ` · ${activeSheet.name}` : ""}
                     </button>
                     <button className="tab-close" title="Fechar esta aba" aria-label="Fechar prancha" onClick={() => closeTab("prancha")}>
@@ -1959,7 +1970,7 @@ export function App() {
                 )}
                 {flowDef && !closedTabs.includes("fluxograma") && (
                   <span className={`view-tab-wrap ${view === "fluxograma" ? "active" : ""}`}>
-                    <button className={`view-tab ${view === "fluxograma" ? "active" : ""}`} onClick={() => setView("fluxograma")}>
+                    <button className={`view-tab ${view === "fluxograma" ? "active" : ""}`} title={viewTabTitle("fluxograma")} onClick={() => setView("fluxograma")}>
                       Fluxograma · {flowDef.name}
                     </button>
                     <button className="tab-close" title="Fechar esta aba" aria-label="Fechar fluxograma" onClick={() => closeTab("fluxograma")}>
@@ -1980,6 +1991,8 @@ export function App() {
               </>
             )}
             <div className="spacer" />
+            {/* Controles da vista: rolam na horizontal se faltar espaço; o botão do painel fica sempre visível. */}
+            <div className="view-tools">
             {model && view === "planta" && floorPlan && (
               <>
                 <div className="segmented small" role="group" aria-label="Planta de piso ou de teto">
@@ -2060,6 +2073,7 @@ export function App() {
                 m
               </label>
             )}
+            </div>
             <button className="icon-btn" onClick={() => setRightOpen(!rightOpen)} title={rightOpen ? "Ocultar painel direito" : "Mostrar painel direito"} aria-pressed={rightOpen}>
               <Icon name="painelDir" size={18} />
             </button>

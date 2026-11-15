@@ -257,7 +257,7 @@ Fora de qualquer comando, o app está sempre em **Selecionar**, em todas as vist
 
   Paredes e pilares cruzados pelo plano de corte saem hachurados. O que está dentro da faixa sem cruzar o corte sai em projeção vista de cima (contorno cinza): tampo das mesas, assento e encosto das cadeiras, bancadas. Pontos e trechos entram pela altura, inclusive os de outro pavimento junto à laje.
 - **Portas** (plantas de piso): folha aberta a 90° e arco de abertura.
-  - **Lado da abertura:** para dentro do ambiente (IfcSpace). Uma porta de fachada abre para o lado que tem ambiente; entre dois ambientes, vale a orientação do IFC.
+  - **Lado da abertura:** o lado da folha, como no Revit. A folha fechada fica encostada no batente do lado para onde a porta abre; o app acha essa face na geometria da porta. Sem folha reconhecível: para dentro do ambiente (IfcSpace) e, por fim, a orientação do IFC.
   - **Dobradiça:** pelo tipo de abertura do IFC (à esquerda, à direita, folha dupla, folhas opostas).
   - **Sem arco:** elementos exportados como porta que não abrem: venezianas, janelas, grelhas e brises (pelo nome), portas que não chegam ao piso (peitoril acima de 30 cm) e portas de correr, pivotantes ou de enrolar.
   - **Ajuste por porta:** nas Propriedades de cada porta, *Abertura na planta*: arco sim/não, *Inverter lado* e *Inverter dobradiça*. Os ajustes ficam salvos no projeto (.seb).
