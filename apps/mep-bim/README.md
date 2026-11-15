@@ -435,6 +435,20 @@ Num IFC de teste com 40 pavimentos e cerca de 29 mil elementos (34 MB):
 - **Primeira abertura agora:** cerca de 7 s, com a janela respondendo; a pausa mais longa foi de cerca de 1,6 s, ao montar o 3D e as listas.
 - **Reabrindo pelo cache:** cerca de 3,4 s, dos quais 0,3 s para ler o modelo; o resto é a montagem da cena.
 
+### Visibilidade (por vista e geral)
+
+Como a "Visibilidade/Gráficos" do Revit, o app pode ocultar:
+- **um modelo IFC:** o principal, um vínculo ou as instalações criadas no app;
+- **um tipo de elemento** (classe IFC: paredes, portas, mobiliário, tubos…);
+- **um sistema** (ex.: Esgoto, Tomadas);
+- **elementos isolados** (um trecho é ocultado inteiro).
+
+Onde se configura:
+- **Só numa vista:** nas Propriedades da vista (com nada selecionado), em *Visibilidade nesta vista*. Vale para plantas de pavimento, ampliações, cortes e vistas 3D salvas, e também para as folhas.
+- **No projeto inteiro:** em *Modelo › Visibilidade geral*. Vale para todas as vistas, folhas e o 3D (inclusive o modelo completo).
+- **Ocultar a seleção:** com elementos selecionados, o topo das Propriedades oferece *Ocultar: Elemento · Tipo · Sistema*, **nesta vista** ou **em todas as vistas**.
+- **Mostrar de novo:** marque de volta no editor de visibilidade ou use "mostrar tudo". As regras ficam salvas no projeto (.seb).
+
 ### Regras de rota das redes (formas de instalação)
 
 Nenhuma rede fica "solta" no meio do pavimento: a altura dos trechos horizontais vem da **forma de instalação**. A altura livre só vale quando o usuário escolhe "Altura livre" ou digita uma altura. As medidas ficam em *Elétrica › Infraestrutura › Instalações* e são salvas no projeto.

@@ -2660,3 +2660,34 @@ h3 {
 .height-field small {
   font-weight: 400;
 }
+
+.vis-editor {
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+.vis-editor .vis-search {
+  width: 100%;
+  margin: 4px 0 6px;
+}
+.vis-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0 0 0 14px;
+  max-height: 220px;
+  overflow: auto;
+}
+.vis-list li,
+.vis-list label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 1px 0;
+}
+.hide-bar {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

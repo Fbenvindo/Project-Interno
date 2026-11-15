@@ -17,6 +17,7 @@ import { spaceAt } from "../../../core/spaces";
 import type { ElementInfo, Vec3 } from "../../../core/types";
 import type { LoadedModel } from "../../../ifc/loadIfc";
 import type { PlanRange } from "../../../core/plan/levels";
+import { segmentElementId } from "../../../core/runs";
 import type { PointsStore } from "../locacao/usePointsStore";
 import type { PointerContext, PreviewItem, Viewer } from "../viewer/Viewer";
 import { draftDistance, isDraftId } from "../../../core/draft";
@@ -34,6 +35,8 @@ interface Props {
   cutHeight: number;
   /** Faixa de visualização (plantas de pavimento). */
   range?: PlanRange;
+  /** Ids ocultos nesta vista (visibilidade da vista e geral). */
+  hidden?: Set<number>;
   selection: number[];
   elementById: Map<number, ElementInfo>;
   onPick: (id: number | null, additive: boolean) => void;
@@ -130,11 +133,16 @@ function primsToSvg(prims: Prim[]): string {
     .join("");
 }
 
-export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick, onPickMany, dark, fitSignal, planTool, viewDef = null, projectDisciplines = [], beams, range, onMoveBy }: Props) {
+export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick, onPickMany, dark, fitSignal, planTool, viewDef = null, projectDisciplines = [], beams, range, hidden, onMoveBy }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const cs = model.coordinates;
   const level = model.storeyLevels.find((s) => s.name === storey)?.level ?? 0;
   const meshes = useMemo(() => new Map(model.meshes.map((m) => [m.expressID, m])), [model]);
+  // Visibilidade: elementos, pontos e trechos ocultos nesta vista ficam de fora do desenho.
+  const H = hidden && hidden.size ? hidden : null;
+  const elements = useMemo(() => (H ? model.elements.filter((e) => !H.has(e.expressID)) : model.elements), [model, H]);
+  const points = useMemo(() => (H ? store.points.filter((p) => !H.has(p.id)) : store.points), [store.points, H]);
+  const runs = useMemo(() => (H ? store.runs.filter((r) => !H.has(segmentElementId(r.id, 0))) : store.runs), [store.runs, H]);
 
   // Vista: trabalho (tudo) ou documentação (disciplinas do projeto + referências em meio-tom).
   const filter = useMemo(() => viewFilter(viewDef, projectDisciplines), [viewDef, projectDisciplines]);
@@ -148,21 +156,21 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   const base = useMemo(() => {
     if (isSection)
       return buildSection({
-        elements: model.elements,
+        elements,
         meshes,
         cs,
         storeyLevels: model.storeyLevels,
-        points: store.points,
-        runs: store.runs,
+        points,
+        runs,
         disciplines,
         cut: viewDef!.cut!,
         scale: SCALE,
         name: viewDef!.name,
         labels,
       });
-    return buildPlan({ elements: model.elements, meshes, cs, storeyLevels: model.storeyLevels, storey, cutHeight, points: [], runs: [], scale: SCALE, disciplines, labels, beams, range });
+    return buildPlan({ elements, meshes, cs, storeyLevels: model.storeyLevels, storey, cutHeight, points: [], runs: [], scale: SCALE, disciplines, labels, beams, range });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, meshes, cs, storey, cutHeight, range?.type, range?.base, range?.below, range?.above, isSection, isSection ? store.points : null, isSection ? store.runs : null, viewDef?.cut, SCALE, disciplines, beams?.mode, beams?.show, beams?.text]);
+  }, [model, elements, meshes, cs, storey, cutHeight, range?.type, range?.base, range?.below, range?.above, isSection, isSection ? points : null, isSection ? runs : null, viewDef?.cut, SCALE, disciplines, beams?.mode, beams?.show, beams?.text]);
   const mep = useMemo(() => {
     if (isSection) {
       const prims = store.drafts.filter((d) => d.view === viewDef!.id).flatMap((d) => draftPrims(d, SCALE));
@@ -175,13 +183,13 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
         storeyLevels: model.storeyLevels,
         storey,
         cutHeight,
-        points: store.points,
-        runs: store.runs,
+        points,
+        runs,
         scale: SCALE,
         disciplines,
         labels,
         spaces: model.spaces,
-        boxes: pullBoxes(store.runs, store.points),
+        boxes: pullBoxes(runs, points),
         drafts: store.drafts,
         draftView,
         range,
@@ -192,7 +200,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       prims = [...prims, ...store.drafts.filter((x) => !x.view && x.storey === storey).flatMap((x) => draftPrims(x, SCALE).map((q) => ({ ...q, id: undefined })))];
     return { ...d, prims };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cs, model, storey, cutHeight, range?.type, range?.base, range?.below, range?.above, store.points, store.runs, store.drafts, store.views, isSection, viewDef, SCALE, disciplines, draftView]);
+  }, [cs, model, storey, cutHeight, range?.type, range?.base, range?.below, range?.above, points, runs, store.drafts, store.views, isSection, viewDef, SCALE, disciplines, draftView]);
   const layersRef = useRef({ base: base.prims, mep: mep.prims, ready: false });
   layersRef.current = { base: base.prims, mep: mep.prims, ready: base.prims.length + mep.prims.length > 0 };
   const edges = useMemo(() => wallEdges(base.prims), [base]);

@@ -33,6 +33,7 @@ export type ToolSpec =
   | { kind: "coordenadas" }
   | { kind: "instalacoes" }
   | { kind: "perfil" }
+  | { kind: "visibilidade" }
   | { kind: "desenho"; cmd: DraftCmd }
   | { kind: "programa"; section: "tipos" | "ambientes" };
 
@@ -255,6 +256,7 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
         { key: "enquadrar", label: "Enquadrar", icon: "enquadrar", action: "enquadrar", needsModel: true },
         { key: "corte", label: "Corte", icon: "corte", action: "corte", needsModel: true },
         { key: "cores", label: "Cores", icon: "cores", action: "cores", needsModel: true },
+        { key: "visibilidade", label: "Visibilidade geral", icon: "olho", tool: { kind: "visibilidade" }, needsModel: true },
       ],
     },
     {

@@ -10,6 +10,7 @@ import { PRINT_COLOR, LAYER_PREFIX } from "./plan/drawing";
 import type { PlanLabels } from "./plan/build";
 import type { P2 } from "./plan/section";
 import type { Discipline, Vec3 } from "./types";
+import type { HideRules } from "./visibility";
 
 export type ViewSection = "trabalho" | "documentacao";
 export type ViewKind = "planta" | "ampliacao" | "corte" | "3d" | "fluxograma";
@@ -74,6 +75,8 @@ export interface ViewDef {
    * teto; abaixo tudo, acima só instalações.
    */
   range?: { below: number; above: number };
+  /** Visibilidade só nesta vista (modelos, tipos, sistemas e elementos ocultos). */
+  hidden?: HideRules;
 }
 
 export const DEFAULT_LABELS: PlanLabels = { tags: true, circuits: true, power: true, sizes: true };

@@ -412,6 +412,12 @@ const P: Record<string, ReactNode> = {
       <path d="M9 6 L12 3 L15 6 M9 18 L12 21 L15 18 M6 9 L3 12 L6 15 M18 9 L21 12 L18 15" />
     </>
   ),
+  olho: (
+    <>
+      <path d="M2 12 C5 6 9 4 12 4 C15 4 19 6 22 12 C19 18 15 20 12 20 C9 20 5 18 2 12 Z" />
+      <circle cx="12" cy="12" r="3.2" />
+    </>
+  ),
   desfazer: (
     <>
       <path d="M9 14 L4 9 L9 4" />

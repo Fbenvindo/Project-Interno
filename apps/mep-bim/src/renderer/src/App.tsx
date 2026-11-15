@@ -7,6 +7,9 @@ import type { Circuit } from "../../core/circuits";
 import type { Discipline, ElementInfo, Vec3 } from "../../core/types";
 import type { LoadedModel } from "../../ifc/loadIfc";
 import { cancelIfcLoad, loadIfcModel, warmIfcWorker } from "./ifc/ifcLoader";
+import { addToRule, elementKey, hiddenIds, MODEL_HOST, MODEL_PROJECT, type HideRules } from "../../core/visibility";
+import { HideSelectionBar, VisibilityEditor, type VisibilityCatalog } from "./shell/VisibilityEditor";
+import { linkSlotOf } from "../../ifc/federate";
 import { cacheClear, cacheList } from "./ifc/modelCache";
 import { deletedText, deleteSelection } from "./desenho/deleteSelection";
 import { desktop, openIfc } from "./platform";
@@ -116,6 +119,7 @@ const TOOL_HINT: Record<ToolSpec["kind"], string> = {
   coordenadas: "Ponto base, survey point, sistema de referência e norte do projeto",
   instalacoes: "Medidas de cada forma de instalação dos eletrodutos neste empreendimento",
   perfil: "Torres, pavimentos comuns ou por torre, alturas e cotas do empreendimento",
+  visibilidade: "O que fica oculto em todas as vistas, folhas e no 3D: modelos IFC, tipos de elemento, sistemas e elementos",
   desenho: "Siga as instruções sobre a planta · Enter conclui · Esc cancela",
 };
 
@@ -235,6 +239,24 @@ export function App() {
     [model, pointElements, runElementList, boxElementList],
   );
   const elementById = useMemo(() => new Map(allElements.map((e) => [e.expressID, e])), [allElements]);
+  // ---- Visibilidade (geral e por vista) ------------------------------------------------------
+  const slotToLink = useMemo(() => new Map(fedLinks.map((l) => [l.data.slot, l.meta.id])), [fedLinks]);
+  /** Modelo de um elemento: principal, vínculo (id) ou instalações do projeto. */
+  const modelOf = useCallback((id: number) => (id < 0 ? MODEL_PROJECT : linkSlotOf(id) ? (slotToLink.get(linkSlotOf(id)) ?? "vinculo") : MODEL_HOST), [slotToLink]);
+  const visibilityCatalog = useMemo<VisibilityCatalog>(() => {
+    const count = new Map<string, number>();
+    for (const e of allElements) count.set(modelOf(e.expressID), (count.get(modelOf(e.expressID)) ?? 0) + 1);
+    return {
+      models: [
+        { key: MODEL_HOST, label: `Modelo principal${fileName ? ` (${fileName})` : ""}`, count: count.get(MODEL_HOST) ?? 0 },
+        ...fedLinks.map((l) => ({ key: l.meta.id, label: `Vínculo: ${l.meta.name}`, count: count.get(l.meta.id) ?? 0 })),
+        { key: MODEL_PROJECT, label: "Instalações do projeto (criadas no app)", count: count.get(MODEL_PROJECT) ?? 0 },
+      ],
+      elements: allElements,
+    };
+  }, [allElements, fedLinks, modelOf, fileName]);
+  /** Ids ocultos numa vista (regras da vista e gerais). */
+  const hiddenFor = useCallback((v: ViewDef | null) => hiddenIds(allElements, modelOf, store.visibility, v?.hidden), [allElements, modelOf, store.visibility]);
   const connected = useMemo(() => connectedPairs(store.runs, store.points), [store.runs, store.points]);
   const meshById = useMemo(() => new Map(model?.meshes.map((m) => [m.expressID, m]) ?? []), [model]);
 
@@ -320,6 +342,7 @@ export function App() {
       drafts: store.drafts,
       views: store.views,
       projectDisciplines: store.disciplines,
+      hidden: hiddenFor,
     };
     const drawings = new Map<string, PlanDrawing>();
     const vps: SheetViewport[] = [];
@@ -339,7 +362,7 @@ export function App() {
     const info = { ...activeSheet.info, conteudo: activeSheet.info.conteudo || activeSheet.name };
     const result = renderSheetViews(vps, activeSheet.format, info, titleBlocks.find((t) => t.id === activeSheet.titleBlockId) ?? null, georef.trueNorthDeg);
     return { result, drawings };
-  }, [view, model, activeSheet, meshById, store.points, store.runs, store.drafts, store.views, store.disciplines, boxes, resolveView, snapshots, titleBlocks, georef.trueNorthDeg]);
+  }, [view, model, activeSheet, meshById, store.points, store.runs, store.drafts, store.views, store.disciplines, boxes, resolveView, snapshots, titleBlocks, georef.trueNorthDeg, hiddenFor]);
 
   const allSystems = useMemo(
     () =>
@@ -715,31 +738,6 @@ export function App() {
     };
   }, [openFile]);
 
-  // ---- Filtros -------------------------------------------------------------
-  const visibleElements = useMemo<ElementInfo[]>(() => {
-    if (!model) return [];
-    const q = filters.search.trim().toLowerCase();
-    // Vista 3D de documentação: só as disciplinas do projeto, as de referência e o fundo.
-    const doc3d = view === "3d" && view3dDef?.section === "documentacao" ? viewFilter(view3dDef, store.disciplines) : null;
-    return allElements.filter((e) => {
-      if (doc3d && !doc3d.show.has(e.discipline)) return false;
-      if (filters.hiddenDisciplines.has(e.discipline)) return false;
-      if (filters.hiddenStoreys.has(e.storey ?? NO_STOREY)) return false;
-      if (filters.systems.size && !e.systems.some((s) => filters.systems.has(s))) return false;
-      if (q) {
-        const hay = `${e.name} ${e.objectType ?? ""} ${getTypeLabel(e.ifcType)} ${e.ifcType} ${e.size ?? ""}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      return true;
-    });
-  }, [model, allElements, filters, view, view3dDef, store.disciplines]);
-
-  useEffect(() => {
-    if (!model) return;
-    const all = visibleElements.length === allElements.length;
-    viewerRef.current?.setVisible(all ? null : new Set(visibleElements.map((e) => e.expressID)));
-  }, [model, allElements, visibleElements]);
-
   const selectAndFrame = useCallback((ids: number[]) => {
     setSelection(ids);
     viewerRef.current?.fitTo(ids);
@@ -935,6 +933,35 @@ export function App() {
     () => (model && activeViewDef && floorPlan ? planRangeOf(activeViewDef, model.elements, model.storeyLevels) : undefined),
     [model, activeViewDef, floorPlan?.section, floorPlan?.type],
   );
+  // ---- Filtros -------------------------------------------------------------
+  const visibleElements = useMemo<ElementInfo[]>(() => {
+    if (!model) return [];
+    const q = filters.search.trim().toLowerCase();
+    // Vista 3D de documentação: só as disciplinas do projeto, as de referência e o fundo.
+    const doc3d = view === "3d" && view3dDef?.section === "documentacao" ? viewFilter(view3dDef, store.disciplines) : null;
+    const hidden = hiddenFor(view === "3d" ? view3dDef : view === "planta" ? activeViewDef : null);
+    return allElements.filter((e) => {
+      if (hidden.has(e.expressID)) return false;
+      if (doc3d && !doc3d.show.has(e.discipline)) return false;
+      if (filters.hiddenDisciplines.has(e.discipline)) return false;
+      if (filters.hiddenStoreys.has(e.storey ?? NO_STOREY)) return false;
+      if (filters.systems.size && !e.systems.some((s) => filters.systems.has(s))) return false;
+      if (q) {
+        const hay = `${e.name} ${e.objectType ?? ""} ${getTypeLabel(e.ifcType)} ${e.ifcType} ${e.size ?? ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [model, allElements, filters, view, view3dDef, store.disciplines, hiddenFor, activeViewDef]);
+
+  useEffect(() => {
+    if (!model) return;
+    const all = visibleElements.length === allElements.length;
+    viewerRef.current?.setVisible(all ? null : new Set(visibleElements.map((e) => e.expressID)));
+  }, [model, allElements, visibleElements]);
+
+  /** Ids ocultos na planta aberta (visibilidade da vista e geral). */
+  const planHidden = useMemo(() => hiddenFor(activeViewDef), [hiddenFor, activeViewDef]);
   /** Grava a vista (as plantas de documentação passam a existir no projeto na primeira alteração). */
   const updateView = useCallback(
     (def: ViewDef) => store.setViews((l) => (l.some((x) => x.id === def.id) ? l.map((x) => (x.id === def.id ? def : x)) : [...l, def]), def.id),
@@ -1435,6 +1462,18 @@ export function App() {
   };
 
   const rightPanel = () => {
+    if (tool.kind === "visibilidade")
+      return (
+        <div className="panel-body">
+          <VisibilityEditor
+            title="Visibilidade geral"
+            hint="Desmarque para ocultar em todas as vistas (plantas, cortes, 3D) e nas folhas. Para ocultar só numa vista, use as Propriedades da vista (sem nada selecionado)."
+            rules={store.visibility}
+            onChange={(r) => store.setVisibility(() => r)}
+            catalog={visibilityCatalog}
+          />
+        </div>
+      );
     if (tool.kind === "perfil")
       return (
         <PerfilPanel
@@ -1746,10 +1785,39 @@ export function App() {
                       setSnapshots((m) => new Map([...m].filter(([k]) => k !== view3dDef.id)));
                     }}
                   />
+                  {(view === "3d" ? view3dDef : activeViewDef) && (
+                    <VisibilityEditor
+                      title="Visibilidade nesta vista"
+                      hint="Desmarque para ocultar só nesta vista. O que estiver oculto na Visibilidade geral (Modelo › Visibilidade geral) some em todas."
+                      rules={(view === "3d" ? view3dDef : activeViewDef)!.hidden}
+                      onChange={(r) => {
+                        const v = (view === "3d" ? view3dDef : activeViewDef)!;
+                        updateView({ ...v, hidden: r });
+                      }}
+                      catalog={visibilityCatalog}
+                    />
+                  )}
                 </div>
               )}
               {propsOpen && !(selection.length === 0 && (view === "planta" || (view === "3d" && view3dDef))) && (
                 <div className="dock-body">
+                  {selection.length > 0 && (
+                    <HideSelectionBar
+                      count={selection.length}
+                      hasView={!!(view === "3d" ? view3dDef : view === "planta" ? activeViewDef : null)}
+                      onHide={(what, where) => {
+                        const els = selection.map((id) => elementById.get(id)).filter((e): e is ElementInfo => !!e);
+                        const values =
+                          what === "elements" ? [...new Set(selection.map(elementKey))] : what === "types" ? [...new Set(els.map((e) => e.ifcType))] : [...new Set(els.flatMap((e) => e.systems))];
+                        if (!values.length) return files.setMessage("Os elementos selecionados não têm sistema.");
+                        const target = view === "3d" ? view3dDef : view === "planta" ? activeViewDef : null;
+                        if (where === "view" && target) updateView({ ...target, hidden: addToRule(target.hidden, what, values) });
+                        else store.setVisibility((v: HideRules) => addToRule(v, what, values));
+                        setSelection([]);
+                        files.setMessage(`${what === "elements" ? "Elemento(s)" : what === "types" ? "Tipo(s)" : "Sistema(s)"} oculto(s) ${where === "view" && target ? "nesta vista" : "em todas as vistas"}. Para mostrar de novo: ${where === "view" && target ? "Propriedades da vista (sem seleção)" : "Modelo › Visibilidade geral"}.`);
+                      }}
+                    />
+                  )}
                   <ParamsPanel
                     selection={selection}
                     elementById={elementById}
@@ -2042,6 +2110,7 @@ export function App() {
                 projectDisciplines={store.disciplines}
                 beams={beamOptions(activeViewDef ?? { ...workDisplay, planType: planTypeOpen })}
                 range={planRange}
+                hidden={planHidden}
                 onMoveBy={(d) => moveRef.current(planDeltaToScene(d[0], d[1]), `${Math.hypot(d[0], d[1]).toFixed(2).replace(".", ",")} m`)}
               />
             )}

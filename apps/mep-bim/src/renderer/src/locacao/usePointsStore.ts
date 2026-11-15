@@ -12,6 +12,7 @@ import type { SheetDef } from "../../../core/viewDrawing";
 import type { Discipline } from "../../../core/types";
 import { EMPTY_CHOICES, type ProjectChoices } from "../../../core/alternatives";
 import { DEFAULT_INSTALL_SETTINGS, type InstallSettings } from "../../../core/conduits";
+import type { HideRules } from "../../../core/visibility";
 
 interface ProjectState {
   points: PlacedPoint[];
@@ -31,6 +32,8 @@ interface ProjectState {
   installSettings: InstallSettings;
   /** Perfil do empreendimento: torres, pavimentos, alturas. */
   profile: BuildingProfile | null;
+  /** Visibilidade geral (todas as vistas, folhas e o 3D). */
+  visibility: HideRules;
 }
 
 export type ProjectSnapshot = ProjectState;
@@ -45,7 +48,7 @@ interface History {
 }
 
 const LIMIT = 200;
-const EMPTY: ProjectState = { points: [], runs: [], circuits: [], program: EMPTY_PROGRAM, links: [], georef: null, drafts: [], views: [], sheets: [], disciplines: [], choices: EMPTY_CHOICES, installSettings: DEFAULT_INSTALL_SETTINGS, profile: null };
+const EMPTY: ProjectState = { points: [], runs: [], circuits: [], program: EMPTY_PROGRAM, links: [], georef: null, drafts: [], views: [], sheets: [], disciplines: [], choices: EMPTY_CHOICES, installSettings: DEFAULT_INSTALL_SETTINGS, profile: null, visibility: {} };
 
 type Patch<T> = (item: T) => Partial<T>;
 
@@ -70,7 +73,7 @@ export function usePointsStore() {
   const commit = useCallback((fn: (cur: ProjectState) => ProjectState, key: string | null = null) => {
     setH((s) => {
       const next = fn(s.present);
-      if (next.points === s.present.points && next.runs === s.present.runs && next.circuits === s.present.circuits && next.program === s.present.program && next.links === s.present.links && next.georef === s.present.georef && next.drafts === s.present.drafts && next.views === s.present.views && next.sheets === s.present.sheets && next.disciplines === s.present.disciplines && next.choices === s.present.choices && next.installSettings === s.present.installSettings && next.profile === s.present.profile) return s;
+      if (next.points === s.present.points && next.runs === s.present.runs && next.circuits === s.present.circuits && next.program === s.present.program && next.links === s.present.links && next.georef === s.present.georef && next.drafts === s.present.drafts && next.views === s.present.views && next.sheets === s.present.sheets && next.disciplines === s.present.disciplines && next.choices === s.present.choices && next.installSettings === s.present.installSettings && next.profile === s.present.profile && next.visibility === s.present.visibility) return s;
       if (key && key === s.lastKey) return { ...s, present: next, future: [] };
       return { ...s, past: [...s.past.slice(-LIMIT + 1), s.present], present: next, future: [], lastKey: key };
     });
@@ -158,6 +161,7 @@ export function usePointsStore() {
   const setSheets = useCallback((fn: (v: SheetDef[]) => SheetDef[], key: string | null = null) => commit((cur) => ({ ...cur, sheets: fn(cur.sheets) }), key && `f:${key}`), [commit]);
   const setDisciplines = useCallback((d: Discipline[]) => commit((cur) => ({ ...cur, disciplines: d })), [commit]);
   const setInstallSettings = useCallback((fn: (c: InstallSettings) => InstallSettings) => commit((cur) => ({ ...cur, installSettings: fn(cur.installSettings) }), "instalacoes"), [commit]);
+  const setVisibility = useCallback((fn: (v: HideRules) => HideRules, key: string | null = null) => commit((cur) => ({ ...cur, visibility: fn(cur.visibility ?? {}) }), key), [commit]);
   const setProfile = useCallback((fn: (p: BuildingProfile | null) => BuildingProfile | null, key: string | null = "perfil") => commit((cur) => ({ ...cur, profile: fn(cur.profile) }), key), [commit]);
   const setChoices = useCallback((fn: (c: ProjectChoices) => ProjectChoices) => commit((cur) => ({ ...cur, choices: fn(cur.choices) })), [commit]);
 
@@ -203,6 +207,7 @@ export function usePointsStore() {
       choices: h.present.choices,
       installSettings: h.present.installSettings,
       profile: h.present.profile,
+      visibility: h.present.visibility ?? {},
       canUndo: h.past.length > 0,
       canRedo: h.future.length > 0,
       dirty: h.present !== h.saved,
@@ -229,12 +234,13 @@ export function usePointsStore() {
       setChoices,
       setInstallSettings,
       setProfile,
+      setVisibility,
       reset,
       markSaved,
       undo,
       redo,
     }),
-    [h, add, update, remove, addRuns, updateRuns, removeRuns, addCircuits, updateCircuits, removeCircuits, assignPoints, mutate, setProgram, setLinks, setGeoref, setDrafts, setViews, setSheets, setDisciplines, setChoices, setInstallSettings, setProfile, reset, markSaved, undo, redo],
+    [h, add, update, remove, addRuns, updateRuns, removeRuns, addCircuits, updateCircuits, removeCircuits, assignPoints, mutate, setProgram, setLinks, setGeoref, setDrafts, setViews, setSheets, setDisciplines, setChoices, setInstallSettings, setProfile, setVisibility, reset, markSaved, undo, redo],
   );
 }
 

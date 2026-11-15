@@ -11,7 +11,7 @@ import type { PlanDrawing } from "./plan/drawing";
 import { buildSection } from "./plan/elevation";
 import type { SheetInfo, SheetFormat } from "./plan/sheet";
 import type { PlacedPoint, StoreyLevel } from "./points";
-import type { Run } from "./runs";
+import { segmentElementId, type Run } from "./runs";
 import type { Space } from "./spaces";
 import type { Discipline, ElementInfo } from "./types";
 import { applyHalftone, beamOptions, clipPrims, DEFAULT_LABELS, filterLegend, parseFloorPlanId, rangeOf, viewFilter, viewMarkers, type ViewDef } from "./views";
@@ -30,9 +30,24 @@ export interface ModelContext {
   views: ViewDef[];
   /** Disciplinas do projeto (vazio = todas as de instalações). */
   projectDisciplines: Discipline[];
+  /** Ids ocultos na vista (visibilidade da vista e geral). */
+  hidden?: (view: ViewDef) => Set<number>;
 }
 
-export function viewDrawing(view: ViewDef, ctx: ModelContext): PlanDrawing | null {
+/** Contexto sem os elementos, pontos e trechos ocultos na vista. */
+function visibleContext(view: ViewDef, ctx: ModelContext): ModelContext {
+  const h = ctx.hidden?.(view);
+  if (!h?.size) return ctx;
+  return {
+    ...ctx,
+    elements: ctx.elements.filter((e) => !h.has(e.expressID)),
+    points: ctx.points.filter((p) => !h.has(p.id)),
+    runs: ctx.runs.filter((r) => !h.has(segmentElementId(r.id, 0))),
+  };
+}
+
+export function viewDrawing(view: ViewDef, full: ModelContext): PlanDrawing | null {
+  const ctx = visibleContext(view, full);
   if (view.kind === "fluxograma") {
     if (!view.flow) return null;
     const prims = flowPrims(view.flow, { legend: true });
