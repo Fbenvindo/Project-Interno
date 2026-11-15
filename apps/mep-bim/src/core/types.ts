@@ -63,4 +63,8 @@ export interface ElementInfo {
   origin?: "ifc" | "locacao";
   /** Caixa orientada exata (elementos criados no app), para interferências precisas. */
   obb?: OBB;
+  /** Portas: origem e eixos da colocação no IFC (cena): x ao longo da parede, y para onde abre. */
+  frame?: { o: Vec3; x: Vec3; y: Vec3 };
+  /** Portas: tipo de abertura do IFC (ex.: SINGLE_SWING_LEFT, DOUBLE_DOOR_SINGLE_SWING). */
+  operation?: string | null;
 }

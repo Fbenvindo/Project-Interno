@@ -73,3 +73,40 @@ describe("planta de piso × planta de teto no modelo de exemplo", () => {
     expect(outlets.every((id) => piso.has(id) && !teto.has(id))).toBe(true);
   });
 });
+
+describe("projeção de cima (mobiliário)", () => {
+  it("mesa: o contorno do tampo aparece (o corte na meia altura só pegava os pés)", async () => {
+    const { topOutline, cutMesh, chainSegments } = await import("../src/core/plan/section");
+    // Caixa (cena, Y para cima) com faces por vértices próprios, como as do IFC.
+    const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number) => {
+      const c = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]];
+      const faces = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [2, 3, 7, 6], [1, 2, 6, 5], [0, 4, 7, 3]];
+      const pos: number[] = [];
+      const idx: number[] = [];
+      for (const f of faces) {
+        const b = pos.length / 3;
+        for (const k of f) pos.push(...c[k]);
+        idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+      }
+      return { pos, idx };
+    };
+    const parts = [box(0, 1.6, 0.72, 0.75, 0, 0.8), box(0.05, 0.1, 0, 0.72, 0.05, 0.1), box(1.5, 1.55, 0, 0.72, 0.05, 0.1), box(0.05, 0.1, 0, 0.72, 0.7, 0.75), box(1.5, 1.55, 0, 0.72, 0.7, 0.75)];
+    const pos: number[] = [];
+    const idx: number[] = [];
+    for (const p of parts) {
+      const b = pos.length / 3;
+      pos.push(...p.pos);
+      idx.push(...p.idx.map((i) => i + b));
+    }
+    const P = new Float32Array(pos);
+    const I = new Uint32Array(idx);
+    const mid = cutMesh(P, I, 0.375);
+    const xs = (segs: { a: number[]; b: number[] }[]) => segs.flatMap((s) => [s.a[0], s.b[0]]);
+    expect(Math.max(...xs(mid)) - Math.min(...xs(mid))).toBeLessThan(1.6); // só os pés
+    const top = topOutline(P, I);
+    const chains = chainSegments(top.map((s) => [[s.a[0], s.a[2]], [s.b[0], s.b[2]]] as [[number, number], [number, number]]), 1e-3);
+    // O tampo (1,60 × 0,80) aparece como um contorno fechado.
+    const tampo = chains.find((c) => c.closed && Math.max(...c.points.map((p) => p[0])) - Math.min(...c.points.map((p) => p[0])) > 1.55);
+    expect(tampo).toBeTruthy();
+  });
+});

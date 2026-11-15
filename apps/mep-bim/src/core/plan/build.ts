@@ -8,7 +8,7 @@ import type { PlacedPoint, StoreyLevel } from "../points";
 import { runFittings, runSegments, RUN_TYPE_BY_ID, segmentElementId, storeyProbeY, type Run } from "../runs";
 import type { Discipline, ElementInfo, Vec3 } from "../types";
 import { LAYER_PREFIX, PEN, PRINT_COLOR, type LegendItem, type PlanDrawing, type Prim, type SymbolPrim } from "./drawing";
-import { chainSegments, cutMesh, type P2 } from "./section";
+import { chainSegments, cutMesh, topOutline, type P2 } from "./section";
 import { centroid, pointInPolygon, type Space } from "../spaces";
 import { assemblySymbol, LEGEND_LINE, RISER_DOWN, RISER_UP, symbolFor, TEE_MARK } from "./symbols";
 import { assemblyKey } from "../devices";
@@ -149,7 +149,8 @@ export function buildPlan(input: PlanInput): PlanDrawing {
       y = (a + b) / 2;
       projected = true;
     }
-    const segs = cutMesh(mesh.positions, mesh.indices, y).map(({ a, b }): [P2, P2] => [plan(a), plan(b)]);
+    // Em projeção: o contorno visto de cima (tampo da mesa, assento da cadeira…); cortado: a seção.
+    const segs = (projected ? topOutline(mesh.positions, mesh.indices) : cutMesh(mesh.positions, mesh.indices, y)).map(({ a, b }): [P2, P2] => [plan(a), plan(b)]);
     if (!segs.length) continue;
     const prefix = LAYER_PREFIX[e.discipline];
     // Layout e equipamentos da arquitetura (inclusive louças e metais): cinza, sempre.
@@ -171,6 +172,8 @@ export function buildPlan(input: PlanInput): PlanDrawing {
         id: e.expressID,
       });
     }
+    // Portas: folha aberta a 90° e arco de abertura (não nas plantas de teto).
+    if (e.ifcType === "IFCDOOR" && e.frame && R?.type !== "teto") prims.push(...doorSwing(e, mesh.positions, plan));
   }
 
   // ---- Vigas (projeção tracejada, verde com 50% de transparência) ---------------------------
@@ -422,6 +425,57 @@ export function buildPlan(input: PlanInput): PlanDrawing {
   prims.sort((a, b) => rank(a.layer) - rank(b.layer));
 
   return { prims, bounds: boundsOf(prims), legend: sortLegend([...legend.values()]), scale, storey, cutHeight: input.cutHeight };
+}
+
+/**
+ * Folha e arco de abertura da porta, pela orientação da porta no IFC (x ao longo da parede, y
+ * para o lado em que ela abre) e pelo tipo de abertura (OperationType: à esquerda, à direita,
+ * folha dupla; de correr, pivotante e outras ficam sem arco).
+ */
+function doorSwing(e: ElementInfo, positions: Float32Array, plan: (v: Vec3) => P2): Prim[] {
+  const f = e.frame!;
+  const nx = Math.hypot(...f.x) || 1;
+  const ny = Math.hypot(...f.y) || 1;
+  const X: Vec3 = [f.x[0] / nx, f.x[1] / nx, f.x[2] / nx];
+  const Y: Vec3 = [f.y[0] / ny, f.y[1] / ny, f.y[2] / ny];
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (let i = 0; i < positions.length; i += 3) {
+    const d: Vec3 = [positions[i] - f.o[0], positions[i + 1] - f.o[1], positions[i + 2] - f.o[2]];
+    const lx = d[0] * X[0] + d[1] * X[1] + d[2] * X[2];
+    const ly = d[0] * Y[0] + d[1] * Y[1] + d[2] * Y[2];
+    if (lx < x0) x0 = lx;
+    if (lx > x1) x1 = lx;
+    if (ly > y1) y1 = ly;
+    if (ly < y0) y0 = ly;
+  }
+  const width = x1 - x0;
+  const op = (e.operation ?? "").toUpperCase();
+  if (!(width > 0.4 && width < 4) || /SLIDING|FOLDING|REVOLVING|ROLLINGUP|SWING_FIXED|LIFTING/.test(op)) return [];
+  const at = (lx: number, ly: number): P2 => plan([f.o[0] + X[0] * lx + Y[0] * ly, f.o[1], f.o[2] + X[2] * lx + Y[2] * ly]);
+  // side: 1 abre para +y (lado da abertura da porta), −1 para o outro lado (folhas opostas).
+  const opposite = /OPPOSITE/.test(op);
+  const leaves: { hinge: number; dir: 1 | -1; w: number; side: 1 | -1 }[] = /DOUBLE/.test(op)
+    ? [
+        { hinge: x0, dir: 1, w: width / 2, side: opposite && /RIGHT/.test(op) ? -1 : 1 },
+        { hinge: x1, dir: -1, w: width / 2, side: opposite && !/RIGHT/.test(op) ? -1 : 1 },
+      ]
+    : [/RIGHT/.test(op) ? { hinge: x1, dir: -1, w: width, side: 1 } : { hinge: x0, dir: 1, w: width, side: 1 }];
+  const out: Prim[] = [];
+  const base = { layer: "ARQ-PORTAS", color: "#333333", id: e.expressID };
+  for (const l of leaves) {
+    // Folha aberta (4 cm de espessura, para dentro do vão) e o arco da ponta da folha ao batente.
+    const t = 0.04 * l.dir;
+    const face = l.side === 1 ? y1 : y0;
+    const s = l.side;
+    out.push({ t: "poly", pts: [at(l.hinge, face), at(l.hinge, face + s * l.w), at(l.hinge + t, face + s * l.w), at(l.hinge + t, face)], closed: true, weight: PEN.porta, ...base });
+    const arc: P2[] = [];
+    for (let k = 0; k <= 16; k++) {
+      const a = ((Math.PI / 2) * k) / 16;
+      arc.push(at(l.hinge + l.dir * l.w * Math.sin(a), face + s * l.w * Math.cos(a)));
+    }
+    out.push({ t: "poly", pts: arc, closed: false, weight: PEN.vista, ...base });
+  }
+  return out;
 }
 
 /** Linhas da família reduzidas para caber no quadro da legenda (≈ 8 × 6 mm). */

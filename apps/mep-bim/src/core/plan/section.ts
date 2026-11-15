@@ -32,6 +32,37 @@ export function cutMesh(positions: Float32Array, indices: Uint32Array, cutY: num
   return out;
 }
 
+/**
+ * Projeção de cima (planta): contorno das faces voltadas para cima, ou seja, as arestas de
+ * faces "para cima" que não são compartilhadas com outra face "para cima" (bordas do tampo da
+ * mesa, do assento e do encosto da cadeira…). Os vértices são unidos por posição (1 mm).
+ */
+export function topOutline(positions: Float32Array, indices: ArrayLike<number>): CutSegment[] {
+  const key = (i: number) => `${Math.round(positions[i * 3] * 1000)},${Math.round(positions[i * 3 + 1] * 1000)},${Math.round(positions[i * 3 + 2] * 1000)}`;
+  const edges = new Map<string, { a: number; b: number; up: number }>();
+  for (let t = 0; t < indices.length; t += 3) {
+    const i0 = indices[t], i1 = indices[t + 1], i2 = indices[t + 2];
+    const ax = positions[i1 * 3] - positions[i0 * 3], ay = positions[i1 * 3 + 1] - positions[i0 * 3 + 1], az = positions[i1 * 3 + 2] - positions[i0 * 3 + 2];
+    const bx = positions[i2 * 3] - positions[i0 * 3], by = positions[i2 * 3 + 1] - positions[i0 * 3 + 1], bz = positions[i2 * 3 + 2] - positions[i0 * 3 + 2];
+    const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+    const len = Math.hypot(nx, ny, nz);
+    if (!len || Math.abs(ny / len) < 0.25) continue;
+    // Faces voltadas para baixo também contam (malhas com a orientação invertida).
+    for (const [p, q] of [[i0, i1], [i1, i2], [i2, i0]]) {
+      const kp = key(p), kq = key(q);
+      if (kp === kq) continue;
+      const k = kp < kq ? `${kp}|${kq}` : `${kq}|${kp}`;
+      const e = edges.get(k);
+      if (e) e.up++;
+      else edges.set(k, { a: p, b: q, up: 1 });
+    }
+  }
+  const v = (i: number): Vec3 => [positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]];
+  const out: CutSegment[] = [];
+  for (const e of edges.values()) if (e.up === 1) out.push({ a: v(e.a), b: v(e.b) });
+  return out;
+}
+
 export interface Chain {
   points: P2[];
   closed: boolean;

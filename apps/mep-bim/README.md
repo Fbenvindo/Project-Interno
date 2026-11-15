@@ -255,7 +255,8 @@ Fora de qualquer comando, o app está sempre em **Selecionar**, em todas as vist
   | Corte inferior (padrão) | 1,00 m: só as instalações abaixo do piso | 1,50 m: todos os elementos e as instalações abaixo da laje (o plano de corte fica aqui) |
   | Corte superior (padrão) | 1,50 m: todos os elementos acima do piso (o plano de corte fica aqui) | 0,20 m: só as instalações acima da face inferior da laje |
 
-  Paredes e pilares cruzados pelo plano de corte saem hachurados; o resto dentro da faixa sai em projeção (contorno cinza). Pontos e trechos entram pela altura, inclusive os de outro pavimento junto à laje.
+  Paredes e pilares cruzados pelo plano de corte saem hachurados. O que está dentro da faixa sem cruzar o corte sai em projeção vista de cima (contorno cinza): tampo das mesas, assento e encosto das cadeiras, bancadas. Pontos e trechos entram pela altura, inclusive os de outro pavimento junto à laje.
+- **Portas** (plantas de piso): folha aberta a 90° e arco de abertura, pela orientação da porta no IFC e pelo tipo de abertura (à esquerda, à direita, folha dupla, folhas opostas). Portas de correr, pivotantes e de enrolar ficam sem arco.
 - **Trabalho:** tudo visível (modelo, vínculos e todas as disciplinas).
 - **Documentação:** só as disciplinas do projeto. Outras disciplinas podem entrar como informação, em meio-tom. A arquitetura/estrutura fica como fundo (em meio-tom, por padrão). É isto que vai para as folhas. Cada pavimento tem a sua planta de documentação, e um botão na barra de vistas alterna entre *Trabalho* e *Documentação*.
 - **Ampliações** (Geral › Ampliação): retângulo da planta em escala maior, 1:25 por padrão.

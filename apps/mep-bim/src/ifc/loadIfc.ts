@@ -25,7 +25,7 @@ import type { StoreyLevel } from "../core/points";
 import { deriveLength, deriveSize, systemsFromProps } from "../core/quantities";
 import { chainSegments, cutMesh, type P2 } from "../core/plan/section";
 import { ccw, polygonArea, type Space } from "../core/spaces";
-import type { BBox, ElementInfo, PropertyGroup, PropertyValue } from "../core/types";
+import type { BBox, ElementInfo, PropertyGroup, PropertyValue, Vec3 } from "../core/types";
 import { compoundToDegrees, EMPTY_GEOREF, type Georef } from "../core/georef";
 import { MeshChunkBuilder, meshesOfChunks, type MeshChunk, type MeshPart } from "./meshChunks";
 
@@ -218,6 +218,68 @@ export function extractIfc(api: IfcAPI, input: Uint8Array | { bytes: Uint8Array 
     }
     return any ? z : null;
   };
+  /** Colocação completa (origem e eixos, coordenadas e unidade do IFC) pela cadeia de IfcLocalPlacement. */
+  type Frame = { t: Vec3; x: Vec3; y: Vec3; z: Vec3 };
+  const nrm = (v: Vec3): Vec3 => {
+    const l = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / l, v[1] / l, v[2] / l];
+  };
+  const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const nums = (id: unknown, attr: string): Vec3 | null => {
+    if (id == null) return null;
+    const l = line(id as number)[attr];
+    return Array.isArray(l) ? ([0, 1, 2].map((k) => Number(val(l[k])) || 0) as Vec3) : null;
+  };
+  const placementFrame = (pid: number | null | undefined): Frame | null => {
+    const chain: Frame[] = [];
+    let cur = pid;
+    for (let guard = 0; cur != null && guard < 30; guard++) {
+      try {
+        const lp = line(cur);
+        const rel = val(lp.RelativePlacement);
+        const r = rel != null ? line(rel) : null;
+        const t = r ? nums(val(r.Location), "Coordinates") ?? [0, 0, 0] : [0, 0, 0];
+        const z = nrm((r && nums(val(r.Axis), "DirectionRatios")) ?? [0, 0, 1]);
+        let x = (r && nums(val(r.RefDirection), "DirectionRatios")) ?? [1, 0, 0];
+        // RefDirection projetado no plano perpendicular a z.
+        const dz = x[0] * z[0] + x[1] * z[1] + x[2] * z[2];
+        x = nrm([x[0] - dz * z[0], x[1] - dz * z[1], x[2] - dz * z[2]]);
+        chain.push({ t: t as Vec3, x, y: cross(z, x), z });
+        cur = val(lp.PlacementRelTo);
+      } catch {
+        break;
+      }
+    }
+    if (!chain.length) return null;
+    // Compõe do pai para o filho: mundo = pai ∘ filho.
+    let w = chain[chain.length - 1];
+    for (let i = chain.length - 2; i >= 0; i--) {
+      const c = chain[i];
+      const rot = (v: Vec3): Vec3 => [w.x[0] * v[0] + w.y[0] * v[1] + w.z[0] * v[2], w.x[1] * v[0] + w.y[1] * v[1] + w.z[1] * v[2], w.x[2] * v[0] + w.y[2] * v[1] + w.z[2] * v[2]];
+      const tt = rot(c.t);
+      w = { t: [w.t[0] + tt[0], w.t[1] + tt[1], w.t[2] + tt[2]], x: rot(c.x), y: rot(c.y), z: rot(c.z) };
+    }
+    return w;
+  };
+  /** Porta: origem e eixos na cena e o tipo de abertura (da porta ou do seu tipo/estilo). */
+  const doorInfo = (id: number, data: any): Pick<ElementInfo, "frame" | "operation"> => {
+    try {
+      const f = placementFrame(val(data.ObjectPlacement));
+      if (!f) return {};
+      const k = unitToMeters;
+      const o = coordinates.ifcToWorld([f.t[0] * k, f.t[1] * k, f.t[2] * k]);
+      const toScene = (d: Vec3): Vec3 => {
+        const q = coordinates.ifcToWorld([f.t[0] * k + d[0], f.t[1] * k + d[1], f.t[2] * k + d[2]]);
+        return [q[0] - o[0], q[1] - o[1], q[2] - o[2]];
+      };
+      let operation: string | null = val(data.OperationType) ?? null;
+      const tid = typeObjectOf.get(id);
+      if (!operation && tid != null) operation = val(line(tid).OperationType) ?? null;
+      return { frame: { o, x: toScene(f.x), y: toScene(f.y) }, operation: operation ? String(operation) : null };
+    } catch {
+      return {};
+    }
+  };
   const storeyInfo = new Map<number, { name: string; elevation: number }>();
   for (const sid of idsOf(IFCBUILDINGSTOREY)) {
     const s = line(sid);
@@ -354,6 +416,7 @@ export function extractIfc(api: IfcAPI, input: Uint8Array | { bytes: Uint8Array 
       bbox,
       length: category === "segmento" ? deriveLength(props, unitToMeters, bbox) : null,
       size: isBuildingElement ? null : deriveSize(props, unitToMeters),
+      ...(ifcType === "IFCDOOR" ? doorInfo(id, data) : {}),
     });
   }
 
