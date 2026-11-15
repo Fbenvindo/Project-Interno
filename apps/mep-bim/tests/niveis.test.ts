@@ -110,3 +110,17 @@ describe("projeção de cima (mobiliário)", () => {
     expect(tampo).toBeTruthy();
   });
 });
+
+describe("portas: arco só nas que abrem", () => {
+  it("venezianas, janelas e portas elevadas ficam sem arco; o usuário decide", async () => {
+    const { isSwingDoor } = await import("../src/core/plan/build");
+    const d = (name: string, minY = 0) => ({ expressID: 1, globalId: "g", ifcType: "IFCDOOR", name, objectType: null, predefinedType: null, storey: "T", systems: [], discipline: "arquitetura", category: "outro", bbox: { min: [0, minY, 0], max: [1, minY + 2.1, 0.2] }, length: null, size: null }) as never;
+    expect(isSwingDoor(d("Porta de giro 80x210"), 0)).toBe(true);
+    expect(isSwingDoor(d("OCA_POR_ABRIR 2 FOLHAS VENEZIANAS:1,20 x 2,50m"), 0)).toBe(true);
+    expect(isSwingDoor(d("Veneziana fachada 120"), 0)).toBe(false);
+    expect(isSwingDoor(d("Janela de correr"), 0)).toBe(false);
+    expect(isSwingDoor(d("Porta alta", 1.1), 0)).toBe(false);
+    expect(isSwingDoor(d("Veneziana fachada 120"), 0, { force: true })).toBe(true);
+    expect(isSwingDoor(d("Porta de giro 80x210"), 0, { none: true })).toBe(false);
+  });
+});

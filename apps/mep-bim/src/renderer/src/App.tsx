@@ -343,6 +343,7 @@ export function App() {
       views: store.views,
       projectDisciplines: store.disciplines,
       hidden: hiddenFor,
+      doors: store.doors,
     };
     const drawings = new Map<string, PlanDrawing>();
     const vps: SheetViewport[] = [];
@@ -362,7 +363,7 @@ export function App() {
     const info = { ...activeSheet.info, conteudo: activeSheet.info.conteudo || activeSheet.name };
     const result = renderSheetViews(vps, activeSheet.format, info, titleBlocks.find((t) => t.id === activeSheet.titleBlockId) ?? null, georef.trueNorthDeg);
     return { result, drawings };
-  }, [view, model, activeSheet, meshById, store.points, store.runs, store.drafts, store.views, store.disciplines, boxes, resolveView, snapshots, titleBlocks, georef.trueNorthDeg, hiddenFor]);
+  }, [view, model, activeSheet, meshById, store.points, store.runs, store.drafts, store.views, store.disciplines, boxes, resolveView, snapshots, titleBlocks, georef.trueNorthDeg, hiddenFor, store.doors]);
 
   const allSystems = useMemo(
     () =>
@@ -2111,6 +2112,7 @@ export function App() {
                 beams={beamOptions(activeViewDef ?? { ...workDisplay, planType: planTypeOpen })}
                 range={planRange}
                 hidden={planHidden}
+                doors={store.doors}
                 onMoveBy={(d) => moveRef.current(planDeltaToScene(d[0], d[1]), `${Math.hypot(d[0], d[1]).toFixed(2).replace(".", ",")} m`)}
               />
             )}

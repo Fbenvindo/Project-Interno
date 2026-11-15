@@ -59,6 +59,19 @@ export interface PlanInput {
    * corte em `cutHeight` com o pavimento inteiro.
    */
   range?: PlanRange;
+  /** Ajustes de portas feitos no projeto (por GlobalId). */
+  doors?: Record<string, DoorOverride>;
+  /** Escrever nome e área dos ambientes (padrão: sim; a camada do modelo não escreve). */
+  roomLabels?: boolean;
+}
+
+/** Ajuste de uma porta: inverter o lado da abertura, inverter a dobradiça ou não desenhar o arco. */
+export interface DoorOverride {
+  flipSide?: boolean;
+  flipHand?: boolean;
+  none?: boolean;
+  /** Desenhar o arco mesmo onde o app não desenharia (nome de veneziana, peitoril). */
+  force?: boolean;
 }
 
 export interface BeamOptions {
@@ -173,7 +186,7 @@ export function buildPlan(input: PlanInput): PlanDrawing {
       });
     }
     // Portas: folha aberta a 90° e arco de abertura (não nas plantas de teto).
-    if (e.ifcType === "IFCDOOR" && e.frame && R?.type !== "teto") prims.push(...doorSwing(e, mesh.positions, plan));
+    if (e.ifcType === "IFCDOOR" && e.frame && R?.type !== "teto") prims.push(...doorSwing(e, mesh.positions, plan, input.spaces ?? [], input.doors?.[e.globalId], R ? R.base : level));
   }
 
   // ---- Vigas (projeção tracejada, verde com 50% de transparência) ---------------------------
@@ -402,7 +415,7 @@ export function buildPlan(input: PlanInput): PlanDrawing {
       .filter((b): b is NonNullable<typeof b> => b != null);
     const free = (minX: number, minY: number, maxX: number, maxY: number) =>
       !mepBoxes.some((b) => b.min[0] < maxX && b.max[0] > minX && b.min[1] < maxY && b.max[1] > minY);
-    for (const sp of input.spaces ?? []) {
+    for (const sp of input.roomLabels === false ? [] : (input.spaces ?? [])) {
       if (sp.storey !== storey) continue;
       const h = 2.5 * m;
       const title = (sp.name || sp.number).toUpperCase();
@@ -432,7 +445,22 @@ export function buildPlan(input: PlanInput): PlanDrawing {
  * para o lado em que ela abre) e pelo tipo de abertura (OperationType: à esquerda, à direita,
  * folha dupla; de correr, pivotante e outras ficam sem arco).
  */
-function doorSwing(e: ElementInfo, positions: Float32Array, plan: (v: Vec3) => P2): Prim[] {
+/** Elementos exportados como porta que não abrem (venezianas, janelas, grelhas, brises, alçapões). */
+export const NOT_A_SWING_DOOR = /VENEZIAN|JANELA|WINDOW|GRELHA|GRADE|BRISE|LOUVER|VENTIL|ALÇAP|ALCAP|SHAFT|VISITA|FIXA|FIXED/i;
+
+/** A porta leva arco? (não para venezianas e afins, nem para as que não chegam ao piso). */
+export function isSwingDoor(e: ElementInfo, floorY: number | null, ov?: DoorOverride): boolean {
+  if (ov?.none) return false;
+  if (ov?.force) return true;
+  const text = `${e.name} ${e.objectType ?? ""} ${e.typeObjectName ?? ""}`;
+  // "Porta de abrir … venezianas" é porta; "Veneziana" sozinha (fachada) não.
+  if (NOT_A_SWING_DOOR.test(text) && !/PORTA|POR_ABRIR|DE ABRIR|DOOR/i.test(text)) return false;
+  if (floorY != null && e.bbox && e.bbox.min[1] > floorY + 0.3) return false;
+  return true;
+}
+
+function doorSwing(e: ElementInfo, positions: Float32Array, plan: (v: Vec3) => P2, spaces: Space[], ov: DoorOverride | undefined, levelY: number | null = null): Prim[] {
+  if (!isSwingDoor(e, levelY, ov)) return [];
   const f = e.frame!;
   const nx = Math.hypot(...f.x) || 1;
   const ny = Math.hypot(...f.y) || 1;
@@ -452,14 +480,25 @@ function doorSwing(e: ElementInfo, positions: Float32Array, plan: (v: Vec3) => P
   const op = (e.operation ?? "").toUpperCase();
   if (!(width > 0.4 && width < 4) || /SLIDING|FOLDING|REVOLVING|ROLLINGUP|SWING_FIXED|LIFTING/.test(op)) return [];
   const at = (lx: number, ly: number): P2 => plan([f.o[0] + X[0] * lx + Y[0] * ly, f.o[1], f.o[2] + X[2] * lx + Y[2] * ly]);
-  // side: 1 abre para +y (lado da abertura da porta), −1 para o outro lado (folhas opostas).
+  // Lado da abertura: para dentro do ambiente (IfcSpace). Porta de fachada (ambiente só de um
+  // lado) abre para o ambiente; entre dois ambientes (ou sem ambientes), vale o lado do IFC (+y).
+  const mid = (x0 + x1) / 2;
+  const floorY = e.bbox?.min[1] ?? f.o[1];
+  const inRoom = (p: P2) => spaces.some((sp) => Math.abs(sp.floorY - floorY) < 1.5 && pointInPolygon(p, sp.polygon));
+  const plus = inRoom(at(mid, y1 + 0.6));
+  const minus = inRoom(at(mid, y0 - 0.6));
+  let sideIn: 1 | -1 = plus || !minus ? 1 : -1;
+  if (ov?.flipSide) sideIn = sideIn === 1 ? -1 : 1;
+  const other = (s: 1 | -1): 1 | -1 => (s === 1 ? -1 : 1);
+  // Folhas: dobradiça à esquerda (x0) ou à direita (x1), invertida pelo ajuste da porta.
+  const right = /RIGHT/.test(op) !== !!ov?.flipHand;
   const opposite = /OPPOSITE/.test(op);
   const leaves: { hinge: number; dir: 1 | -1; w: number; side: 1 | -1 }[] = /DOUBLE/.test(op)
     ? [
-        { hinge: x0, dir: 1, w: width / 2, side: opposite && /RIGHT/.test(op) ? -1 : 1 },
-        { hinge: x1, dir: -1, w: width / 2, side: opposite && !/RIGHT/.test(op) ? -1 : 1 },
+        { hinge: x0, dir: 1, w: width / 2, side: opposite && right ? other(sideIn) : sideIn },
+        { hinge: x1, dir: -1, w: width / 2, side: opposite && !right ? other(sideIn) : sideIn },
       ]
-    : [/RIGHT/.test(op) ? { hinge: x1, dir: -1, w: width, side: 1 } : { hinge: x0, dir: 1, w: width, side: 1 }];
+    : [right ? { hinge: x1, dir: -1, w: width, side: sideIn } : { hinge: x0, dir: 1, w: width, side: sideIn }];
   const out: Prim[] = [];
   const base = { layer: "ARQ-PORTAS", color: "#333333", id: e.expressID };
   for (const l of leaves) {

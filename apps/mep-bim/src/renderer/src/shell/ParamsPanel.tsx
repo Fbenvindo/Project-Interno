@@ -20,6 +20,7 @@ import type { PointsStore } from "../locacao/usePointsStore";
 import { changeRunsHeight, networkAtLevel, runLevel } from "../../../core/runHeight";
 import { storeyScheme } from "../../../core/plan/levels";
 import { LevelScheme } from "./LevelScheme";
+import { isSwingDoor, type DoorOverride } from "../../../core/plan/build";
 
 interface Props {
   selection: number[];
@@ -247,6 +248,7 @@ export function ParamsPanel({ selection, elementById, store, model, getPropertie
         <tbody>
           {only === "ponto" && <PointRows points={shown.map((i) => i.point!)} store={store} levels={levels} resolveCeiling={resolveCeiling} />}
           {only === "trecho" && <RunRows runs={shown.map((i) => i.run!)} store={store} model={model} slabAt={slabAt} />}
+          {only === "ifc" && shown.length === 1 && shown[0].el!.ifcType === "IFCDOOR" && <DoorRows el={shown[0].el!} store={store} />}
           {(only === "ifc" || only === "caixa") && <ElementRows els={shown.map((i) => i.el!)} getProperties={getProperties} />}
           {!only && <MixedRows items={shown} />}
           {shown.length === 1 && <CoordRows item={shown[0]} model={model} georef={georef} />}
@@ -787,6 +789,41 @@ function RunRows({
         </tr>
       )}
     </>
+  );
+}
+
+// ---- Portas do IFC: abertura na planta ----------------------------------------------------------
+
+function DoorRows({ el, store }: { el: ElementInfo; store: PointsStore }) {
+  const ov = store.doors[el.globalId] ?? {};
+  const auto = isSwingDoor(el, null, {});
+  const set = (patch: Partial<DoorOverride>) =>
+    store.setDoors((d) => {
+      const next = { ...(d[el.globalId] ?? {}), ...patch };
+      const out = { ...d };
+      if (!next.flipSide && !next.flipHand && !next.none && !next.force) delete out[el.globalId];
+      else out[el.globalId] = next;
+      return out;
+    });
+  return (
+    <Group title="Abertura na planta">
+      <Row label="Arco de abertura">
+        <label className="small">
+          <input type="checkbox" checked={!ov.none && (auto || !!ov.force)} onChange={(e) => set(e.target.checked ? { none: false, force: !auto } : { none: true, force: false })} />{" "}
+          {ov.none ? "sem arco (definido por você)" : auto || ov.force ? "desenhar" : "sem arco (veneziana, janela ou peitoril)"}
+        </label>
+      </Row>
+      <Row label="Lado da abertura">
+        <button className="btn small" disabled={ov.none} onClick={() => set({ flipSide: !ov.flipSide })}>
+          Inverter lado{ov.flipSide ? " ✓" : ""}
+        </button>
+      </Row>
+      <Row label="Dobradiça">
+        <button className="btn small" disabled={ov.none} onClick={() => set({ flipHand: !ov.flipHand })}>
+          Inverter dobradiça{ov.flipHand ? " ✓" : ""}
+        </button>
+      </Row>
+    </Group>
   );
 }
 

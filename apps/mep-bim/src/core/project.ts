@@ -9,6 +9,7 @@ import type { Vec3 } from "./types";
 import { EMPTY_PROGRAM, type ProgramState } from "./program";
 import type { LinkMeta } from "../ifc/federate";
 import { isEmptyRules, type HideRules } from "./visibility";
+import type { DoorOverride } from "./plan/build";
 import type { GeorefSettings } from "./georef";
 import { syncDraftIds, type DraftEntity } from "./draft";
 import { migrateViews, type ViewDef } from "./views";
@@ -52,6 +53,8 @@ export interface ProjectData {
   profile?: BuildingProfile | null;
   /** Visibilidade geral (modelos, tipos, sistemas e elementos ocultos em todas as vistas). */
   visibility?: HideRules;
+  /** Ajustes das portas do IFC (por GlobalId). */
+  doors?: Record<string, DoorOverride>;
 }
 
 interface StoredCircuit {
@@ -97,6 +100,7 @@ export interface ProjectFile extends LocacaoFile {
   instalacoes?: InstallSettings;
   empreendimento?: BuildingProfile;
   visibilidade?: HideRules;
+  portas?: Record<string, DoorOverride>;
   variantes?: Record<string, string>;
   vinculos?: { id: string; nome: string; caminho: string | null; disciplina: LinkMeta["discipline"]; visivel: boolean; transparente: boolean; alinhamento?: LinkMeta["align"] }[];
 }
@@ -144,6 +148,7 @@ export function serializeProject(data: ProjectData, cs: CoordinateSystem, modelN
     ...(data.installSettings ? { instalacoes: data.installSettings } : {}),
     ...(data.profile?.floors.length || (data.profile?.towers.length ?? 0) > 1 ? { empreendimento: data.profile! } : {}),
     ...(!isEmptyRules(data.visibility) ? { visibilidade: data.visibility } : {}),
+    ...(data.doors && Object.keys(data.doors).length ? { portas: data.doors } : {}),
     ...(data.links?.length
       ? { vinculos: data.links.map((l) => ({ id: l.id, nome: l.name, caminho: l.path, disciplina: l.discipline, visivel: l.visible, transparente: l.translucent, ...(l.align ? { alinhamento: l.align } : {}) })) }
       : {}),
@@ -202,5 +207,6 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
     installSettings: withInstallDefaults(file.instalacoes),
     profile: file.empreendimento && Array.isArray(file.empreendimento.floors) && Array.isArray(file.empreendimento.towers) ? file.empreendimento : null,
     visibility: file.visibilidade && typeof file.visibilidade === "object" ? file.visibilidade : {},
+    doors: file.portas && typeof file.portas === "object" ? file.portas : {},
   };
 }

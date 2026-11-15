@@ -6,7 +6,7 @@ import type { DraftEntity } from "./draft";
 import { draftPrims } from "./draft";
 import type { CoordinateSystem } from "./math";
 import type { TriangleMesh } from "./obb";
-import { boundsOf, buildPlan } from "./plan/build";
+import { boundsOf, buildPlan, type DoorOverride } from "./plan/build";
 import type { PlanDrawing } from "./plan/drawing";
 import { buildSection } from "./plan/elevation";
 import type { SheetInfo, SheetFormat } from "./plan/sheet";
@@ -32,6 +32,8 @@ export interface ModelContext {
   projectDisciplines: Discipline[];
   /** Ids ocultos na vista (visibilidade da vista e geral). */
   hidden?: (view: ViewDef) => Set<number>;
+  /** Ajustes das portas (lado, dobradiça, sem arco). */
+  doors?: Record<string, DoorOverride>;
 }
 
 /** Contexto sem os elementos, pontos e trechos ocultos na vista. */
@@ -91,6 +93,7 @@ export function viewDrawing(view: ViewDef, full: ModelContext): PlanDrawing | nu
       draftView: view.section === "trabalho" && view.kind === "planta" ? null : view.id,
       beams: beamOptions(view),
       range: view.kind === "planta" ? planRangeOf(view, ctx.elements, ctx.storeyLevels) : undefined,
+      doors: ctx.doors,
     });
     let prims = applyHalftone(d.prims, f);
     if (view.section === "documentacao" && view.workNotes)

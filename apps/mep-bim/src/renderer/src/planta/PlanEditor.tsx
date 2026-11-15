@@ -17,6 +17,7 @@ import { spaceAt } from "../../../core/spaces";
 import type { ElementInfo, Vec3 } from "../../../core/types";
 import type { LoadedModel } from "../../../ifc/loadIfc";
 import type { PlanRange } from "../../../core/plan/levels";
+import type { DoorOverride } from "../../../core/plan/build";
 import { segmentElementId } from "../../../core/runs";
 import type { PointsStore } from "../locacao/usePointsStore";
 import type { PointerContext, PreviewItem, Viewer } from "../viewer/Viewer";
@@ -37,6 +38,8 @@ interface Props {
   range?: PlanRange;
   /** Ids ocultos nesta vista (visibilidade da vista e geral). */
   hidden?: Set<number>;
+  /** Ajustes das portas do projeto. */
+  doors?: Record<string, DoorOverride>;
   selection: number[];
   elementById: Map<number, ElementInfo>;
   onPick: (id: number | null, additive: boolean) => void;
@@ -133,7 +136,7 @@ function primsToSvg(prims: Prim[]): string {
     .join("");
 }
 
-export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick, onPickMany, dark, fitSignal, planTool, viewDef = null, projectDisciplines = [], beams, range, hidden, onMoveBy }: Props) {
+export function PlanEditor({ viewer, model, store, storey, cutHeight, selection, elementById, onPick, onPickMany, dark, fitSignal, planTool, viewDef = null, projectDisciplines = [], beams, range, hidden, doors, onMoveBy }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const cs = model.coordinates;
   const level = model.storeyLevels.find((s) => s.name === storey)?.level ?? 0;
@@ -168,9 +171,10 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
         name: viewDef!.name,
         labels,
       });
-    return buildPlan({ elements, meshes, cs, storeyLevels: model.storeyLevels, storey, cutHeight, points: [], runs: [], scale: SCALE, disciplines, labels, beams, range });
+    // Ambientes entram para o lado de abertura das portas (o texto dos ambientes é da outra camada).
+    return buildPlan({ elements, meshes, cs, storeyLevels: model.storeyLevels, storey, cutHeight, points: [], runs: [], scale: SCALE, disciplines, labels, beams, range, spaces: model.spaces, doors, roomLabels: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, elements, meshes, cs, storey, cutHeight, range?.type, range?.base, range?.below, range?.above, isSection, isSection ? points : null, isSection ? runs : null, viewDef?.cut, SCALE, disciplines, beams?.mode, beams?.show, beams?.text]);
+  }, [model, elements, meshes, cs, storey, cutHeight, range?.type, range?.base, range?.below, range?.above, doors, isSection, isSection ? points : null, isSection ? runs : null, viewDef?.cut, SCALE, disciplines, beams?.mode, beams?.show, beams?.text]);
   const mep = useMemo(() => {
     if (isSection) {
       const prims = store.drafts.filter((d) => d.view === viewDef!.id).flatMap((d) => draftPrims(d, SCALE));
