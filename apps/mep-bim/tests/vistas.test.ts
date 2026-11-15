@@ -232,3 +232,24 @@ describe("planta: vigas, pilares e layout", () => {
     expect(piso.prims.filter((p) => p.id === 5).every((p) => p.color === "#8c8c8c" && p.layer === "ARQ-LAYOUT")).toBe(true);
   });
 });
+
+describe("plantas de piso e de teto de cada pavimento", () => {
+  it("documentação: ids, nomes e tipo; chaves do navegador", async () => {
+    const { docPlanOf, docPlanOfId, isDocPlanId } = await import("../src/core/views");
+    const { parsePlanKey, planKeyOf, viewIdOfKey } = await import("../src/renderer/src/shell/VistasBrowser");
+    const piso = docPlanOf([], "Térreo");
+    const teto = docPlanOf([], "Térreo", "teto");
+    expect(piso.id).toBe("doc-planta:Térreo");
+    expect(teto.id).toBe("doc-teto:Térreo");
+    expect(teto.planType).toBe("teto");
+    expect(teto.name).toBe("Planta de teto — Térreo");
+    expect(isDocPlanId(teto.id) && isDocPlanId(piso.id)).toBe(true);
+    expect(docPlanOfId([], "doc-teto:1º Pavimento")?.planType).toBe("teto");
+    expect(parsePlanKey("trab-teto:1º Pavimento")).toEqual({ section: "trabalho", type: "teto", storey: "1º Pavimento" });
+    expect(parsePlanKey("doc:Térreo")).toEqual({ section: "documentacao", type: "piso", storey: "Térreo" });
+    expect(parsePlanKey("view:x")).toBeNull();
+    expect(planKeyOf("documentacao", "teto", "Térreo")).toBe("doc-teto:Térreo");
+    expect(viewIdOfKey("doc-teto:Térreo")).toBe("doc-teto:Térreo");
+    expect(viewIdOfKey("trab:Térreo")).toBeNull();
+  });
+});

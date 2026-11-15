@@ -25,10 +25,10 @@ import { FolhaPanel } from "./planta/FolhaPanel";
 import { renderSheetViews, type SheetFormat, type SheetViewport } from "../../core/plan/sheet";
 import { boundsOf } from "../../core/plan/build";
 import type { PlanDrawing } from "../../core/plan/drawing";
-import { beamOptions, docPlanOf, viewFilter, type ViewDef } from "../../core/views";
+import { beamOptions, docPlanOf, docPlanOfId, isDocPlanId, viewFilter, type PlanType, type ViewDef } from "../../core/views";
 import { newSheetId, viewDrawing, viewSubtitle, viewTitle, type ModelContext, type SheetDef } from "../../core/viewDrawing";
 import { sectionFrame } from "../../core/plan/elevation";
-import { VistasBrowser } from "./shell/VistasBrowser";
+import { parsePlanKey, PLAN_PREFIX, VistasBrowser } from "./shell/VistasBrowser";
 import { VistaPanel } from "./shell/VistaPanel";
 import { connectedPairs, runElements, runFittings, runIdOfElement, segmentIndexOf, runProperties, runSegments, RUN_TYPE_BY_ID, segmentElementId, fittingElementId } from "../../core/runs";
 import { usePointsStore } from "./locacao/usePointsStore";
@@ -192,7 +192,7 @@ export function App() {
   const [snapshots, setSnapshots] = useState<Map<string, { href: string; aspect: number }>>(() => new Map());
   /** Vista pelo id (as plantas de documentação existem mesmo sem terem sido alteradas). */
   const resolveView = useCallback(
-    (id: string): ViewDef | null => store.views.find((v) => v.id === id) ?? (id.startsWith("doc-planta:") ? docPlanOf(store.views, id.slice(11)) : null),
+    (id: string): ViewDef | null => store.views.find((v) => v.id === id) ?? docPlanOfId(store.views, id),
     [store.views],
   );
   const view3dDef = view3dId ? (store.views.find((v) => v.id === view3dId) ?? null) : null;
@@ -285,7 +285,10 @@ export function App() {
   const activeSheet = store.sheets.find((x) => x.id === sheetId) ?? null;
   /** Vistas de documentação que podem ir para as folhas. */
   const docViews = useMemo(
-    () => [...(model?.storeys ?? []).map((st) => docPlanOf(store.views, st)), ...store.views.filter((v) => v.section === "documentacao" && !v.id.startsWith("doc-planta:"))],
+    () => [
+      ...(model?.storeys ?? []).flatMap((st) => [docPlanOf(store.views, st, "piso"), docPlanOf(store.views, st, "teto")]),
+      ...store.views.filter((v) => v.section === "documentacao" && !isDocPlanId(v.id)),
+    ],
     [model, store.views],
   );
   const sheetRender = useMemo(() => {
@@ -904,7 +907,14 @@ export function App() {
     return above != null ? above - storeyLevel : 3;
   }, [model, storeyLevel]);
   // ---- Abrir vistas ----------------------------------------------------------------------
-  const activeViewDef: ViewDef | null = planKey === "trab" ? null : planKey === "doc" ? docPlanOf(store.views, storey) : resolveView(planKey.slice(5));
+  // Planta do pavimento aberta: seção (trabalho/documentação) e tipo (piso/teto) pela chave.
+  const floorPlan = parsePlanKey(`${planKey}:${storey}`);
+  const planTypeOpen: PlanType = floorPlan?.type ?? "piso";
+  const activeViewDef: ViewDef | null = floorPlan
+    ? floorPlan.section === "trabalho"
+      ? null
+      : docPlanOf(store.views, storey, floorPlan.type)
+    : resolveView(planKey.slice(5));
   /** Grava a vista (as plantas de documentação passam a existir no projeto na primeira alteração). */
   const updateView = useCallback(
     (def: ViewDef) => store.setViews((l) => (l.some((x) => x.id === def.id) ? l.map((x) => (x.id === def.id ? def : x)) : [...l, def]), def.id),
@@ -930,7 +940,7 @@ export function App() {
       if (v.kind === "3d") return open3D(v);
       if (v.kind === "fluxograma") return openFlowRef.current(v);
       if (v.storey && model?.storeys.includes(v.storey)) setStorey(v.storey);
-      setPlanKey(v.id.startsWith("doc-planta:") ? "doc" : `view:${v.id}`);
+      setPlanKey(v.id.startsWith("doc-planta:") ? "doc" : v.id.startsWith("doc-teto:") ? "doc-teto" : `view:${v.id}`);
       setView("planta");
     },
     [open3D, model],
@@ -960,9 +970,10 @@ export function App() {
   );
   const openKey = useCallback(
     (key: string) => {
-      if (key.startsWith("trab:") || key.startsWith("doc:")) {
-        setStorey(key.slice(key.indexOf(":") + 1));
-        setPlanKey(key.startsWith("trab:") ? "trab" : "doc");
+      const fp = parsePlanKey(key);
+      if (fp) {
+        setStorey(fp.storey);
+        setPlanKey(PLAN_PREFIX[fp.section][fp.type]);
         setView("planta");
         return;
       }
@@ -1685,7 +1696,7 @@ export function App() {
                 <div className="dock-body">
                   <VistaPanel
                     view={view === "3d" ? view3dDef : activeViewDef}
-                    workDisplay={workDisplay}
+                    workDisplay={{ ...workDisplay, planType: planTypeOpen }}
                     onWorkDisplay={setWorkDisplay}
                     storey={storey}
                     projectDisciplines={store.disciplines}
@@ -1740,11 +1751,9 @@ export function App() {
                     sheets={store.sheets}
                     active={
                       view === "planta"
-                        ? planKey === "trab"
-                          ? `trab:${storey}`
-                          : planKey === "doc"
-                            ? `doc:${storey}`
-                            : planKey
+                        ? floorPlan
+                          ? `${planKey}:${storey}`
+                          : planKey
                         : view === "3d"
                           ? view3dId && `view:${view3dId}`
                           : view === "prancha" && sheetId
@@ -1822,7 +1831,7 @@ export function App() {
                 {!closedTabs.includes("planta") && (
                   <span className={`view-tab-wrap ${view === "planta" ? "active" : ""}`}>
                     <button className={`view-tab ${view === "planta" ? "active" : ""}`} onClick={() => setView("planta")}>
-                      {activeViewDef && planKey.startsWith("view:") ? activeViewDef.name : `Planta · ${storey}`}
+                      {activeViewDef && planKey.startsWith("view:") ? activeViewDef.name : `${planTypeOpen === "teto" ? "Planta de teto" : "Planta de piso"} · ${storey}`}
                     </button>
                     <button className="tab-close" title="Fechar esta aba" aria-label="Fechar planta" onClick={() => closeTab("planta")}>
                       ×
@@ -1872,15 +1881,33 @@ export function App() {
               </>
             )}
             <div className="spacer" />
-            {model && view === "planta" && (planKey === "trab" || planKey === "doc") && (
-              <div className="segmented small" role="group" aria-label="Seção da planta">
-                <button className={planKey === "trab" ? "on" : ""} onClick={() => setPlanKey("trab")} title="Tudo visível">
-                  Trabalho
-                </button>
-                <button className={planKey === "doc" ? "on" : ""} onClick={() => setPlanKey("doc")} title="Só as disciplinas do projeto (vai para as folhas)">
-                  Documentação
-                </button>
-              </div>
+            {model && view === "planta" && floorPlan && (
+              <>
+                <div className="segmented small" role="group" aria-label="Planta de piso ou de teto">
+                  {(["piso", "teto"] as const).map((t) => (
+                    <button
+                      key={t}
+                      className={floorPlan.type === t ? "on" : ""}
+                      onClick={() => setPlanKey(PLAN_PREFIX[floorPlan.section][t])}
+                      title={t === "teto" ? "Vigas do pavimento de cima" : "Vigas da laje de baixo"}
+                    >
+                      {t === "piso" ? "Piso" : "Teto"}
+                    </button>
+                  ))}
+                </div>
+                <div className="segmented small" role="group" aria-label="Seção da planta">
+                  <button className={floorPlan.section === "trabalho" ? "on" : ""} onClick={() => setPlanKey(PLAN_PREFIX.trabalho[floorPlan.type])} title="Tudo visível">
+                    Trabalho
+                  </button>
+                  <button
+                    className={floorPlan.section === "documentacao" ? "on" : ""}
+                    onClick={() => setPlanKey(PLAN_PREFIX.documentacao[floorPlan.type])}
+                    title="Só as disciplinas do projeto (vai para as folhas)"
+                  >
+                    Documentação
+                  </button>
+                </div>
+              </>
             )}
             {model && view === "planta" && activeViewDef?.kind !== "corte" && (
               <label className="cut-input" title="Altura do plano de corte acima do piso">
@@ -1948,7 +1975,7 @@ export function App() {
                 planTool={planTool}
                 viewDef={activeViewDef}
                 projectDisciplines={store.disciplines}
-                beams={beamOptions(activeViewDef ?? workDisplay)}
+                beams={beamOptions(activeViewDef ?? { ...workDisplay, planType: planTypeOpen })}
                 onMoveBy={(d) => moveRef.current(planDeltaToScene(d[0], d[1]), `${Math.hypot(d[0], d[1]).toFixed(2).replace(".", ",")} m`)}
               />
             )}

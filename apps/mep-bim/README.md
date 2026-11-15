@@ -246,7 +246,8 @@ Fora de qualquer comando, o app está sempre em **Selecionar**, em todas as vist
 - A edição continua no arquivo de projeto (.json). O IFC é a entrega.
 
 **Vistas**, no navegador *Vistas e folhas* (coluna da esquerda):
-- **Trabalho:** tudo visível (modelo, vínculos e todas as disciplinas). Cada pavimento tem a sua planta de trabalho.
+- **Plantas de piso e de teto:** em Trabalho e em Documentação, todo pavimento já tem a sua **Planta de piso** (vigas da laje de baixo) e a sua **Planta de teto** (vigas do pavimento de cima), sem precisar criá-las. Elas ficam no navegador em *Plantas › Planta de piso* e *Plantas › Planta de teto*. Na barra de vistas, **Piso/Teto** e **Trabalho/Documentação** alternam a planta aberta. As plantas de teto de documentação também podem ir para as folhas.
+- **Trabalho:** tudo visível (modelo, vínculos e todas as disciplinas).
 - **Documentação:** só as disciplinas do projeto. Outras disciplinas podem entrar como informação, em meio-tom. A arquitetura/estrutura fica como fundo (em meio-tom, por padrão). É isto que vai para as folhas. Cada pavimento tem a sua planta de documentação, e um botão na barra de vistas alterna entre *Trabalho* e *Documentação*.
 - **Ampliações** (Geral › Ampliação): retângulo da planta em escala maior, 1:25 por padrão.
 - **Cortes** (Geral › Corte por linha): vista 2D com os elementos cortados hachurados, as arestas do que está além até a profundidade de vista, tubos e eletrodutos cortados e os níveis dos pavimentos.

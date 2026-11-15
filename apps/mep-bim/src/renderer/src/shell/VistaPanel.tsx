@@ -4,6 +4,7 @@ import type { PlanLabels } from "../../../core/plan/build";
 import type { Discipline } from "../../../core/types";
 import type { SheetDef } from "../../../core/viewDrawing";
 import { DEFAULT_LABELS, primaryDisciplines, SECTION_LABEL, type ViewDef } from "../../../core/views";
+import { isDocPlanId } from "../../../core/views";
 
 const SCALES = [10, 20, 25, 50, 75, 100, 125, 200];
 
@@ -28,18 +29,18 @@ interface Props {
 type BeamFields = Pick<ViewDef, "planType" | "showBeams" | "showBeamText">;
 
 /** Planta de piso/teto e vigas (projeção tracejada com largura × altura). */
-function BeamControls({ value, onChange }: { value: BeamFields; onChange: (v: BeamFields) => void }) {
+function BeamControls({ value, onChange, fixedType }: { value: BeamFields; onChange: (v: BeamFields) => void; fixedType?: boolean }) {
   return (
     <>
-      <div className="field-label">Planta e vigas</div>
-      <div className="segmented small">
+      <div className="field-label">{fixedType ? `${(value.planType ?? "piso") === "teto" ? "Planta de teto" : "Planta de piso"} · vigas` : "Planta e vigas"}</div>
+      {!fixedType && <div className="segmented small">
         <button className={(value.planType ?? "piso") === "piso" ? "on" : ""} onClick={() => onChange({ ...value, planType: "piso" })} title="Vigas da laje de baixo">
           Planta de piso
         </button>
         <button className={value.planType === "teto" ? "on" : ""} onClick={() => onChange({ ...value, planType: "teto" })} title="Vigas do pavimento de cima">
           Planta de teto
         </button>
-      </div>
+      </div>}
       <div className="options">
         <label>
           <input type="checkbox" checked={value.showBeams !== false} onChange={(e) => onChange({ ...value, showBeams: e.target.checked })} /> Vigas
@@ -63,7 +64,7 @@ export function VistaPanel({ view, storey, projectDisciplines, available, sheets
         <p className="muted small">
           Vista de trabalho: tudo visível (modelo, vínculos e todas as disciplinas). Para as folhas, use a planta deste pavimento em Documentação.
         </p>
-        <BeamControls value={workDisplay} onChange={onWorkDisplay} />
+        <BeamControls value={workDisplay} onChange={(v) => onWorkDisplay({ ...v, planType: workDisplay.planType })} fixedType />
       </div>
     );
   const set = (patch: Partial<ViewDef>) => onChange({ ...view, ...patch });
@@ -88,7 +89,7 @@ export function VistaPanel({ view, storey, projectDisciplines, available, sheets
           <tr>
             <th>Seção</th>
             <td>
-              <select value={view.section} onChange={(e) => set({ section: e.target.value as ViewDef["section"] })} disabled={view.id.startsWith("doc-planta:")}>
+              <select value={view.section} onChange={(e) => set({ section: e.target.value as ViewDef["section"] })} disabled={isDocPlanId(view.id)}>
                 <option value="trabalho">Trabalho (tudo visível)</option>
                 <option value="documentacao">Documentação (folhas)</option>
               </select>
@@ -173,7 +174,7 @@ export function VistaPanel({ view, storey, projectDisciplines, available, sheets
         </>
       )}
 
-      {(view.kind === "planta" || view.kind === "ampliacao") && <BeamControls value={view} onChange={(v) => set(v)} />}
+      {(view.kind === "planta" || view.kind === "ampliacao") && <BeamControls value={view} onChange={(v) => set(v)} fixedType={isDocPlanId(view.id)} />}
       {view.kind !== "3d" && (
         <>
           <div className="field-label">Textos</div>

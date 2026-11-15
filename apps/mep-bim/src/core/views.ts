@@ -75,13 +75,30 @@ export const DEFAULT_LABELS: PlanLabels = { tags: true, circuits: true, power: t
 let seq = 0;
 export const newViewId = (kind: ViewKind) => `${kind}-${Date.now().toString(36)}-${(seq++).toString(36)}`;
 
+export type PlanType = "piso" | "teto";
+export const PLAN_TYPE_LABEL: Record<PlanType, string> = { piso: "Planta de piso", teto: "Planta de teto" };
+
+/**
+ * Plantas de cada pavimento, de piso e de teto, em Trabalho e em Documentação: existem para
+ * todos os pavimentos sem precisar criá-las. Chaves no navegador: "trab:", "trab-teto:",
+ * "doc:" e "doc-teto:" + pavimento.
+ */
+export const docPlanId = (storey: string, type: PlanType = "piso") => `${type === "teto" ? "doc-teto" : "doc-planta"}:${storey}`;
+/** Plantas de documentação de pavimento (piso ou teto) pelo id. */
+export const isDocPlanId = (id: string) => id.startsWith("doc-planta:") || id.startsWith("doc-teto:");
+export function docPlanOfId(views: ViewDef[], id: string): ViewDef | null {
+  if (id.startsWith("doc-planta:")) return docPlanOf(views, id.slice(11), "piso");
+  if (id.startsWith("doc-teto:")) return docPlanOf(views, id.slice(9), "teto");
+  return null;
+}
+
 /** Planta de documentação de um pavimento: id fixo, criada com valores padrão quando ainda não existe. */
-export const docPlanId = (storey: string) => `doc-planta:${storey}`;
-export function docPlanOf(views: ViewDef[], storey: string): ViewDef {
+export function docPlanOf(views: ViewDef[], storey: string, type: PlanType = "piso"): ViewDef {
+  const id = docPlanId(storey, type);
   return (
-    views.find((v) => v.id === docPlanId(storey)) ?? {
-      id: docPlanId(storey),
-      name: `Planta — ${storey}`,
+    views.find((v) => v.id === id) ?? {
+      id,
+      name: `${type === "teto" ? "Planta de teto" : "Planta"} — ${storey}`,
       kind: "planta",
       section: "documentacao",
       storey,
@@ -91,6 +108,7 @@ export function docPlanOf(views: ViewDef[], storey: string): ViewDef {
       background: true,
       halftoneBackground: true,
       labels: DEFAULT_LABELS,
+      planType: type,
     }
   );
 }

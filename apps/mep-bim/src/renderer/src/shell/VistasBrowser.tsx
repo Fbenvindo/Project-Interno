@@ -3,9 +3,12 @@ import { useState } from "react";
 import { DISCIPLINES } from "../../../core/disciplines";
 import type { Discipline } from "../../../core/types";
 import type { SheetDef } from "../../../core/viewDrawing";
-import { docPlanId, KIND_LABEL, SECTION_LABEL, type ViewDef, type ViewKind, type ViewSection } from "../../../core/views";
+import { docPlanId, isDocPlanId, KIND_LABEL, PLAN_TYPE_LABEL, SECTION_LABEL, type PlanType, type ViewDef, type ViewKind, type ViewSection } from "../../../core/views";
 
-/** Chave da vista aberta: "trab:<pavimento>", "doc:<pavimento>", "view:<id>" ou "sheet:<id>". */
+/**
+ * Chave da vista aberta: "trab:<pavimento>", "trab-teto:<pavimento>", "doc:<pavimento>",
+ * "doc-teto:<pavimento>", "view:<id>" ou "sheet:<id>".
+ */
 export type ViewKey = string;
 
 interface Props {
@@ -69,18 +72,29 @@ export function VistasBrowser({ storeys, views, sheets, active, disciplines, ava
           <ul>
             {KINDS.map((kind) => {
               const kk = `${k}:${kind}`;
-              const custom = views.filter((v) => v.section === sec && v.kind === kind && !(kind === "planta" && v.id.startsWith("doc-planta:")));
+              const custom = views.filter((v) => v.section === sec && v.kind === kind && !(kind === "planta" && isDocPlanId(v.id)));
+              // Plantas de piso e de teto de todos os pavimentos.
+              const typeGroup = (type: PlanType) => {
+                const tk = `${kk}:${type}`;
+                const hint = `${PLAN_TYPE_LABEL[type]} · ${sec === "trabalho" ? "tudo visível" : "só as disciplinas do projeto"}${type === "teto" ? " · vigas do pavimento de cima" : " · vigas da laje de baixo"}`;
+                return (
+                  <li key={tk} className="vb-group">
+                    <button className="vb-head sub" onClick={() => toggle(tk)}>
+                      <span className={`caret ${closed[tk] ? "" : "open"}`}>▸</span> {PLAN_TYPE_LABEL[type]} <span className="muted">({storeys.length})</span>
+                    </button>
+                    {!closed[tk] && <ul>{storeys.map((s) => item(planKeyOf(sec, type, s), s, { hint }))}</ul>}
+                  </li>
+                );
+              };
               const list =
                 kind === "planta"
-                  ? [
-                      ...storeys.map((s) => item(sec === "trabalho" ? `trab:${s}` : `doc:${s}`, s, { hint: sec === "trabalho" ? "Tudo visível" : "Só as disciplinas do projeto" })),
-                      ...custom.map((v) => item(`view:${v.id}`, v.name, { id: v.id, deletable: true })),
-                    ]
+                  ? [typeGroup("piso"), typeGroup("teto"), ...custom.map((v) => item(`view:${v.id}`, v.name, { id: v.id, deletable: true }))]
                   : custom.map((v) => item(`view:${v.id}`, v.name, { id: v.id, deletable: true }));
+              const count = kind === "planta" ? storeys.length * 2 + custom.length : list.length;
               return (
                 <li key={kk} className="vb-group">
                   <button className="vb-head sub" onClick={() => toggle(kk)}>
-                    <span className={`caret ${closed[kk] ? "" : "open"}`}>▸</span> {KIND_LABEL[kind]} <span className="muted">({list.length})</span>
+                    <span className={`caret ${closed[kk] ? "" : "open"}`}>▸</span> {KIND_LABEL[kind]} <span className="muted">({count})</span>
                   </button>
                   {!closed[kk] && (list.length ? <ul>{list}</ul> : <div className="vb-empty muted small">{emptyHint(kind)}</div>)}
                 </li>
@@ -144,5 +158,23 @@ function emptyHint(kind: ViewKind): string {
 }
 
 export const docKey = (storey: string) => `doc:${storey}`;
-export const viewIdOfKey = (key: ViewKey, views: ViewDef[]): string | null =>
-  key.startsWith("view:") ? key.slice(5) : key.startsWith("doc:") ? docPlanId(key.slice(4)) : views.length ? null : null;
+
+/** Prefixo da planta de pavimento por seção e tipo. */
+export const PLAN_PREFIX = { trabalho: { piso: "trab", teto: "trab-teto" }, documentacao: { piso: "doc", teto: "doc-teto" } } as const;
+export const planKeyOf = (sec: ViewSection, type: PlanType, storey: string) => `${PLAN_PREFIX[sec][type]}:${storey}`;
+/** Planta de pavimento pela chave: seção, tipo e pavimento (null se não for). */
+export function parsePlanKey(key: ViewKey): { section: ViewSection; type: PlanType; storey: string } | null {
+  const i = key.indexOf(":");
+  const p = i < 0 ? key : key.slice(0, i);
+  const storey = i < 0 ? "" : key.slice(i + 1);
+  if (p === "trab") return { section: "trabalho", type: "piso", storey };
+  if (p === "trab-teto") return { section: "trabalho", type: "teto", storey };
+  if (p === "doc") return { section: "documentacao", type: "piso", storey };
+  if (p === "doc-teto") return { section: "documentacao", type: "teto", storey };
+  return null;
+}
+export const viewIdOfKey = (key: ViewKey): string | null => {
+  if (key.startsWith("view:")) return key.slice(5);
+  const p = parsePlanKey(key);
+  return p && p.section === "documentacao" ? docPlanId(p.storey, p.type) : null;
+};
