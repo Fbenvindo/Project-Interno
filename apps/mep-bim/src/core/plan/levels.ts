@@ -25,12 +25,16 @@ const TOL = 0.05;
 
 const footprint = (e: ElementInfo) => (e.bbox ? (e.bbox.max[0] - e.bbox.min[0]) * (e.bbox.max[2] - e.bbox.min[2]) : 0);
 
+/** Distância mínima (m) para um pavimento contar como o de cima (o Revit costuma ter pares
+ * "osso"/"piso acabado" a poucos centímetros, que são o mesmo andar). */
+const MIN_STOREY_GAP = 1.8;
+
 function levelOf(levels: StoreyLevel[], storey: string): { level: number; next: number } {
   const sorted = [...levels].sort((a, b) => a.level - b.level);
   const i = sorted.findIndex((s) => s.name === storey);
   const level = i >= 0 ? sorted[i].level : 0;
-  const next = i >= 0 && i < sorted.length - 1 ? sorted[i + 1].level : level + 3;
-  return { level, next };
+  const above = sorted.find((s) => s.level > level + MIN_STOREY_GAP);
+  return { level, next: above ? above.level : level + 3 };
 }
 
 /** Agrupa valores próximos, somando o peso de cada grupo. */

@@ -26,6 +26,20 @@ describe("níveis das plantas de pavimento", () => {
     expect(planRangeOf(v, els, levels)).toEqual({ type: "piso", base: 0.45, below: 1, above: 1.5 });
   });
 
+  it("pavimentos em par (osso e piso acabado, a poucos cm): o de cima é o próximo andar", () => {
+    const lv = [
+      { name: "Térreo - osso", level: -0.1 },
+      { name: "Térreo - acabado", level: 0 },
+      { name: "1º - osso", level: 4.4 },
+      { name: "1º - acabado", level: 4.5 },
+    ];
+    const els = [slab(1, "1º - osso", [0, 10], [0, 10], [4.25, 4.4])];
+    expect(ceilingBase(els, lv, "Térreo - osso", -0.1)).toBeCloseTo(4.25);
+    expect(ceilingBase(els, lv, "Térreo - acabado", 0)).toBeCloseTo(4.25);
+    // Sem laje modelada: o próximo andar (não o par a 10 cm).
+    expect(ceilingBase([], lv, "Térreo - osso", -0.1)).toBeCloseTo(4.4 - 0.12);
+  });
+
   it("sem laje de cima: o nível do pavimento de cima", () => {
     const v = floorPlanOf([], "documentacao", "teto", "Térreo");
     expect(planRangeOf(v, [], levels)).toEqual({ type: "teto", base: 3 - 0.12, below: 1.5, above: 0.2 });
