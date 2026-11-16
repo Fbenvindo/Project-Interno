@@ -47,7 +47,7 @@ describe("operações de modificação", () => {
   it("separa a seleção por tipo (trecho por qualquer segmento)", () => {
     const st = sample();
     const sel = splitSelection([-1000, segmentElementId(7, 0), segmentElementId(7, 1), st.drafts[0].id, 12345], st);
-    expect(sel).toEqual({ points: [-1000], runs: [7], drafts: [st.drafts[0].id] });
+    expect(sel).toEqual({ points: [-1000], runs: [7], drafts: [st.drafts[0].id], arch: [] });
   });
 
   it("move pontos, trechos e desenhos pelo mesmo deslocamento", () => {

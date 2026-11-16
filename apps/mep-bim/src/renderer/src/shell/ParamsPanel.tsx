@@ -21,6 +21,7 @@ import { changeRunsHeight, networkAtLevel, runLevel } from "../../../core/runHei
 import { storeyScheme } from "../../../core/plan/levels";
 import { LevelScheme } from "./LevelScheme";
 import { isSwingDoor, type DoorOverride } from "../../../core/plan/build";
+import { ARCH_LABEL, archDiscipline, archIdOf, archProperties, type ArchElement } from "../../../core/arch";
 
 interface Props {
   selection: number[];
@@ -49,7 +50,7 @@ const DISCIPLINE_GROUP: Record<Discipline, string> = {
   outros: "Outros",
 };
 
-type Kind = "ponto" | "trecho" | "caixa" | "ifc";
+type Kind = "ponto" | "trecho" | "caixa" | "ifc" | "arq";
 interface Item {
   id: number;
   kind: Kind;
@@ -59,6 +60,7 @@ interface Item {
   point?: PlacedPoint;
   run?: Run;
   el?: ElementInfo;
+  arch?: ArchElement;
 }
 
 const VARIES = "(vários)";
@@ -165,6 +167,7 @@ export function ParamsPanel({ selection, elementById, store, model, getPropertie
   const items = useMemo<Item[]>(() => {
     const pointById = new Map(store.points.map((p) => [p.id, p]));
     const runById = new Map(store.runs.map((r) => [r.id, r]));
+    const archById = new Map(store.arch.map((a) => [a.id, a]));
     const seenRuns = new Set<number>();
     const out: Item[] = [];
     for (const id of selection) {
@@ -172,6 +175,12 @@ export function ParamsPanel({ selection, elementById, store, model, getPropertie
       if (p) {
         const def = COMPONENT_BY_ID[p.componentId];
         out.push({ id, kind: "ponto", key: `p:${def.id}`, label: def.label, point: p });
+        continue;
+      }
+      const aid = archIdOf(id);
+      if (aid != null) {
+        const a = archById.get(aid);
+        if (a) out.push({ id, kind: "arq", key: `a:${a.kind}${a.kind === "parede" && a.structural ? ":e" : ""}`, label: a.kind === "parede" && a.structural ? "Parede estrutural" : ARCH_LABEL[a.kind], arch: a, el: elementById.get(id) });
         continue;
       }
       const rid = runIdOfElement(id);
@@ -189,7 +198,7 @@ export function ParamsPanel({ selection, elementById, store, model, getPropertie
       else out.push({ id, kind: "ifc", key: `i:${el.ifcType}`, label: getTypeLabel(el.ifcType), el });
     }
     return out;
-  }, [selection, store.points, store.runs, elementById]);
+  }, [selection, store.points, store.runs, store.arch, elementById]);
 
   const categories = useMemo(() => {
     const m = new Map<string, { label: string; n: number }>();
@@ -214,7 +223,7 @@ export function ParamsPanel({ selection, elementById, store, model, getPropertie
   }
 
   const discColor = (d: Discipline) => DISCIPLINE_BY_ID[d].color;
-  const headerColor = only === "ponto" ? discColor(COMPONENT_BY_ID[shown[0].point!.componentId].discipline) : only === "trecho" ? discColor(RUN_TYPE_BY_ID[shown[0].run!.typeId].discipline) : shown[0].el ? discColor(shown[0].el.discipline) : "#94a3b8";
+  const headerColor = only === "arq" ? discColor(archDiscipline(shown[0].arch!)) : only === "ponto" ? discColor(COMPONENT_BY_ID[shown[0].point!.componentId].discipline) : only === "trecho" ? discColor(RUN_TYPE_BY_ID[shown[0].run!.typeId].discipline) : shown[0].el ? discColor(shown[0].el.discipline) : "#94a3b8";
 
   return (
     <div className="params">
@@ -248,6 +257,7 @@ export function ParamsPanel({ selection, elementById, store, model, getPropertie
         <tbody>
           {only === "ponto" && <PointRows points={shown.map((i) => i.point!)} store={store} levels={levels} resolveCeiling={resolveCeiling} />}
           {only === "trecho" && <RunRows runs={shown.map((i) => i.run!)} store={store} model={model} slabAt={slabAt} />}
+          {only === "arq" && <ArchRows els={shown.map((i) => i.arch!)} store={store} />}
           {only === "ifc" && shown.length === 1 && shown[0].el!.ifcType === "IFCDOOR" && <DoorRows el={shown[0].el!} store={store} />}
           {(only === "ifc" || only === "caixa") && <ElementRows els={shown.map((i) => i.el!)} getProperties={getProperties} />}
           {!only && <MixedRows items={shown} />}
@@ -892,6 +902,107 @@ function ElementRows({ els, getProperties }: { els: ElementInfo[]; getProperties
           </td>
         </tr>
       )}
+    </>
+  );
+}
+
+// ---- Arquitetura e estrutura modeladas no app (editáveis) ---------------------------------------
+
+function ArchRows({ els, store }: { els: ArchElement[]; store: PointsStore }) {
+  const ids = new Set(els.map((e) => e.id));
+  const kind = els[0].kind;
+  const set = (field: string, patch: (e: ArchElement) => Partial<ArchElement>) =>
+    store.setArch((l) => l.map((e) => (ids.has(e.id) ? ({ ...e, ...patch(e) } as ArchElement) : e)), `${field}:${[...ids].join(",")}`);
+  const val = <V,>(f: (e: ArchElement) => V) => common(els, f);
+  const numRow = (label: string, f: (e: ArchElement) => number, apply: (v: number) => (e: ArchElement) => Partial<ArchElement>, field: string, min = 0.01) => {
+    const c = val(f);
+    return (
+      <Row label={label}>
+        <NumberCell value={c.varies ? null : c.value} varies={c.varies} step={0.01} onCommit={(v) => set(field, apply(Math.max(min, v)))} />
+      </Row>
+    );
+  };
+  const single = els.length === 1 ? els[0] : null;
+  const groups = single ? archProperties(single, store.arch) : [];
+  const typeName = val((e) => e.name);
+  return (
+    <>
+      <Group title="Identidade">
+        <Row label="Tipo">
+          <TextCell value={typeName.varies ? "" : (typeName.value ?? "")} varies={typeName.varies} onCommit={(v) => set("nome", () => ({ name: v }))} />
+        </Row>
+        <Row label="Pavimento">
+          <RO>{val((e) => e.storey).varies ? VARIES : els[0].storey}</RO>
+        </Row>
+        {single && (
+          <Row label="GlobalId">
+            <RO>{single.guid}</RO>
+          </Row>
+        )}
+      </Group>
+      <Group title="Dimensões">
+        {kind === "parede" && (
+          <>
+            {numRow("Espessura (m)", (e) => (e as { thickness: number }).thickness, (v) => () => ({ thickness: v }), "esp")}
+            {numRow("Altura (m)", (e) => (e as { height: number }).height, (v) => () => ({ height: v }), "alt")}
+            {numRow("Cota da base (m)", (e) => (e as { base: number }).base, (v) => () => ({ base: v }), "base", -1e6)}
+            <Row label="Estrutural">
+              <input type="checkbox" checked={!!(els[0] as { structural?: boolean }).structural} onChange={(e) => set("estr", () => ({ structural: e.target.checked }))} />
+            </Row>
+          </>
+        )}
+        {(kind === "porta" || kind === "janela") && (
+          <>
+            {numRow("Largura (m)", (e) => (e as { width: number }).width, (v) => () => ({ width: v }), "larg", 0.2)}
+            {numRow("Altura (m)", (e) => (e as { height: number }).height, (v) => () => ({ height: v }), "alt", 0.2)}
+            {kind === "janela" && numRow("Peitoril (m)", (e) => (e as { sill: number }).sill, (v) => () => ({ sill: v }), "peit", 0)}
+            {numRow("Posição na parede (m)", (e) => (e as { offset: number }).offset, (v) => () => ({ offset: v }), "pos", 0)}
+            {kind === "porta" && (
+              <Row label="Abertura">
+                <span className="btn-row tight">
+                  <button className="btn small" onClick={() => set("lado", (e) => ({ flip: !(e as { flip?: boolean }).flip }))}>
+                    Inverter lado
+                  </button>
+                  <button className="btn small" onClick={() => set("mao", (e) => ({ right: !(e as { right?: boolean }).right }))}>
+                    Inverter dobradiça
+                  </button>
+                </span>
+              </Row>
+            )}
+          </>
+        )}
+        {kind === "laje" && (
+          <>
+            {numRow("Espessura (m)", (e) => (e as { thickness: number }).thickness, (v) => () => ({ thickness: v }), "esp")}
+            {numRow("Cota do topo (m)", (e) => (e as { top: number }).top, (v) => () => ({ top: v }), "topo", -1e6)}
+          </>
+        )}
+        {kind === "pilar" && (
+          <>
+            {numRow("Largura (m)", (e) => (e as { width: number }).width, (v) => () => ({ width: v }), "larg")}
+            {numRow("Profundidade (m)", (e) => (e as { depth: number }).depth, (v) => () => ({ depth: v }), "prof")}
+            {numRow("Altura (m)", (e) => (e as { height: number }).height, (v) => () => ({ height: v }), "alt")}
+            {numRow("Cota da base (m)", (e) => (e as { base: number }).base, (v) => () => ({ base: v }), "base", -1e6)}
+            {numRow("Rotação (°)", (e) => Math.round(((e as { rotation: number }).rotation * 180) / Math.PI * 100) / 100, (v) => () => ({ rotation: (v * Math.PI) / 180 }), "rot", -360)}
+          </>
+        )}
+        {kind === "viga" && (
+          <>
+            {numRow("Largura (m)", (e) => (e as { width: number }).width, (v) => () => ({ width: v }), "larg")}
+            {numRow("Altura (m)", (e) => (e as { height: number }).height, (v) => () => ({ height: v }), "alt")}
+            {numRow("Cota do topo (m)", (e) => (e as { top: number }).top, (v) => () => ({ top: v }), "topo", -1e6)}
+          </>
+        )}
+      </Group>
+      {groups.map((g, i) => (
+        <Group key={`${g.name}-${i}`} title={g.kind === "quantidades" ? "Quantidades" : "Medidas"} defaultOpen={g.kind === "quantidades"}>
+          {g.values.map((v, j) => (
+            <Row key={j} label={v.name}>
+              <RO>{fmt(v.value)}</RO>
+            </Row>
+          ))}
+        </Group>
+      ))}
     </>
   );
 }

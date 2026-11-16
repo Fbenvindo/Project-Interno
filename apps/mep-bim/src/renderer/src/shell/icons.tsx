@@ -412,6 +412,44 @@ const P: Record<string, ReactNode> = {
       <path d="M9 6 L12 3 L15 6 M9 18 L12 21 L15 18 M6 9 L3 12 L6 15 M18 9 L21 12 L18 15" />
     </>
   ),
+  aParede: (
+    <>
+      <path d="M3 9 H21 M3 15 H21" />
+      <path d="M6 9 L3 12 M10 9 L5 15 M14 9 L9 15 M18 9 L13 15 M21 10 L17 15" strokeWidth="1" />
+    </>
+  ),
+  aPorta: (
+    <>
+      <path d="M3 18 H7 M17 18 H21" />
+      <path d="M7 18 V6" />
+      <path d="M7 6 A12 12 0 0 1 19 18" strokeDasharray="2 1.5" />
+    </>
+  ),
+  aJanela: (
+    <>
+      <path d="M3 10 H7 M17 10 H21 M3 14 H7 M17 14 H21" />
+      <rect x="7" y="10" width="10" height="4" />
+      <path d="M7 12 H17" />
+    </>
+  ),
+  aLaje: (
+    <>
+      <path d="M2 10 L8 6 H22 L16 10 Z" />
+      <path d="M2 10 V13 H16 V10 M16 13 L22 9 V6" />
+    </>
+  ),
+  aPilar: (
+    <>
+      <rect x="8" y="3" width="8" height="18" />
+      <path d="M8 8 L16 3 M8 14 L16 9 M8 20 L16 15" strokeWidth="1" />
+    </>
+  ),
+  aViga: (
+    <>
+      <rect x="2" y="9" width="20" height="6" />
+      <path d="M4 15 L10 9 M10 15 L16 9 M16 15 L22 9" strokeWidth="1" />
+    </>
+  ),
   zoomJanela: (
     <>
       <circle cx="10" cy="10" r="6" />

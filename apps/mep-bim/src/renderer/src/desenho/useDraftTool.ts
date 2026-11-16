@@ -861,7 +861,7 @@ const shift = (e: DraftEntity, d: P2): Partial<DraftEntity> => {
 };
 
 function editState(store: PointsStore): EditState {
-  return { points: store.points, runs: store.runs, drafts: store.drafts };
+  return { points: store.points, runs: store.runs, drafts: store.drafts, arch: store.arch };
 }
 
 function promptFor(cmd: DraftCmd, phase: Phase, k: number, count: number): string {

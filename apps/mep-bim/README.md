@@ -225,6 +225,28 @@ Em **Arquivo › Importar elementos em IFC**. Neste app, *elemento* = família.
 - **Cortes 2D:** as emendas internas da triangulação das faces (comuns em paredes com aberturas) não aparecem mais como linhas.
 - **Abas de vista:** o botão **×** fecha a vista aberta. Num corte, ampliação ou planta extra, volta à planta do pavimento. Numa vista 3D salva ou recortada, volta ao modelo completo sem recortes. Na folha, volta à planta.
 
+### Modelar arquitetura e estrutura
+
+As abas **Arquitetura** e **Estrutura** criam os elementos no próprio app, desenhando na planta do pavimento aberto. Os cliques usam o encaixe e o ortogonal da barra de status, e as medidas ficam no painel da direita (guardadas para a próxima vez).
+
+- **Parede:** clique ponto a ponto; cada trecho vira uma parede, e Enter, botão direito ou Esc terminam. A linha de referência pode ser o eixo ou uma das faces. A altura vai até o pavimento de cima ou é fixa.
+  - Paredes que se encontram nas pontas fecham o canto em esquadria.
+  - Uma ponta no meio de outra parede termina na face dela (encontro em T).
+- **Porta / Janela:** clique sobre a parede. O vão abre na parede, e a porta abre para o lado do clique, com o arco na planta de piso. A janela leva o peitoril indicado.
+- **Piso / laje e Laje:** clique nos cantos; Enter ou clique no primeiro canto fecha a laje. Ela fica no teto do pavimento (topo no pavimento de cima) ou no piso. A laje de teto passa a definir a base da planta de teto.
+- **Pilar:** cada clique cria um pilar do piso ao pavimento de cima, com largura, profundidade e rotação.
+- **Viga:** clique ponto a ponto; o topo fica no nível do pavimento de cima.
+- **Parede estrutural:** parede de concreto, que vai para a disciplina de estrutura.
+
+Os elementos entram como os do IFC: plantas (corte, hachura, portas com arco), cortes, 3D, folhas, quantitativos (comprimento, área descontando os vãos, volume), visibilidade e encaixe.
+
+- **Propriedades:** editáveis com o elemento selecionado (tipo, espessura, altura, cotas, peitoril, posição na parede, inverter lado e dobradiça da porta).
+- **Mover, Copiar, Recortar/Colar e Apagar** (menu Modificar ou nas próprias abas) e as setas do teclado também valem para eles.
+  - Copiar uma parede leva as portas e janelas dela.
+  - Mover só a porta faz ela deslizar ao longo da parede.
+- **Projeto (.seb):** os elementos são gravados nele.
+- **Exportar IFC:** gera IfcWall, IfcDoor, IfcWindow, IfcSlab, IfcColumn e IfcBeam (malha triangulada) nos pavimentos do modelo. No **IFC por disciplina**, arquitetura e estrutura saem em arquivos separados.
+
 ### Selecionar (comando padrão), janela de seleção e Esc
 
 Fora de qualquer comando, o app está sempre em **Selecionar**, em todas as vistas: planta (Trabalho ou Documentação), ampliações, cortes, 3D e folhas.

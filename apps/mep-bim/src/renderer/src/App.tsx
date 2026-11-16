@@ -10,6 +10,8 @@ import { cancelIfcLoad, loadIfcModel, warmIfcWorker } from "./ifc/ifcLoader";
 import { addToRule, elementKey, hiddenIds, MODEL_HOST, MODEL_PROJECT, type HideRules } from "../../core/visibility";
 import { HideSelectionBar, VisibilityEditor, type VisibilityCatalog } from "./shell/VisibilityEditor";
 import { ViewCube } from "./viewer/ViewCube";
+import { archIdOf, archProperties, buildArch, moveArch, raiseArch, storeyZ as archStoreyZ, worldMesh } from "../../core/arch";
+import { ArqPanel, readArchParams, saveArchParams, useArchTool, type ArchParams } from "./arq/ArqPanel";
 import { linkSlotOf } from "../../ifc/federate";
 import { cacheClear, cacheList } from "./ifc/modelCache";
 import { deletedText, deleteSelection } from "./desenho/deleteSelection";
@@ -122,6 +124,7 @@ const TOOL_HINT: Record<ToolSpec["kind"], string> = {
   perfil: "Torres, pavimentos comuns ou por torre, alturas e cotas do empreendimento",
   visibilidade: "O que fica oculto em todas as vistas, folhas e no 3D: modelos IFC, tipos de elemento, sistemas e elementos",
   desenho: "Siga as instruções sobre a planta · Enter conclui · Esc cancela",
+  arq: "Desenhe na planta (encaixe e ortogonal valem) · Enter ou botão direito termina · Esc volta a Selecionar",
 };
 
 export function App() {
@@ -235,9 +238,18 @@ export function App() {
   const runElementList = useMemo(() => (model ? runElements(store.runs, model.storeyLevels) : []), [store.runs, model]);
   const boxes = useMemo(() => pullBoxes(store.runs, store.points), [store.runs, store.points]);
   const boxElementList = useMemo(() => (model ? boxElements(boxes, store.runs, model.storeyLevels) : []), [boxes, store.runs, model]);
+  // Arquitetura e estrutura modeladas no app: entram como elementos de modelo (plantas, cortes, 3D).
+  const archPieces = useMemo(() => (model ? buildArch(store.arch, model.coordinates) : []), [store.arch, model]);
+  const archInfos = useMemo(() => archPieces.map((p) => p.info), [archPieces]);
+  const archMeshes = useMemo(() => (model ? archPieces.map((p) => worldMesh(p, model.coordinates)) : []), [archPieces, model]);
+  /** Modelo das plantas, cortes e folhas: o IFC (com vínculos) mais a arquitetura/estrutura do app. */
+  const planModel = useMemo(
+    () => (model && archPieces.length ? { ...model, elements: [...model.elements, ...archInfos], meshes: [...model.meshes, ...archMeshes] } : model),
+    [model, archPieces, archInfos, archMeshes],
+  );
   const allElements = useMemo(
-    () => (model ? [...model.elements, ...pointElements, ...runElementList, ...boxElementList] : []),
-    [model, pointElements, runElementList, boxElementList],
+    () => (model ? [...model.elements, ...archInfos, ...pointElements, ...runElementList, ...boxElementList] : []),
+    [model, archInfos, pointElements, runElementList, boxElementList],
   );
   const elementById = useMemo(() => new Map(allElements.map((e) => [e.expressID, e])), [allElements]);
   // ---- Visibilidade (geral e por vista) ------------------------------------------------------
@@ -251,7 +263,7 @@ export function App() {
       models: [
         { key: MODEL_HOST, label: `Modelo principal${fileName ? ` (${fileName})` : ""}`, count: count.get(MODEL_HOST) ?? 0 },
         ...fedLinks.map((l) => ({ key: l.meta.id, label: `Vínculo: ${l.meta.name}`, count: count.get(l.meta.id) ?? 0 })),
-        { key: MODEL_PROJECT, label: "Instalações do projeto (criadas no app)", count: count.get(MODEL_PROJECT) ?? 0 },
+        { key: MODEL_PROJECT, label: "Criados no app (instalações, arquitetura e estrutura)", count: count.get(MODEL_PROJECT) ?? 0 },
       ],
       elements: allElements,
     };
@@ -259,14 +271,14 @@ export function App() {
   /** Ids ocultos numa vista (regras da vista e gerais). */
   const hiddenFor = useCallback((v: ViewDef | null) => hiddenIds(allElements, modelOf, store.visibility, v?.hidden), [allElements, modelOf, store.visibility]);
   const connected = useMemo(() => connectedPairs(store.runs, store.points), [store.runs, store.points]);
-  const meshById = useMemo(() => new Map(model?.meshes.map((m) => [m.expressID, m]) ?? []), [model]);
+  const meshById = useMemo(() => new Map(planModel?.meshes.map((m) => [m.expressID, m]) ?? []), [planModel]);
 
   const chooseTool = useCallback(
     (spec: ToolSpec, disc: DisciplineTab | null = null) => {
       setToolState({ ...spec, n: ++toolCounter.current } as Tool);
       setToolDisc(disc);
       if (spec.kind === "pranchas") setView("prancha");
-      else if (spec.kind === "locacao" || spec.kind === "tracado") setView("planta");
+      else if (spec.kind === "locacao" || spec.kind === "tracado" || spec.kind === "arq") setView("planta");
       // Medir funciona na planta, nos cortes e no 3D: fica na vista atual (da folha vai para a planta).
       else if (spec.kind === "desenho" && isMeasureCmd(spec.cmd)) setView((v) => (v === "prancha" || v === "vazio" ? "planta" : v));
       else if (spec.kind === "desenho" && spec.cmd !== "corte-selecao") setView("planta");
@@ -332,7 +344,7 @@ export function App() {
   const sheetRender = useMemo(() => {
     if (view !== "prancha" || !model || !activeSheet) return null;
     const ctx: ModelContext = {
-      elements: model.elements,
+      elements: planModel?.elements ?? model.elements,
       meshes: meshById,
       cs: model.coordinates,
       storeyLevels: model.storeyLevels,
@@ -364,7 +376,7 @@ export function App() {
     const info = { ...activeSheet.info, conteudo: activeSheet.info.conteudo || activeSheet.name };
     const result = renderSheetViews(vps, activeSheet.format, info, titleBlocks.find((t) => t.id === activeSheet.titleBlockId) ?? null, georef.trueNorthDeg);
     return { result, drawings };
-  }, [view, model, activeSheet, meshById, store.points, store.runs, store.drafts, store.views, store.disciplines, boxes, resolveView, snapshots, titleBlocks, georef.trueNorthDeg, hiddenFor, store.doors]);
+  }, [view, model, planModel, activeSheet, meshById, store.points, store.runs, store.drafts, store.views, store.disciplines, boxes, resolveView, snapshots, titleBlocks, georef.trueNorthDeg, hiddenFor, store.doors]);
 
   const allSystems = useMemo(
     () =>
@@ -375,6 +387,11 @@ export function App() {
   );
   const getProperties = useCallback(
     (id: number) => {
+      const archId = archIdOf(id);
+      if (archId != null) {
+        const a = store.arch.find((x) => x.id === archId);
+        return a ? archProperties(a, store.arch) : [];
+      }
       const runId = runIdOfElement(id);
       if (runId != null) {
         const r = store.runs.find((x) => x.id === runId);
@@ -391,7 +408,7 @@ export function App() {
       }
       return model?.getProperties(id) ?? [];
     },
-    [model, store.points, store.runs, boxes],
+    [model, store.points, store.runs, store.arch, boxes],
   );
 
   // ---- Visualizador --------------------------------------------------------
@@ -477,6 +494,35 @@ export function App() {
     }));
     viewerRef.current?.setExtras("runs", [...visuals, ...fittings, ...boxVisuals]);
   }, [store.runs, model, boxes]);
+
+  // Arquitetura e estrutura na cena: como malhas de modelo (blocos, seleção, cores, cortes).
+  // Só o que mudou sai e entra de novo; abrir outro modelo limpa a cena (e a lista).
+  const archInScene = useRef(new Map<number, string>());
+  useEffect(() => {
+    archInScene.current.clear();
+  }, [hostModel]);
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || !hostModel) return;
+    const sig = (m: (typeof archMeshes)[number]) => {
+      let h = m.positions.length;
+      for (let i = 0; i < m.positions.length; i += 7) h = (h * 31 + Math.round(m.positions[i] * 1000)) | 0;
+      return `${h}|${m.color.join(",")}`;
+    };
+    const want = new Map(archMeshes.map((m) => [m.expressID, sig(m)]));
+    const drop = [...archInScene.current].filter(([id, s]) => want.get(id) !== s).map(([id]) => id);
+    if (drop.length) viewer.removeModelMeshes(drop);
+    for (const id of drop) archInScene.current.delete(id);
+    const fresh = archMeshes.filter((m) => !archInScene.current.has(m.expressID));
+    if (fresh.length) {
+      const infoOf = new Map(archInfos.map((e) => [e.expressID, e]));
+      viewer.addModelMeshes(fresh, (id) => {
+        const e = infoOf.get(id);
+        return e ? color3d(e, DISCIPLINE_BY_ID[e.discipline].color) : "#9ca3af";
+      });
+      for (const m of fresh) archInScene.current.set(m.expressID, want.get(m.expressID)!);
+    }
+  }, [archMeshes, archInfos, hostModel]);
 
   // Ganchos para testes automatizados da interface (somente em desenvolvimento).
   useEffect(() => {
@@ -932,8 +978,8 @@ export function App() {
     : resolveView(planKey.slice(5));
   /** Faixa de visualização da planta de pavimento aberta (nível base, abaixo e acima). */
   const planRange = useMemo(
-    () => (model && activeViewDef && floorPlan ? planRangeOf(activeViewDef, model.elements, model.storeyLevels) : undefined),
-    [model, activeViewDef, floorPlan?.section, floorPlan?.type],
+    () => (planModel && activeViewDef && floorPlan ? planRangeOf(activeViewDef, planModel.elements, planModel.storeyLevels) : undefined),
+    [planModel, activeViewDef, floorPlan?.section, floorPlan?.type],
   );
   // ---- Filtros -------------------------------------------------------------
   const visibleElements = useMemo<ElementInfo[]>(() => {
@@ -1167,7 +1213,30 @@ export function App() {
     onNotice: (msg) => files.setMessage(msg),
     isSection: activeViewDef?.kind === "corte",
   });
-  const planTool = tool.kind === "desenho" ? draft.tool : null;
+  // Arquitetura e estrutura: desenho na planta do pavimento aberto.
+  const [archParams, setArchParamsState] = useState<ArchParams>(readArchParams);
+  const setArchParams = useCallback((p: ArchParams) => {
+    setArchParamsState(p);
+    saveArchParams(p);
+  }, []);
+  const archStorey = activeViewDef?.storey ?? storey;
+  const archLevels = useMemo(() => {
+    if (!model) return { baseZ: 0, nextZ: 3 };
+    const { z, next } = archStoreyZ(model.storeyLevels, archStorey, model.coordinates);
+    const base = planRange?.type === "piso" ? model.coordinates.worldToIfc([0, planRange.base, 0])[2] : z;
+    return { baseZ: base, nextZ: Math.max(next, base + 0.5) };
+  }, [model, archStorey, planRange]);
+  const archTool = useArchTool({
+    kind: tool.kind === "arq" ? tool.elem : "parede",
+    structural: tool.kind === "arq" && !!tool.structural,
+    params: archParams,
+    store,
+    storey: archStorey,
+    baseZ: archLevels.baseZ,
+    nextZ: archLevels.nextZ,
+    onNotice: (msg) => files.setMessage(msg),
+  });
+  const planTool = tool.kind === "desenho" ? draft.tool : tool.kind === "arq" ? archTool : null;
 
   // Medição no 3D: cliques no modelo (com encaixe), Enter ou duplo clique encerra.
   const measuring3d = tool.kind === "desenho" && isMeasureCmd(tool.cmd) && view === "3d";
@@ -1198,6 +1267,10 @@ export function App() {
       return chooseTool({ kind: "propriedades" });
     }
     if (tool.kind === "locacao" || tool.kind === "tracado") return chooseTool({ kind: "propriedades" });
+    if (tool.kind === "arq") {
+      archTool.finish();
+      return chooseTool({ kind: "propriedades" });
+    }
     setSelection([]);
   };
   useEffect(() => {
@@ -1216,6 +1289,16 @@ export function App() {
   moveKeyBlocked.current = tool.kind !== "propriedades" || !(view === "planta" || view === "3d") || selection.length === 0;
   const moveRef = useRef<(d: Vec3, label: string) => void>(() => {});
   moveRef.current = (d, label) => {
+    // Arquitetura e estrutura: deslocamento em planta (e na vertical, no 3D com Alt).
+    const archSel = new Set(selection.map(archIdOf).filter((x): x is number => x != null));
+    if (archSel.size && model) {
+      const [dx, dy, dz] = model.coordinates.worldDirToIfc(d);
+      store.setArch((l) => l.map((e) => (archSel.has(e.id) ? raiseArch(moveArch(e, [dx, dy], l), dz) : e)));
+      if (selection.every((id) => archIdOf(id) != null)) {
+        files.setMessage(`Movido ${label}.`);
+        return;
+      }
+    }
     const pointIds = new Set(store.points.map((p) => p.id));
     const sel: MoveSelection = { points: [], segments: [] };
     const seen = new Set<string>();
@@ -1322,7 +1405,7 @@ export function App() {
   useEffect(() => {
     const v = viewerRef.current;
     if (!v) return;
-    v.canMove = (id) => move3dAllowed.current && (segmentIndexOf(id) != null || (id < 0 && id > -800000));
+    v.canMove = (id) => move3dAllowed.current && (segmentIndexOf(id) != null || (id < 0 && id > -800000) || archIdOf(id) != null);
     v.onMoveBy = (d) => {
       const fmt = (x: number) => x.toFixed(2).replace(".", ",");
       moveRef.current(d, d[1] ? `${fmt(Math.abs(d[1]))} m ${d[1] > 0 ? "para cima" : "para baixo"}` : `${fmt(Math.hypot(d[0], d[2]))} m`);
@@ -1550,6 +1633,18 @@ export function App() {
     switch (tool.kind) {
       case "propriedades":
         return null;
+      case "arq":
+        return (
+          <ArqPanel
+            kind={tool.elem}
+            structural={!!tool.structural}
+            params={archParams}
+            onChange={setArchParams}
+            storey={archStorey}
+            storeyHeight={archLevels.nextZ - archLevels.baseZ}
+            count={store.arch.filter((e) => e.kind === tool.elem).length}
+          />
+        );
       case "locacao":
         return (
           <LocacaoPanel
@@ -2111,7 +2206,7 @@ export function App() {
             {view === "planta" && model && viewer && storey && (
               <PlanEditor
                 viewer={viewer}
-                model={model}
+                model={planModel ?? model}
                 store={store}
                 storey={activeViewDef?.storey ?? storey}
                 cutHeight={activeViewDef?.cutHeight ?? editorCut}

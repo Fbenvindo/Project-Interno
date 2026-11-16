@@ -14,6 +14,7 @@ import { EMPTY_CHOICES, type ProjectChoices } from "../../../core/alternatives";
 import { DEFAULT_INSTALL_SETTINGS, type InstallSettings } from "../../../core/conduits";
 import type { HideRules } from "../../../core/visibility";
 import type { DoorOverride } from "../../../core/plan/build";
+import type { ArchElement } from "../../../core/arch";
 
 interface ProjectState {
   points: PlacedPoint[];
@@ -37,6 +38,8 @@ interface ProjectState {
   visibility: HideRules;
   /** Ajustes das portas do IFC (lado da abertura, dobradiça, sem arco), por GlobalId. */
   doors: Record<string, DoorOverride>;
+  /** Arquitetura e estrutura modeladas no app (paredes, portas, janelas, lajes, pilares, vigas). */
+  arch: ArchElement[];
 }
 
 export type ProjectSnapshot = ProjectState;
@@ -51,7 +54,7 @@ interface History {
 }
 
 const LIMIT = 200;
-const EMPTY: ProjectState = { points: [], runs: [], circuits: [], program: EMPTY_PROGRAM, links: [], georef: null, drafts: [], views: [], sheets: [], disciplines: [], choices: EMPTY_CHOICES, installSettings: DEFAULT_INSTALL_SETTINGS, profile: null, visibility: {}, doors: {} };
+const EMPTY: ProjectState = { points: [], runs: [], circuits: [], program: EMPTY_PROGRAM, links: [], georef: null, drafts: [], views: [], sheets: [], disciplines: [], choices: EMPTY_CHOICES, installSettings: DEFAULT_INSTALL_SETTINGS, profile: null, visibility: {}, doors: {}, arch: [] };
 
 type Patch<T> = (item: T) => Partial<T>;
 
@@ -76,7 +79,7 @@ export function usePointsStore() {
   const commit = useCallback((fn: (cur: ProjectState) => ProjectState, key: string | null = null) => {
     setH((s) => {
       const next = fn(s.present);
-      if (next.points === s.present.points && next.runs === s.present.runs && next.circuits === s.present.circuits && next.program === s.present.program && next.links === s.present.links && next.georef === s.present.georef && next.drafts === s.present.drafts && next.views === s.present.views && next.sheets === s.present.sheets && next.disciplines === s.present.disciplines && next.choices === s.present.choices && next.installSettings === s.present.installSettings && next.profile === s.present.profile && next.visibility === s.present.visibility && next.doors === s.present.doors) return s;
+      if ((Object.keys(next) as (keyof ProjectState)[]).every((k) => next[k] === s.present[k])) return s;
       if (key && key === s.lastKey) return { ...s, present: next, future: [] };
       return { ...s, past: [...s.past.slice(-LIMIT + 1), s.present], present: next, future: [], lastKey: key };
     });
@@ -167,6 +170,8 @@ export function usePointsStore() {
   const setVisibility = useCallback((fn: (v: HideRules) => HideRules, key: string | null = null) => commit((cur) => ({ ...cur, visibility: fn(cur.visibility ?? {}) }), key), [commit]);
   const setDoors = useCallback((fn: (d: Record<string, DoorOverride>) => Record<string, DoorOverride>) => commit((cur) => ({ ...cur, doors: fn(cur.doors ?? {}) })), [commit]);
   const setProfile = useCallback((fn: (p: BuildingProfile | null) => BuildingProfile | null, key: string | null = "perfil") => commit((cur) => ({ ...cur, profile: fn(cur.profile) }), key), [commit]);
+  /** Arquitetura e estrutura (agrupa edições seguidas do mesmo campo). */
+  const setArch = useCallback((fn: (a: ArchElement[]) => ArchElement[], key: string | null = null) => commit((cur) => ({ ...cur, arch: fn(cur.arch ?? []) }), key && `arq:${key}`), [commit]);
   const setChoices = useCallback((fn: (c: ProjectChoices) => ProjectChoices) => commit((cur) => ({ ...cur, choices: fn(cur.choices) })), [commit]);
 
   /** Substitui todo o projeto e zera o histórico (abrir arquivo ou novo modelo). */
@@ -213,11 +218,12 @@ export function usePointsStore() {
       profile: h.present.profile,
       visibility: h.present.visibility ?? {},
       doors: h.present.doors ?? {},
+      arch: h.present.arch ?? [],
       canUndo: h.past.length > 0,
       canRedo: h.future.length > 0,
       dirty: h.present !== h.saved,
       isEmpty:
-        !h.present.points.length && !h.present.runs.length && !h.present.circuits.length && !Object.keys(h.present.program.rooms).length && !h.present.drafts.length,
+        !h.present.points.length && !h.present.runs.length && !h.present.circuits.length && !Object.keys(h.present.program.rooms).length && !h.present.drafts.length && !(h.present.arch?.length ?? 0),
       add,
       update,
       remove,
@@ -241,12 +247,13 @@ export function usePointsStore() {
       setProfile,
       setVisibility,
       setDoors,
+      setArch,
       reset,
       markSaved,
       undo,
       redo,
     }),
-    [h, add, update, remove, addRuns, updateRuns, removeRuns, addCircuits, updateCircuits, removeCircuits, assignPoints, mutate, setProgram, setLinks, setGeoref, setDrafts, setViews, setSheets, setDisciplines, setChoices, setInstallSettings, setProfile, setVisibility, setDoors, reset, markSaved, undo, redo],
+    [h, add, update, remove, addRuns, updateRuns, removeRuns, addCircuits, updateCircuits, removeCircuits, assignPoints, mutate, setProgram, setLinks, setGeoref, setDrafts, setViews, setSheets, setDisciplines, setChoices, setInstallSettings, setProfile, setVisibility, setDoors, setArch, reset, markSaved, undo, redo],
   );
 }
 

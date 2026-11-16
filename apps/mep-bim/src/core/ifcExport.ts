@@ -10,6 +10,7 @@ import { boxSizeLabel, INSTALL_LABEL, pullBoxes } from "./conduits";
 import { boxLabel, modulesText } from "./devices";
 import { degreesToCompound, type Georef } from "./georef";
 import type { Discipline, Vec3 } from "./types";
+import { archProperties, buildArch, type ArchElement } from "./arch";
 
 class StepWriter {
   private lines: string[] = [];
@@ -75,6 +76,10 @@ export interface ExportOptions {
   georef?: Georef;
   /** Disciplina(s) do arquivo, no nome do projeto IFC (ex.: "Elétrica"). */
   title?: string;
+  /** Paredes, portas, janelas, lajes, pilares e vigas modelados no app. */
+  arch?: ArchElement[];
+  /** Só estes elementos de arquitetura/estrutura vão para o arquivo (os demais servem de hospedeiros). */
+  archOnly?: (e: ArchElement) => boolean;
 }
 
 /** Só o que pertence às disciplinas pedidas (um IFC por disciplina). Circuitos seguem os pontos e trechos. */
@@ -105,7 +110,7 @@ export function disciplinesInUse(points: PlacedPoint[], runs: Run[]): Discipline
   return [...set];
 }
 
-export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs, runs = [], circuits = [], georef, title }: ExportOptions): string {
+export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs, runs = [], circuits = [], georef, title, arch = [], archOnly }: ExportOptions): string {
   const w = new StepWriter();
   const MM = 1000;
   const pt = ([x, y, z]: Vec3) => w.add(`IFCCARTESIANPOINT((${num(x)},${num(y)},${num(z)}))`);
@@ -336,6 +341,42 @@ export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs,
     const pset = w.add(`IFCPROPERTYSET('${newGuid()}',$,'Pset_MEP_CaixaPassagem',$,${list(props)})`);
     w.add(`IFCRELDEFINESBYPROPERTIES('${newGuid()}',$,$,$,${list([el])},${ref(pset)})`);
     addToStoreyAndSystem(el, storeyProbeY(b, b.position[1]), r.system, "ELECTRICAL");
+  }
+
+  // ---- Arquitetura e estrutura modeladas no app (malha triangulada, coordenadas do IFC) -----
+  for (const piece of buildArch(arch, cs)) {
+    const { el: a, mesh } = piece;
+    if (!mesh.indices.length || (archOnly && !archOnly(a))) continue;
+    const coords: string[] = [];
+    for (let i = 0; i < mesh.positions.length; i += 3) coords.push(`(${num(mesh.positions[i] * MM)},${num(mesh.positions[i + 1] * MM)},${num(mesh.positions[i + 2] * MM)})`);
+    const tris: string[] = [];
+    for (let i = 0; i < mesh.indices.length; i += 3) tris.push(`(${mesh.indices[i] + 1},${mesh.indices[i + 1] + 1},${mesh.indices[i + 2] + 1})`);
+    const fs = w.add(`IFCTRIANGULATEDFACESET(${ref(w.add(`IFCCARTESIANPOINTLIST3D((${coords.join(",")}))`))},$,.T.,(${tris.join(",")}),$)`);
+    const rep = w.add(`IFCSHAPEREPRESENTATION(${ref(context)},'Body','Tessellation',${list([fs])})`);
+    const shape = w.add(`IFCPRODUCTDEFINITIONSHAPE($,$,${list([rep])})`);
+    const pl = placement([0, 0, 0]);
+    const head = `'${a.guid}',$,${str(piece.info.name)},$,${str(a.name)},${ref(pl)},${ref(shape)},$`;
+    const el =
+      a.kind === "parede"
+        ? w.add(`IFCWALL(${head},.${a.structural ? "SHEAR" : "STANDARD"}.)`)
+        : a.kind === "porta"
+          ? w.add(`IFCDOOR(${head},${num(a.height * MM)},${num(a.width * MM)},.DOOR.,.${piece.info.operation ?? "SINGLE_SWING_LEFT"}.,$)`)
+          : a.kind === "janela"
+            ? w.add(`IFCWINDOW(${head},${num(a.height * MM)},${num(a.width * MM)},.WINDOW.,.SINGLE_PANEL.,$)`)
+            : a.kind === "laje"
+              ? w.add(`IFCSLAB(${head},.FLOOR.)`)
+              : a.kind === "pilar"
+                ? w.add(`IFCCOLUMN(${head},.COLUMN.)`)
+                : w.add(`IFCBEAM(${head},.BEAM.)`);
+    const props = archProperties(a, arch).flatMap((g) =>
+      g.values.map((v) => w.add(`IFCPROPERTYSINGLEVALUE(${str(v.name)},$,${typeof v.value === "number" ? `IFCREAL(${num(v.value)})` : `IFCLABEL(${str(String(v.value))})`},$)`)),
+    );
+    if (props.length) {
+      const pset = w.add(`IFCPROPERTYSET('${newGuid()}',$,'Pset_SmartEasyBIM',$,${list(props)})`);
+      w.add(`IFCRELDEFINESBYPROPERTIES('${newGuid()}',$,$,$,${list([el])},${ref(pset)})`);
+    }
+    const st = storeyIds.get(a.storey);
+    (st ? st.elements : looseElements).push(el);
   }
 
   for (const s of storeyIds.values()) {

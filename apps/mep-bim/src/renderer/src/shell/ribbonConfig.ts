@@ -1,7 +1,8 @@
 // Menu superior (por disciplina) e faixa de ferramentas de cada um.
 import type { DraftCmd } from "../desenho/useDraftTool";
+import type { ArchKind } from "../../../core/arch";
 
-export type TopTab = "arquivo" | "criar" | "modificar" | "geral" | "modelo" | "programa" | "eletrica" | "hidraulica" | "incendio" | "climatizacao" | "pranchas";
+export type TopTab = "arquivo" | "criar" | "modificar" | "geral" | "modelo" | "arquitetura" | "estrutura" | "programa" | "eletrica" | "hidraulica" | "incendio" | "climatizacao" | "pranchas";
 export type DisciplineTab = "eletrica" | "hidraulica" | "incendio" | "climatizacao";
 
 export const TOP_TABS: { id: TopTab; label: string }[] = [
@@ -10,6 +11,8 @@ export const TOP_TABS: { id: TopTab; label: string }[] = [
   { id: "modificar", label: "Modificar" },
   { id: "geral", label: "Geral" },
   { id: "modelo", label: "Modelo" },
+  { id: "arquitetura", label: "Arquitetura" },
+  { id: "estrutura", label: "Estrutura" },
   { id: "programa", label: "Programa" },
   { id: "eletrica", label: "Elétrica" },
   { id: "hidraulica", label: "Hidráulica" },
@@ -35,6 +38,7 @@ export type ToolSpec =
   | { kind: "perfil" }
   | { kind: "visibilidade" }
   | { kind: "desenho"; cmd: DraftCmd }
+  | { kind: "arq"; elem: ArchKind; structural?: boolean }
   | { kind: "programa"; section: "tipos" | "ambientes" };
 
 export type Tool = ToolSpec & { n: number };
@@ -128,6 +132,7 @@ export const DISCIPLINE_TABS: Record<DisciplineTab, DisciplineCfg> = {
 
 const draw = (cmd: DraftCmd, label: string, icon: string): RibbonButton => ({ key: `d-${cmd}`, label, icon, tool: { kind: "desenho", cmd }, needsModel: true });
 const loc = (key: string, label: string, icon: string, componentId: string): RibbonButton => ({ key, label, icon, tool: { kind: "locacao", componentId }, needsModel: true });
+const arq = (key: string, label: string, icon: string, elem: ArchKind, structural = false): RibbonButton => ({ key, label, icon, tool: { kind: "arq", elem, ...(structural ? { structural } : {}) }, needsModel: true });
 const run = (key: string, label: string, icon: string, typeId: string): RibbonButton => ({ key, label, icon, tool: { kind: "tracado", typeId }, needsModel: true });
 
 export const RIBBON: Record<TopTab, RibbonGroup[]> = {
@@ -277,6 +282,45 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
         { key: "propriedades", label: "Propriedades", icon: "propriedades", action: "propriedades", needsModel: true },
         { key: "quantitativos", label: "Quantitativos", icon: "quantitativos", tool: { kind: "quantitativos" }, needsModel: true },
         { key: "interferencias", label: "Interferências", icon: "interferencias", tool: { kind: "interferencias" }, needsModel: true },
+      ],
+    },
+  ],
+  arquitetura: [
+    {
+      label: "Construir",
+      buttons: [arq("a-parede", "Parede", "aParede", "parede"), arq("a-porta", "Porta", "aPorta", "porta"), arq("a-janela", "Janela", "aJanela", "janela"), arq("a-piso", "Piso / laje", "aLaje", "laje")],
+    },
+    {
+      label: "Modificar",
+      buttons: [draw("mover", "Mover", "mMover"), draw("copiar", "Copiar", "mCopiar"), draw("apagar", "Apagar", "mApagar")],
+    },
+    {
+      label: "Consulta",
+      buttons: [
+        { key: "a-selecionar", label: "Selecionar", icon: "selecionar", tool: { kind: "propriedades" }, needsModel: true },
+        { key: "a-quantitativos", label: "Quantitativos", icon: "quantitativos", tool: { kind: "quantitativos" }, needsModel: true },
+      ],
+    },
+  ],
+  estrutura: [
+    {
+      label: "Estrutura",
+      buttons: [
+        arq("e-pilar", "Pilar", "aPilar", "pilar"),
+        arq("e-viga", "Viga", "aViga", "viga"),
+        arq("e-laje", "Laje", "aLaje", "laje", true),
+        arq("e-parede", "Parede estrutural", "aParede", "parede", true),
+      ],
+    },
+    {
+      label: "Modificar",
+      buttons: [draw("mover", "Mover", "mMover"), draw("copiar", "Copiar", "mCopiar"), draw("apagar", "Apagar", "mApagar")],
+    },
+    {
+      label: "Consulta",
+      buttons: [
+        { key: "e-selecionar", label: "Selecionar", icon: "selecionar", tool: { kind: "propriedades" }, needsModel: true },
+        { key: "e-quantitativos", label: "Quantitativos", icon: "quantitativos", tool: { kind: "quantitativos" }, needsModel: true },
       ],
     },
   ],
@@ -433,5 +477,6 @@ export function sameTool(a: ToolSpec, b: ToolSpec | undefined): boolean {
   if (a.kind === "calc" && b.kind === "calc") return a.which === b.which;
   if (a.kind === "programa" && b.kind === "programa") return a.section === b.section;
   if (a.kind === "desenho" && b.kind === "desenho") return a.cmd === b.cmd;
+  if (a.kind === "arq" && b.kind === "arq") return a.elem === b.elem && !!a.structural === !!b.structural;
   return true;
 }

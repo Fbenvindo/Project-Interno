@@ -4,6 +4,7 @@ import { DISCIPLINE_BY_ID } from "../../../core/disciplines";
 import type { Discipline } from "../../../core/types";
 import { effectiveGeoref } from "../../../core/georef";
 import { deserializeProject, serializeProject } from "../../../core/project";
+import { archDiscipline } from "../../../core/arch";
 import type { LoadedModel } from "../../../ifc/loadIfc";
 import { desktop, openTextFile, saveFile } from "../platform";
 import type { PointsStore } from "./usePointsStore";
@@ -53,7 +54,7 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel | null, f
       const json = JSON.stringify(
         {
           ...serializeProject(
-            { points: store.points, runs: store.runs, circuits: store.circuits, program: store.program, links: store.links, georef: store.georef, drafts: store.drafts, views: store.views, sheets: store.sheets, disciplines: store.disciplines, choices: store.choices, installSettings: store.installSettings, profile: store.profile, visibility: store.visibility, doors: store.doors },
+            { points: store.points, runs: store.runs, circuits: store.circuits, program: store.program, links: store.links, georef: store.georef, drafts: store.drafts, views: store.views, sheets: store.sheets, disciplines: store.disciplines, choices: store.choices, installSettings: store.installSettings, profile: store.profile, visibility: store.visibility, doors: store.doors, arch: store.arch },
             model.coordinates,
             fileName,
           ),
@@ -115,7 +116,7 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel | null, f
     async (perDiscipline = false) => {
       if (!model) return;
       const groups: { disc: Discipline[] | null; suffix: string; title?: string }[] = perDiscipline
-        ? disciplinesInUse(store.points, store.runs).map((d) => ({ disc: [d], suffix: slugDisc(d), title: DISCIPLINE_BY_ID[d].label }))
+        ? [...new Set([...disciplinesInUse(store.points, store.runs), ...store.arch.map(archDiscipline)])].map((d) => ({ disc: [d], suffix: slugDisc(d), title: DISCIPLINE_BY_ID[d].label }))
         : store.disciplines.length
           ? [{ disc: store.disciplines, suffix: store.disciplines.map(slugDisc).join("-"), title: store.disciplines.map((d) => DISCIPLINE_BY_ID[d].label).join(", ") }]
           : [{ disc: null, suffix: "mep" }];
@@ -123,7 +124,9 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel | null, f
       const saved: string[] = [];
       for (const g of groups) {
         const sel = g.disc ? filterByDisciplines(store.points, store.runs, store.circuits, new Set(g.disc)) : { points: store.points, runs: store.runs, circuits: store.circuits };
-        if (!sel.points.length && !sel.runs.length) continue;
+        const archOnly = g.disc ? (e: (typeof store.arch)[number]) => g.disc!.includes(archDiscipline(e)) : undefined;
+        const archCount = archOnly ? store.arch.filter(archOnly).length : store.arch.length;
+        if (!sel.points.length && !sel.runs.length && !archCount) continue;
         const text = exportPointsIfc(sel.points, {
           modelName: fileName,
           storeys: model.storeyLevels,
@@ -132,6 +135,8 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel | null, f
           circuits: sel.circuits,
           georef: effectiveGeoref(model.georef, store.georef),
           title: g.title,
+          arch: store.arch,
+          archOnly,
         });
         const path = await saveFile({ defaultName: `${base(fileName)}-${g.suffix}.ifc`, content: text, filters: [{ name: "IFC", extensions: ["ifc"] }] });
         if (path) saved.push(path);
