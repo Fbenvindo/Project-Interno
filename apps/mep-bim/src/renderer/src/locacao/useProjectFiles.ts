@@ -9,7 +9,7 @@ import type { LoadedModel } from "../../../ifc/loadIfc";
 import { desktop, openTextFile, saveFile } from "../platform";
 import type { PointsStore } from "./usePointsStore";
 
-const base = (name: string | null) => (name ?? "modelo").replace(/\.ifc$/i, "");
+const base = (name: string | null) => (name ?? "modelo").replace(/\.(ifc|sebmod)$/i, "");
 const slugDisc = (d: Discipline) => (d === "hvac" ? "climatizacao" : d === "eletrica" ? "eletrica" : d);
 
 // ---- Arquivo do projeto (compartilhado por todos os painéis) -----------------------------------

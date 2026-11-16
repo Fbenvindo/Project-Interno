@@ -2,7 +2,9 @@ SmartEasyBIM para Revit
 =======================
 
 Exporta famílias do Revit (geometria 3D, tipos, parâmetros e conectores) para a
-biblioteca do aplicativo SmartEasyBIM.
+biblioteca do aplicativo SmartEasyBIM, e o modelo do projeto (elementos, famílias,
+categorias e parâmetros, com níveis, ambientes, eixos e coordenadas) para ser aberto
+ou vinculado no SmartEasyBIM.
 
 Instalação
 ----------
@@ -19,6 +21,11 @@ Uso
   marcadas) e salve o arquivo .sebfam.
 - No editor de famílias: a família aberta é exportada.
 - No SmartEasyBIM: Arquivo > Importar elementos em IFC > Importar famílias (.sebfam).
+
+- Aba SmartEasyBIM > Exportar modelo: marque as categorias (arquitetura e estrutura já
+  vêm marcadas) e salve o arquivo .sebmod. No SmartEasyBIM: Arquivo > Novo projeto
+  (modelo base) ou Vincular IFC (referência). Plantas, vistas e folhas não são
+  exportadas: o SmartEasyBIM monta as suas.
 
 O plugin só lê as famílias: nada é alterado no projeto nem nos arquivos .rfa.
 

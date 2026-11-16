@@ -742,7 +742,7 @@ export function App() {
     const m = await openFile(file, { skipConfirm: true });
     if (m) {
       setProjectFile({ path: null, name: null });
-      files.setMessage(`Novo projeto sobre ${file.name}. O IFC é só referência (não é alterado); salve o projeto como arquivo .seb.`);
+      files.setMessage(`Novo projeto sobre ${file.name}. O modelo é só referência (não é alterado); salve o projeto como arquivo .seb.`);
     }
   }, [openFile, files]);
 
@@ -774,7 +774,7 @@ export function App() {
     const drop = async (e: DragEvent) => {
       e.preventDefault();
       const file = e.dataTransfer?.files[0];
-      if (file && file.name.toLowerCase().endsWith(".ifc")) {
+      if (file && /\.(ifc|sebmod)$/i.test(file.name)) {
         await openFile({ name: file.name, path: null, data: new Uint8Array(await file.arrayBuffer()) });
       }
     };
@@ -1063,7 +1063,7 @@ export function App() {
         name: `Folha ${String(n).padStart(2, "0")}`,
         format,
         titleBlockId: titleBlockById(defaultTitleBlockId())?.id ?? null,
-        info: { projeto: (fileName ?? "").replace(/\.ifc$/i, ""), conteudo: "", responsavel: "", data: new Date().toLocaleDateString("pt-BR"), revisao: "R00", folha: String(n).padStart(2, "0") },
+        info: { projeto: (fileName ?? "").replace(/\.(ifc|sebmod)$/i, ""), conteudo: "", responsavel: "", data: new Date().toLocaleDateString("pt-BR"), revisao: "R00", folha: String(n).padStart(2, "0") },
         viewports: viewIds.map((viewId) => ({ viewId })),
       };
       store.setSheets((l) => [...l, s]);
@@ -1162,7 +1162,7 @@ export function App() {
         name: `Planta ${st}`,
         format: "A1",
         titleBlockId: titleBlockById(defaultTitleBlockId())?.id ?? null,
-        info: { projeto: (fileName ?? "").replace(/\.ifc$/i, ""), conteudo: `Planta — ${st}`, responsavel: "", data: new Date().toLocaleDateString("pt-BR"), revisao: "R00", folha: String(n).padStart(2, "0") },
+        info: { projeto: (fileName ?? "").replace(/\.(ifc|sebmod)$/i, ""), conteudo: `Planta — ${st}`, responsavel: "", data: new Date().toLocaleDateString("pt-BR"), revisao: "R00", folha: String(n).padStart(2, "0") },
         viewports: [{ viewId: docPlanOf(store.views, st).id }],
       };
     });
@@ -1420,7 +1420,7 @@ export function App() {
   const rightWidth = view === "fluxograma" && tool.kind === "propriedades" ? 380 : tool.kind === "propriedades" ? 0 : tool.kind === "pranchas" ? 400 : tool.kind === "programa" ? 620 : tool.kind === "perfil" ? 640 : 460;
   const resolveCeiling = useMemo(() => (viewer && model ? makeCeilingResolver(viewer, elementById, model.storeyLevels) : null), [viewer, model, elementById]);
   const slabAt = useMemo(() => (viewer && model ? makeSlabProbe(viewer, elementById, model.storeyLevels) : null), [viewer, model, elementById]);
-  const projectName = (fileName ?? "").replace(/\.ifc$/i, "");
+  const projectName = (fileName ?? "").replace(/\.(ifc|sebmod)$/i, "");
 
   // ---- Fluxogramas -------------------------------------------------------------------------
   const flowDef = flowId ? (store.views.find((v) => v.id === flowId && v.kind === "fluxograma" && v.flow) ?? null) : null;

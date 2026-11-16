@@ -4,6 +4,7 @@ import { loadIfc, modelFromData, type LoadedModel } from "../../../ifc/loadIfc";
 import { getIfcApi } from "../platform";
 import type { WorkerRequest, WorkerResponse } from "./ifcWorker";
 import { cachePut } from "./modelCache";
+import { isSebmod, readSebmodBytes, sebmodToData } from "../../../ifc/sebmod";
 
 export interface LoadInfo {
   fromCache: boolean;
@@ -110,6 +111,16 @@ export async function loadIfcModel(
   onProgress: (stage: string, fraction: number) => void = () => {},
   opts: { transfer?: boolean } = {},
 ): Promise<{ model: LoadedModel; info: LoadInfo }> {
+  // Modelo exportado do Revit pelo plugin (.sebmod): já vem pronto, sem o leitor IFC.
+  if (isSebmod(file.name, file.data)) {
+    const t0 = performance.now();
+    onProgress("Lendo modelo do Revit", 0.1);
+    const json = await readSebmodBytes(file.data);
+    onProgress("Montando geometria", 0.6);
+    await new Promise((r) => setTimeout(r, 0));
+    const model = modelFromData(sebmodToData(json));
+    return { model, info: { fromCache: false, ms: performance.now() - t0 } };
+  }
   const w = getWorker();
   if (w) {
     try {

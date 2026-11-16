@@ -102,7 +102,7 @@ function buildMenu() {
 ipcMain.handle("ifc:open", async (): Promise<OpenedFile | null> => {
   const res = await dialog.showOpenDialog(mainWindow!, {
     title: "Abrir modelo IFC",
-    filters: [{ name: "Modelos IFC", extensions: ["ifc"] }],
+    filters: [{ name: "Modelos IFC ou do Revit (SmartEasyBIM)", extensions: ["ifc", "sebmod"] }],
     properties: ["openFile"],
   });
   if (res.canceled || !res.filePaths[0]) return null;
@@ -112,7 +112,7 @@ ipcMain.handle("ifc:open", async (): Promise<OpenedFile | null> => {
 ipcMain.handle("ifc:openMany", async (): Promise<OpenedFile[]> => {
   const res = await dialog.showOpenDialog(mainWindow!, {
     title: "Vincular modelos IFC",
-    filters: [{ name: "Modelos IFC", extensions: ["ifc"] }],
+    filters: [{ name: "Modelos IFC ou do Revit (SmartEasyBIM)", extensions: ["ifc", "sebmod"] }],
     properties: ["openFile", "multiSelections"],
   });
   if (res.canceled) return [];

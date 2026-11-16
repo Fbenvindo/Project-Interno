@@ -225,6 +225,23 @@ Em **Arquivo › Importar elementos em IFC**. Neste app, *elemento* = família.
 - **Cortes 2D:** as emendas internas da triangulação das faces (comuns em paredes com aberturas) não aparecem mais como linhas.
 - **Abas de vista:** o botão **×** fecha a vista aberta. Num corte, ampliação ou planta extra, volta à planta do pavimento. Numa vista 3D salva ou recortada, volta ao modelo completo sem recortes. Na folha, volta à planta.
 
+### Modelo exportado do Revit (.sebmod)
+
+O plugin do Revit (aba **SmartEasyBIM › Exportar modelo**) leva o modelo para o app sem passar pelo IFC. Só o modelo vai; plantas, vistas e folhas são montadas no SmartEasyBIM.
+
+- **O que vai no arquivo:**
+  - os elementos, com categoria, família, tipo, parâmetros de instância e de tipo (com os grupos do Revit) e a geometria em detalhe fino;
+  - os níveis, os ambientes (contorno, número, nome e área), os eixos e as coordenadas compartilhadas (survey point e norte).
+- **Como se escolhe:** no diálogo, por categoria. Arquitetura e estrutura já vêm marcadas.
+- **Tamanho do arquivo:**
+  - Instâncias iguais de uma família (mesmo tipo e mesmos parâmetros de instância) dividem uma geometria só, colocada pela matriz de cada instância.
+  - O arquivo é JSON compactado, bem menor que o IFC equivalente.
+- **Portas e janelas:** levam o símbolo de planta da própria família (folha, arco, caixilho), lido no editor de famílias sem alterar nada. Na planta do app ficam como no Revit.
+- **No app:** abra o `.sebmod` em **Arquivo › Novo projeto** (modelo base) ou **Vincular IFC** (referência), ou arraste-o para a janela.
+  - As categorias do Revit viram as classes equivalentes (paredes → IfcWall, pisos → IfcSlab, pilares estruturais → IfcColumn, vigas → IfcBeam…).
+  - Com isso, plantas, cortes, 3D, visibilidade, quantitativos e propriedades funcionam como com um IFC.
+  - Modelos longe da origem interna são trazidos para perto na cena, mantendo as coordenadas do projeto.
+
 ### Modelar arquitetura e estrutura
 
 As abas **Arquitetura** e **Estrutura** criam os elementos no próprio app, desenhando na planta do pavimento aberto. Os cliques usam o encaixe e o ortogonal da barra de status, e as medidas ficam no painel da direita (guardadas para a próxima vez).

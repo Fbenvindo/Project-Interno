@@ -65,6 +65,8 @@ export interface ElementInfo {
   obb?: OBB;
   /** Portas: origem e eixos da colocação no IFC (cena): x ao longo da parede, y para onde abre. */
   frame?: { o: Vec3; x: Vec3; y: Vec3 };
+  /** Símbolo em planta da família do Revit (polilinhas x, y nas coordenadas do projeto): porta com folha e arco, janela. */
+  planSymbol?: number[][];
   /** Portas: tipo de abertura do IFC (ex.: SINGLE_SWING_LEFT, DOUBLE_DOOR_SINGLE_SWING). */
   operation?: string | null;
 }

@@ -16,7 +16,7 @@ export async function openIfc(): Promise<OpenedFile | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".ifc";
+    input.accept = ".ifc,.sebmod";
     input.onchange = async () => {
       const file = input.files?.[0];
       resolve(file ? { name: file.name, path: null, data: new Uint8Array(await file.arrayBuffer()) } : null);
@@ -31,7 +31,7 @@ export async function openIfcMany(): Promise<OpenedFile[]> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".ifc";
+    input.accept = ".ifc,.sebmod";
     input.multiple = true;
     input.onchange = async () => {
       const files = [...(input.files ?? [])];

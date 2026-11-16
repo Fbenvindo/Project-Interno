@@ -225,6 +225,16 @@ export function buildPlan(input: PlanInput): PlanDrawing {
     const hi = e.bbox!.max[1];
     const yCut = cutY > lo + 0.05 && cutY < hi - 0.05 ? cutY : (lo + hi) / 2;
     pushElement(e, cutMesh(mesh.positions, mesh.indices, yCut), false);
+    // Família do Revit com símbolo de planta: desenhado como no Revit (folha, arco, caixilho).
+    if (e.planSymbol?.length) {
+      if (R?.type !== "teto" || e.ifcType !== "IFCDOOR")
+        for (const line of e.planSymbol) {
+          const pts: P2[] = [];
+          for (let i = 0; i + 1 < line.length; i += 2) pts.push([line[i], line[i + 1]]);
+          if (pts.length >= 2) prims.push({ t: "poly", pts, closed: false, weight: PEN.vista, layer: "ARQ-PORTAS", color: "#333333", id: e.expressID });
+        }
+      continue;
+    }
     if (e.ifcType === "IFCDOOR" && e.frame && R?.type !== "teto") prims.push(...doorSwing(e, mesh.positions, mesh.indices, plan, input.spaces ?? [], input.doors?.[e.globalId], R ? R.base : level));
   }
 

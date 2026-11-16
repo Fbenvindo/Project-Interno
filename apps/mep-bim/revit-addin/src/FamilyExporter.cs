@@ -403,7 +403,7 @@ namespace SmartEasyBIM.Revit
         private const int MaxPlanPoints = 20000;
 
         /// <summary>Linhas simbólicas visíveis em planta (vista superior), como o Revit desenha a família na planta.</summary>
-        private static void ReadPlanLines(Document fam, ExportedType et)
+        internal static void ReadPlanLines(Document fam, ExportedType et)
         {
             int count = 0;
             foreach (var sc in new FilteredElementCollector(fam).OfClass(typeof(SymbolicCurve)).Cast<SymbolicCurve>())

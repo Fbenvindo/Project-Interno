@@ -25,6 +25,18 @@ namespace SmartEasyBIM.Revit
                 Image = Icons.Logo(16),
             };
             panel.AddItem(data);
+
+            var modelPanel = application.CreateRibbonPanel(TabName, "Modelo");
+            var model = new PushButtonData("SmartEasyBIM.ExportarModelo", "Exportar\nmodelo", assembly, typeof(ModelExportCommand).FullName)
+            {
+                ToolTip = "Exporta o modelo (elementos, famílias, tipos, categorias e parâmetros) para o SmartEasyBIM.",
+                LongDescription =
+                    "Escolha as categorias (arquitetura e estrutura já vêm marcadas). Vão a geometria, os níveis, os ambientes, os eixos e as coordenadas compartilhadas; " +
+                    "plantas, vistas e folhas não. Gera um arquivo .sebmod; no SmartEasyBIM, abra como modelo base ou vincule.",
+                LargeImage = Icons.Logo(32),
+                Image = Icons.Logo(16),
+            };
+            modelPanel.AddItem(model);
             return Result.Succeeded;
         }
 
