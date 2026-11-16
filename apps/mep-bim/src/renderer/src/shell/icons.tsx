@@ -412,6 +412,13 @@ const P: Record<string, ReactNode> = {
       <path d="M9 6 L12 3 L15 6 M9 18 L12 21 L15 18 M6 9 L3 12 L6 15 M18 9 L21 12 L18 15" />
     </>
   ),
+  zoomJanela: (
+    <>
+      <circle cx="10" cy="10" r="6" />
+      <path d="M14.5 14.5 L20 20" />
+      <rect x="7" y="7.5" width="6" height="5" strokeDasharray="2 1.5" />
+    </>
+  ),
   olho: (
     <>
       <path d="M2 12 C5 6 9 4 12 4 C15 4 19 6 22 12 C19 18 15 20 12 20 C9 20 5 18 2 12 Z" />

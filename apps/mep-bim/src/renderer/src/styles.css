@@ -2719,3 +2719,75 @@ h3 {
   flex-direction: column;
   gap: 4px;
 }
+
+/* Cubo de orientação e zoom (3D) */
+.view-cube-wrap {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  z-index: 6;
+  user-select: none;
+}
+.view-cube-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.view-cube-tools .icon-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.view-cube-tools .icon-btn.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.view-cube-scene {
+  perspective: 400px;
+  margin: 8px;
+}
+.view-cube {
+  position: relative;
+  transform-style: preserve-3d;
+}
+.view-cube-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 600 9px/1 Inter, sans-serif;
+  letter-spacing: 0.04em;
+  color: #334155;
+  background: rgba(241, 245, 249, 0.92);
+  border: 1px solid #94a3b8;
+  backface-visibility: hidden;
+  cursor: pointer;
+  padding: 0;
+}
+.view-cube-face:hover {
+  background: #bae6fd;
+  color: #0c4a6e;
+}
+/* Zoom janela e enquadrar na planta 2D */
+.plan-zoom-tools {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: flex;
+  gap: 4px;
+  z-index: 5;
+}
+.plan-zoom-tools .icon-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.plan-zoom-tools .icon-btn.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.plan-editor.zooming {
+  cursor: crosshair;
+}

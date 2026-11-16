@@ -224,6 +224,30 @@ export class Viewer {
     canvas.addEventListener("pointerup", (e) => {
       if (this.moveDrag && e.button === 2) this.endMoveDrag(true);
     });
+    // Zoom janela: os cliques são da janela (nada de seleção ou giro enquanto ativo).
+    canvas.addEventListener(
+      "pointerdown",
+      (e) => {
+        if (!this.zoomWin) return;
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        this.zoomWindowClick(e);
+      },
+      { capture: true },
+    );
+    canvas.addEventListener("pointermove", (e) => {
+      const z = this.zoomWin;
+      if (!z?.p0) return;
+      const r = this.container.getBoundingClientRect();
+      Object.assign(this.boxEl.style, {
+        left: `${Math.min(z.p0.x, e.clientX) - r.left}px`,
+        top: `${Math.min(z.p0.y, e.clientY) - r.top}px`,
+        width: `${Math.abs(e.clientX - z.p0.x)}px`,
+        height: `${Math.abs(e.clientY - z.p0.y)}px`,
+      });
+      this.boxEl.classList.remove("crossing");
+      this.boxEl.hidden = false;
+    });
     canvas.addEventListener("pointerdown", (e) => {
       this.pointerDown = { x: e.clientX, y: e.clientY };
       this.boxStart = e.button === 0 && !this.placement && !this.measureMode ? { x: e.clientX, y: e.clientY } : null;
@@ -1095,8 +1119,90 @@ export class Viewer {
       this.needsRender = false;
       this.renderer.render(this.scene, this.camera);
       this.placeMeasureLabels();
+      for (const cb of this.cameraListeners) cb();
     }
   };
+
+  // ---- Cubo de orientação e zoom ---------------------------------------------------------
+
+  private cameraListeners = new Set<() => void>();
+  /** Avisado a cada quadro desenhado (o cubo de orientação acompanha a câmera). */
+  onCameraChange(cb: () => void): () => void {
+    this.cameraListeners.add(cb);
+    cb();
+    return () => this.cameraListeners.delete(cb);
+  }
+  /** Rotação da câmera (matriz inversa do mundo, só a parte de rotação). */
+  getCameraInverse(): number[] {
+    this.camera.updateMatrixWorld();
+    return [...this.camera.matrixWorldInverse.elements];
+  }
+  /** Olha o modelo de uma direção (ex.: [0, 1, 0] = de cima) e enquadra o que está visível. */
+  viewFrom(dir: Vec3) {
+    // Exatamente na vertical a órbita perde a referência: um leve desvio para o norte.
+    const d: Vec3 = Math.abs(dir[0]) < 1e-6 && Math.abs(dir[2]) < 1e-6 ? [0, Math.sign(dir[1]) || 1, 1e-4] : dir;
+    this.fitTo(undefined, d);
+  }
+  /** Enquadra tudo o que está visível, mantendo a direção atual da câmera. */
+  zoomExtents() {
+    const d = this.camera.position.clone().sub(this.controls.target).normalize();
+    this.fitTo(undefined, [d.x, d.y, d.z]);
+  }
+  private zoomWin: { p0: { x: number; y: number } | null; onEnd: () => void } | null = null;
+  /** Zoom janela: dois cliques definem a janela; o modelo é ampliado para preenchê-la. */
+  startZoomWindow(onEnd: () => void) {
+    this.zoomWin = { p0: null, onEnd };
+    this.renderer.domElement.style.cursor = "crosshair";
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      window.removeEventListener("keydown", esc, true);
+      this.cancelZoomWindow();
+    };
+    window.addEventListener("keydown", esc, true);
+  }
+  cancelZoomWindow() {
+    if (!this.zoomWin) return;
+    const end = this.zoomWin.onEnd;
+    this.zoomWin = null;
+    this.boxEl.hidden = true;
+    this.renderer.domElement.style.cursor = "";
+    end();
+  }
+  private zoomWindowClick(e: PointerEvent): boolean {
+    const z = this.zoomWin;
+    if (!z || e.button !== 0) return false;
+    if (!z.p0) {
+      z.p0 = { x: e.clientX, y: e.clientY };
+      return true;
+    }
+    const a = z.p0;
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const w = Math.abs(e.clientX - a.x);
+    const h = Math.abs(e.clientY - a.y);
+    this.cancelZoomWindow();
+    if (w < 4 || h < 4) return true;
+    const cx = (a.x + e.clientX) / 2;
+    const cy = (a.y + e.clientY) / 2;
+    // Novo centro: o modelo sob o centro da janela (ou o plano do alvo atual).
+    this.raycaster.setFromCamera(this.ndc(cx, cy), this.camera);
+    const hit = this.raycaster.intersectObjects(this.pickTargets(), false).find((x) => !this.clipped(x.point));
+    const forward = this.controls.target.clone().sub(this.camera.position).normalize();
+    let center: THREE.Vector3;
+    if (hit) center = hit.point.clone();
+    else {
+      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(forward, this.controls.target);
+      center = this.raycaster.ray.intersectPlane(plane, new THREE.Vector3()) ?? this.controls.target.clone();
+    }
+    const scale = Math.max(w / r.width, h / r.height);
+    const dist = Math.max(this.camera.position.distanceTo(center) * scale, 0.3);
+    this.camera.position.copy(center).addScaledVector(forward, -dist);
+    this.controls.target.copy(center);
+    this.camera.near = Math.max(dist / 1000, 0.01);
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+    this.requestRender();
+    return true;
+  }
 
   // ---- Medição no 3D ---------------------------------------------------------------------
 

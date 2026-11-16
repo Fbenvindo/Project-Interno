@@ -9,6 +9,7 @@ import type { LoadedModel } from "../../ifc/loadIfc";
 import { cancelIfcLoad, loadIfcModel, warmIfcWorker } from "./ifc/ifcLoader";
 import { addToRule, elementKey, hiddenIds, MODEL_HOST, MODEL_PROJECT, type HideRules } from "../../core/visibility";
 import { HideSelectionBar, VisibilityEditor, type VisibilityCatalog } from "./shell/VisibilityEditor";
+import { ViewCube } from "./viewer/ViewCube";
 import { linkSlotOf } from "../../ifc/federate";
 import { cacheClear, cacheList } from "./ifc/modelCache";
 import { deletedText, deleteSelection } from "./desenho/deleteSelection";
@@ -2130,6 +2131,7 @@ export function App() {
                 onMoveBy={(d) => moveRef.current(planDeltaToScene(d[0], d[1]), `${Math.hypot(d[0], d[1]).toFixed(2).replace(".", ",")} m`)}
               />
             )}
+            {view === "3d" && model && viewer && <ViewCube viewer={viewer} />}
             {view === "3d" && model && (
               <SectionTools
                 section={section}

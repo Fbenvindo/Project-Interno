@@ -17,6 +17,7 @@ import { spaceAt } from "../../../core/spaces";
 import type { ElementInfo, Vec3 } from "../../../core/types";
 import type { LoadedModel } from "../../../ifc/loadIfc";
 import type { PlanRange } from "../../../core/plan/levels";
+import { Icon } from "../shell/icons";
 import type { DoorOverride } from "../../../core/plan/build";
 import { segmentElementId } from "../../../core/runs";
 import type { PointsStore } from "../locacao/usePointsStore";
@@ -266,6 +267,14 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   useEffect(() => viewer.onPlacementChange(() => force((n) => n + 1)), [viewer]);
   const handler = viewer.getPlacementHandler();
   const [hover, setHover] = useState<{ previews: PreviewItem[]; snap: WallSnap | null } | null>(null);
+  /** Zoom janela: primeiro canto (e o cursor) em coordenadas da planta; null = desligado. */
+  const [zoomWin, setZoomWin] = useState<{ p0: P2 | null; cur: P2 | null } | null>(null);
+  useEffect(() => {
+    if (!zoomWin) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && (e.stopPropagation(), setZoomWin(null));
+    window.addEventListener("keydown", esc, true);
+    return () => window.removeEventListener("keydown", esc, true);
+  }, [!!zoomWin]);
   const lastPointer = useRef<{ x: number; y: number; shift: boolean } | null>(null);
 
   /** Traduz o cursor na planta para a superfície e o contexto esperados pelo modo de edição. */
@@ -512,6 +521,27 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   const moveDelta = (a: P2, b: P2): P2 => [Math.round((b[0] - a[0]) * 100) / 100, Math.round((b[1] - a[1]) * 100) / 100];
   const onPointerDown = (e: PointerEvent) => {
     if (edit) return;
+    // Zoom janela: dois cliques definem a área a ampliar.
+    if (zoomWin && e.button === 0) {
+      e.stopPropagation();
+      const p = toModel(e.clientX, e.clientY);
+      if (!zoomWin.p0) return setZoomWin({ p0: p, cur: p });
+      const a = zoomWin.p0;
+      setZoomWin(null);
+      const w = Math.abs(p[0] - a[0]);
+      const h = Math.abs(p[1] - a[1]);
+      const el = host.current;
+      if (!el || w < 1e-3 || h < 1e-3) return;
+      const aspect = el.clientWidth / Math.max(el.clientHeight, 1);
+      let W = w;
+      let Hh = h;
+      if (W / Hh < aspect) W = Hh * aspect;
+      else Hh = W / aspect;
+      const cx = (a[0] + p[0]) / 2;
+      const cy = -(a[1] + p[1]) / 2;
+      setVb({ x: cx - W / 2, y: cy - Hh / 2, w: W, h: Hh });
+      return;
+    }
     if (e.button === 2 && selectMode && onMoveBy && !isSection) {
       const pm = toModel(e.clientX, e.clientY);
       const id = hitAt(e.clientX, e.clientY, pm);
@@ -529,6 +559,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     host.current?.setPointerCapture?.(e.pointerId);
   };
   const onPointerMove = (e: PointerEvent) => {
+    if (zoomWin?.p0) setZoomWin({ ...zoomWin, cur: toModel(e.clientX, e.clientY) });
     // Coordenadas do projeto do cursor (para a barra de status), na cota do piso do pavimento.
     const pm = toModel(e.clientX, e.clientY);
     setCursor(isSection ? null : [pm[0], pm[1], cs.worldToIfc([0, level, 0])[2]]);
@@ -762,6 +793,18 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
               />
             );
           })()}
+        {zoomWin?.p0 && zoomWin.cur && (
+          <rect
+            x={Math.min(zoomWin.p0[0], zoomWin.cur[0])}
+            y={-Math.max(zoomWin.p0[1], zoomWin.cur[1])}
+            width={Math.abs(zoomWin.cur[0] - zoomWin.p0[0])}
+            height={Math.abs(zoomWin.cur[1] - zoomWin.p0[1])}
+            fill="rgba(14,165,233,0.08)"
+            stroke="#0ea5e9"
+            strokeDasharray="6 4"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
       </svg>
       {(edit || textEdit) &&
         (() => {
@@ -819,6 +862,18 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       <button className="btn plan-fit" onClick={fit} onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
         Enquadrar
       </button>
+      <div className="plan-zoom-tools" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()}>
+        <button
+          className={`icon-btn ${zoomWin ? "on" : ""}`}
+          title="Zoom janela: clique em dois cantos da área a ampliar (Esc cancela)"
+          onClick={() => setZoomWin(zoomWin ? null : { p0: null, cur: null })}
+        >
+          <Icon name="zoomJanela" size={18} />
+        </button>
+        <button className="icon-btn" title="Enquadrar tudo (zoom extensão)" onClick={fit}>
+          <Icon name="enquadrar" size={18} />
+        </button>
+      </div>
     </div>
   );
 }
