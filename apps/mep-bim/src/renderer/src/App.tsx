@@ -30,6 +30,7 @@ import { NO_SECTION, SectionTools, sectionToPlanes, type SectionState } from "./
 import { FolhaPanel } from "./planta/FolhaPanel";
 import { renderSheetViews, type SheetFormat, type SheetViewport } from "../../core/plan/sheet";
 import { boundsOf } from "../../core/plan/build";
+import { displayTransform, transformPrims, viewAngle } from "../../core/plan/orient";
 import type { PlanDrawing } from "../../core/plan/drawing";
 import { beamOptions, docPlanOf, floorPlanOf, floorPlanOfId, isFloorPlanId, parseFloorPlanId, rangeOf, viewFilter, type PlanType, type ViewDef } from "../../core/views";
 import { newSheetId, viewDrawing, viewSubtitle, viewTitle, type ModelContext, type SheetDef } from "../../core/viewDrawing";
@@ -360,6 +361,7 @@ export function App() {
     };
     const drawings = new Map<string, PlanDrawing>();
     const vps: SheetViewport[] = [];
+    let sheetAngle: number | null = null;
     for (const vp of activeSheet.viewports) {
       const v = resolveView(vp.viewId);
       if (!v || v.section !== "documentacao") continue;
@@ -368,13 +370,22 @@ export function App() {
         vps.push({ id: v.id, title: viewTitle(v), subtitle: viewSubtitle(v), image: snap ? { ...snap, widthMm: vp.widthMm ?? 150 } : undefined, pos: vp.pos });
         continue;
       }
-      const d = viewDrawing(v, ctx);
+      let d = viewDrawing(v, ctx);
       if (!d) continue;
+      // Plantas giradas (maior eixo na horizontal ou ângulo escolhido): a folha mostra igual à tela.
+      if (v.kind === "planta" || v.kind === "ampliacao") {
+        const a = viewAngle(v.rotation, d.prims);
+        if (a) {
+          const prims = transformPrims(d.prims, displayTransform([0, 0], a));
+          d = { ...d, prims, bounds: boundsOf(prims) };
+        }
+        if (sheetAngle == null) sheetAngle = a;
+      }
       drawings.set(v.id, d);
       vps.push({ id: v.id, title: viewTitle(v), subtitle: viewSubtitle(v), drawing: d, pos: vp.pos });
     }
     const info = { ...activeSheet.info, conteudo: activeSheet.info.conteudo || activeSheet.name };
-    const result = renderSheetViews(vps, activeSheet.format, info, titleBlocks.find((t) => t.id === activeSheet.titleBlockId) ?? null, georef.trueNorthDeg);
+    const result = renderSheetViews(vps, activeSheet.format, info, titleBlocks.find((t) => t.id === activeSheet.titleBlockId) ?? null, sheetAngle ? (georef.trueNorthDeg ?? 0) + (sheetAngle * 180) / Math.PI : georef.trueNorthDeg);
     return { result, drawings };
   }, [view, model, planModel, activeSheet, meshById, store.points, store.runs, store.drafts, store.views, store.disciplines, boxes, resolveView, snapshots, titleBlocks, georef.trueNorthDeg, hiddenFor, store.doors]);
 

@@ -116,6 +116,33 @@ export function VistaPanel({ view, storey, projectDisciplines, available, sheets
               </td>
             </tr>
           )}
+          {(view.kind === "planta" || view.kind === "ampliacao") && (
+            <tr title="Gira o desenho na tela e na folha; o modelo e as anotações não mudam">
+              <th>Rotação</th>
+              <td>
+                <select
+                  value={view.rotation == null || view.rotation === "auto" ? "auto" : view.rotation === 0 ? "0" : "custom"}
+                  onChange={(e) => set({ rotation: e.target.value === "auto" ? "auto" : e.target.value === "0" ? 0 : typeof view.rotation === "number" && view.rotation ? view.rotation : 90 })}
+                >
+                  <option value="auto">Automática (maior eixo na horizontal)</option>
+                  <option value="0">Norte do projeto (0°)</option>
+                  <option value="custom">Ângulo escolhido</option>
+                </select>
+                {typeof view.rotation === "number" && view.rotation !== 0 && (
+                  <input
+                    type="number"
+                    step={1}
+                    value={view.rotation}
+                    title="Graus, anti-horário"
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isFinite(v)) set({ rotation: v });
+                    }}
+                  />
+                )}
+              </td>
+            </tr>
+          )}
           {floor &&
             (["below", "above"] as const).map((k) => (
               <tr key={k} title={rangeHint(floor.type, k)}>

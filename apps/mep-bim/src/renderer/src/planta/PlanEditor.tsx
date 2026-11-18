@@ -22,6 +22,7 @@ import type { DoorOverride } from "../../../core/plan/build";
 import { segmentElementId } from "../../../core/runs";
 import type { PointsStore } from "../locacao/usePointsStore";
 import type { PointerContext, PreviewItem, Viewer } from "../viewer/Viewer";
+import { displayTransform, transformPrims, transformSnapGeometry, viewAngle } from "../../../core/plan/orient";
 import { draftDistance, isDraftId } from "../../../core/draft";
 import type { PlanTool } from "./planTool";
 import { applyHalftone, viewFilter, viewMarkers, type ViewDef } from "../../../core/views";
@@ -208,16 +209,32 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   }, [cs, model, storey, cutHeight, range?.type, range?.base, range?.below, range?.above, points, runs, store.drafts, store.views, isSection, viewDef, SCALE, disciplines, draftView]);
   const layersRef = useRef({ base: base.prims, mep: mep.prims, ready: false });
   layersRef.current = { base: base.prims, mep: mep.prims, ready: base.prims.length + mep.prims.length > 0 };
+  const shownRef = useRef({ base: [] as typeof base.prims, mep: [] as typeof base.prims, T: displayTransform([0, 0], 0) });
   const edges = useMemo(() => wallEdges(base.prims), [base]);
-  const baseSvg = useMemo(() => primsToSvg(applyHalftone(base.prims, filter)), [base, filter]);
-  const mepSvg = useMemo(() => primsToSvg(applyHalftone(mep.prims, filter)), [mep, filter]);
+  // Exibição: desenho relativo a uma origem local (coordenadas de mapa, na casa dos milhões de
+  // metros, perdem precisão no SVG) e girado conforme a vista. O modelo fica nas coordenadas do projeto.
+  const T = useMemo(() => {
+    const b = boundsOf(base.prims) ?? boundsOf(mep.prims);
+    const o: P2 = b ? [Math.round((b.min[0] + b.max[0]) / 200) * 100, Math.round((b.min[1] + b.max[1]) / 200) * 100] : [0, 0];
+    return displayTransform(o, isSection ? 0 : viewAngle(viewDef?.rotation, base.prims));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base, isSection, viewDef?.rotation]);
+  const baseShown = useMemo(() => transformPrims(base.prims, T), [base, T]);
+  const mepShown = useMemo(() => transformPrims(mep.prims, T), [mep, T]);
+  const baseSvg = useMemo(() => primsToSvg(applyHalftone(baseShown, filter)), [baseShown, filter]);
+  const mepSvg = useMemo(() => primsToSvg(applyHalftone(mepShown, filter)), [mepShown, filter]);
+  shownRef.current = { base: baseShown, mep: mepShown, T };
 
   // ---- Vista (zoom e deslocamento) -----------------------------------------------------
   const [vb, setVb] = useState<ViewBox>({ x: 0, y: -10, w: 20, h: 10 });
   const fit = useCallback(() => {
     const el = host.current;
     const L = layersRef.current;
-    const b = viewDef?.kind === "ampliacao" && viewDef.region ? { min: viewDef.region.min, max: viewDef.region.max } : boundsOf([...L.base, ...L.mep]);
+    const S = shownRef.current;
+    const r = viewDef?.kind === "ampliacao" ? viewDef.region : undefined;
+    const b = r
+      ? boundsOf([{ t: "poly", pts: [r.min, [r.max[0], r.min[1]], r.max, [r.min[0], r.max[1]]].map((q) => S.T.to(q as P2)), closed: true, weight: 0, layer: "", color: "" }])
+      : boundsOf(S.base.length + S.mep.length ? [...S.base, ...S.mep] : transformPrims([...L.base, ...L.mep], S.T));
     if (!el || !b) return;
     const aspect = el.clientWidth / Math.max(el.clientHeight, 1);
     let w = (b.max[0] - b.min[0]) * 1.1 + 1;
@@ -228,7 +245,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     const cy = -(b.min[1] + b.max[1]) / 2;
     setVb({ x: cx - w / 2, y: cy - h / 2, w, h });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewDef?.id, viewDef?.region, storey, isSection, model, cutHeight, layersRef.current.ready]);
+  }, [viewDef?.id, viewDef?.region, storey, isSection, model, cutHeight, layersRef.current.ready, T.angle, T.origin[0], T.origin[1]]);
   useEffect(fit, [fit]);
   useEffect(() => {
     if (fitSignal) fit();
@@ -238,13 +255,16 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   // O SVG encaixa o viewBox centralizado (preserveAspectRatio "meet"): quando a área muda de
   // tamanho (um painel abre), sobram faixas e a escala é a menor das duas.
   const pxScale = (r: { width: number; height: number }) => Math.min(r.width / vb.w, r.height / vb.h) || 1;
-  const toModel = (clientX: number, clientY: number): P2 => {
+  /** Cursor em coordenadas da exibição (as do SVG, com Y para cima). */
+  const toDisplay = (clientX: number, clientY: number): P2 => {
     const r = host.current!.getBoundingClientRect();
     const k = pxScale(r);
     const x = vb.x + vb.w / 2 + (clientX - r.left - r.width / 2) / k;
     const y = vb.y + vb.h / 2 + (clientY - r.top - r.height / 2) / k;
     return [x, -y];
   };
+  /** Cursor em coordenadas do projeto. */
+  const toModel = (clientX: number, clientY: number): P2 => T.from(toDisplay(clientX, clientY));
   const metersPerPx = () => 1 / pxScale(host.current?.getBoundingClientRect() ?? { width: 1, height: 1 });
 
   // ---- Conversões planta ⇄ cena ------------------------------------------------------------
@@ -383,7 +403,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
         b[3] = Math.max(b[3], y);
       }
     };
-    for (const p of [...base.prims, ...mep.prims]) {
+    for (const p of [...baseShown, ...mepShown]) {
       if (p.id == null) continue;
       if (p.t === "line") (grow(p.id, ...p.a), grow(p.id, ...p.b));
       else if (p.t === "poly") p.pts.forEach((q) => grow(p.id!, ...q));
@@ -391,7 +411,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       else (grow(p.id, p.p[0] - p.height, p.p[1] - p.height / 2), grow(p.id, p.p[0] + p.height, p.p[1] + p.height / 2));
     }
     return m;
-  }, [base, mep]);
+  }, [baseShown, mepShown]);
 
   type Resolved = { p: P2; snapped: boolean; kind?: SnapMode; ref?: P2 };
   const [toolCursor, setToolCursor] = useState<Resolved | null>(null);
@@ -412,19 +432,22 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       ),
     [base, mep, storeyDrafts, store.points, storey, toPlan, isSection],
   );
+  const snapShown = useMemo(() => transformSnapGeometry(snapGeom, T), [snapGeom, T]);
   /** Ponto com encaixe e ortogonal; `anchor` é o ponto anterior do comando (base do ortogonal). */
-  const resolveWith = (clientX: number, clientY: number, anchor: P2 | null | undefined, shift: boolean): Resolved => {
-    const p = toModel(clientX, clientY);
+  const resolveWith = (clientX: number, clientY: number, anchorModel: P2 | null | undefined, shift: boolean): Resolved => {
+    // Encaixe e ortogonal nos eixos da tela (a planta pode estar girada); o resultado volta ao projeto.
+    const p = toDisplay(clientX, clientY);
+    const anchor = anchorModel ? T.to(anchorModel) : anchorModel;
     const a = aidsRef.current;
     const modes = activeSnaps(a);
     const tol = SNAP_PX * 0.6 * metersPerPx();
     // Shift inverte o ortogonal enquanto está pressionado.
     if (anchor && a.ortho !== shift) {
-      const r = orthoSnap(p, anchor, snapGeom, modes, tol);
-      return { p: r.p, snapped: !!r.snap, kind: r.snap?.kind, ref: r.snap && (r.snap.p[0] !== r.p[0] || r.snap.p[1] !== r.p[1]) ? r.snap.p : undefined };
+      const r = orthoSnap(p, anchor, snapShown, modes, tol);
+      return { p: T.from(r.p), snapped: !!r.snap, kind: r.snap?.kind, ref: r.snap && (r.snap.p[0] !== r.p[0] || r.snap.p[1] !== r.p[1]) ? T.from(r.snap.p) : undefined };
     }
-    const sn = findSnap(p, snapGeom, modes, tol, anchor);
-    return sn ? { p: sn.p, snapped: true, kind: sn.kind } : { p, snapped: false };
+    const sn = findSnap(p, snapShown, modes, tol, anchor ?? undefined);
+    return sn ? { p: T.from(sn.p), snapped: true, kind: sn.kind } : { p: T.from(p), snapped: false };
   };
   const resolvePoint = (clientX: number, clientY: number, shift: boolean): Resolved => {
     const t = toolRef.current;
@@ -524,7 +547,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     // Zoom janela: dois cliques definem a área a ampliar.
     if (zoomWin && e.button === 0) {
       e.stopPropagation();
-      const p = toModel(e.clientX, e.clientY);
+      const p = toDisplay(e.clientX, e.clientY);
       if (!zoomWin.p0) return setZoomWin({ p0: p, cur: p });
       const a = zoomWin.p0;
       setZoomWin(null);
@@ -554,12 +577,12 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     }
     if (e.button === 1) e.preventDefault();
     const box = e.button === 0 && (planTool ? planTool.selecting : selectMode);
-    drag.current = { x: e.clientX, y: e.clientY, vb, moved: false, box, start: toModel(e.clientX, e.clientY) };
+    drag.current = { x: e.clientX, y: e.clientY, vb, moved: false, box, start: toDisplay(e.clientX, e.clientY) };
     // O soltar do botão volta para cá mesmo sobre botões e sobreposições.
     host.current?.setPointerCapture?.(e.pointerId);
   };
   const onPointerMove = (e: PointerEvent) => {
-    if (zoomWin?.p0) setZoomWin({ ...zoomWin, cur: toModel(e.clientX, e.clientY) });
+    if (zoomWin?.p0) setZoomWin({ ...zoomWin, cur: toDisplay(e.clientX, e.clientY) });
     // Coordenadas do projeto do cursor (para a barra de status), na cota do piso do pavimento.
     const pm = toModel(e.clientX, e.clientY);
     setCursor(isSection ? null : [pm[0], pm[1], cs.worldToIfc([0, level, 0])[2]]);
@@ -576,7 +599,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       const dy = e.clientY - d.y;
       if (Math.hypot(dx, dy) > 4) d.moved = true;
       if (d.moved && d.box) {
-        if (e.buttons & 1) setBoxRect({ a: d.start, b: pm });
+        if (e.buttons & 1) setBoxRect({ a: d.start, b: toDisplay(e.clientX, e.clientY) });
         return;
       }
       else if (d.moved) {
@@ -608,7 +631,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     drag.current = null;
     if (planTool) {
       if (d?.box && d.moved) {
-        const b = toModel(e.clientX, e.clientY);
+        const b = toDisplay(e.clientX, e.clientY);
         setBoxRect(null);
         planTool.box?.(idsInBox(d.start, b, b[0] < d.start[0]), { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey });
         return;
@@ -622,7 +645,7 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
       return;
     }
     if (d?.box && d.moved) {
-      const b = toModel(e.clientX, e.clientY);
+      const b = toDisplay(e.clientX, e.clientY);
       setBoxRect(null);
       onPickMany?.(idsInBox(d.start, b, b[0] < d.start[0]), e.ctrlKey || e.metaKey || e.shiftKey);
       return;
@@ -656,10 +679,11 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     const W = el.clientWidth;
     const H = el.clientHeight;
     const k = pxScale({ width: W, height: H });
-    return { left: W / 2 + (p[0] - vb.x - vb.w / 2) * k, top: H / 2 + (-p[1] - vb.y - vb.h / 2) * k };
+    const q = T.to(p);
+    return { left: W / 2 + (q[0] - vb.x - vb.w / 2) * k, top: H / 2 + (-q[1] - vb.y - vb.h / 2) * k };
   };
   const onWheel = (e: WheelEvent) => {
-    const [mx, my] = toModel(e.clientX, e.clientY);
+    const [mx, my] = toDisplay(e.clientX, e.clientY);
     const p = { x: mx, y: -my };
     const k = Math.exp(e.deltaY * 0.0015);
     const w = Math.min(Math.max(vb.w * k, 0.5), 2000);
@@ -668,25 +692,27 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   };
 
   // ---- Sobreposições: pré-visualização, ambientes destacados, encaixe --------------------------
+  /** Ponto da cena na exibição. */
+  const dp = (v: Vec3): P2 => T.to(toPlan(v));
   const previewSvg = (items: PreviewItem[]) =>
     items
       .map((it) => {
         const color = it.ok ? "#2fbf71" : "#ef5350";
         const common = `fill="${color}" fill-opacity="0.35" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke"`;
         if (it.kind === "segmento") {
-          const a = toPlan(it.start);
-          const b = toPlan(it.end);
+          const a = dp(it.start);
+          const b = dp(it.end);
           if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-3) return `<circle cx="${f3(a[0])}" cy="${f3(-a[1])}" r="${f3(Math.max(it.width, 0.06))}" ${common}/>`;
           return `<line x1="${f3(a[0])}" y1="${f3(-a[1])}" x2="${f3(b[0])}" y2="${f3(-b[1])}" stroke="${color}" stroke-opacity="0.8" stroke-width="${f3(Math.max(it.width, 0.03))}" stroke-linecap="round"/>`;
         }
         if (it.kind === "no") {
-          const c = toPlan(it.position);
+          const c = dp(it.position);
           return `<circle cx="${f3(c[0])}" cy="${f3(-c[1])}" r="${f3(Math.max(it.width * 0.7, 0.03))}" ${common}/>`;
         }
-        const c = toPlan(it.position);
+        const c = dp(it.position);
         const [w, d] = it.size;
         if (it.shape === "cilindro") return `<circle cx="${f3(c[0])}" cy="${f3(-c[1])}" r="${f3(w / 2)}" ${common}/>`;
-        const ax = toPlan([it.position[0] + Math.cos(it.rotation), it.position[1], it.position[2] - Math.sin(it.rotation)]);
+        const ax = dp([it.position[0] + Math.cos(it.rotation), it.position[1], it.position[2] - Math.sin(it.rotation)]);
         const u: P2 = [ax[0] - c[0], ax[1] - c[1]];
         const v: P2 = [-u[1], u[0]];
         const corner = (su: number, sv: number): string => `${f3(c[0] + (u[0] * su * w + v[0] * sv * d) / 2)},${f3(-(c[1] + (u[1] * su * w + v[1] * sv * d) / 2))}`;
@@ -699,14 +725,15 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
     : viewer
     .getSpaceOutlines()
     .map(({ points, selected }) => {
-      const pts = points.map((v) => toPlan(v)).map(([x, y]) => `${f3(x)},${f3(-y)}`).join(" ");
+      const pts = points.map((v) => dp(v)).map(([x, y]) => `${f3(x)},${f3(-y)}`).join(" ");
       return `<polygon points="${pts}" fill="${selected ? "#00b8d4" : "none"}" fill-opacity="0.12" stroke="${selected ? "#00a3c4" : "#9aa4b2"}" stroke-width="${selected ? 2 : 1}" stroke-dasharray="${selected ? "" : "4 3"}" vector-effect="non-scaling-stroke" pointer-events="none"/>`;
     })
     .join("");
 
   const snapMarker = hover?.snap
     ? (() => {
-        const s = hover.snap;
+        const s0 = hover.snap;
+        const s = { point: T.to(s0.point), normal: T.dir(s0.normal) };
         const L = 18 * metersPerPx();
         return `<line x1="${f3(s.point[0])}" y1="${f3(-s.point[1])}" x2="${f3(s.point[0] + s.normal[0] * L)}" y2="${f3(-(s.point[1] + s.normal[1] * L))}" stroke="#00a3c4" stroke-width="2" vector-effect="non-scaling-stroke"/><circle cx="${f3(s.point[0])}" cy="${f3(-s.point[1])}" r="${f3(4 * metersPerPx())}" fill="#00a3c4"/>`;
       })()
@@ -720,10 +747,10 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
   const toolSvg = planTool
     ? (() => {
         const px = metersPerPx();
-        let out = primsToSvg(planTool.preview(toolCursor?.p ?? null));
-        if (toolCursor?.snapped && toolCursor.kind) out += snapMarkerSvg(toolCursor.kind, toolCursor.p, toolCursor.ref, px);
+        let out = primsToSvg(transformPrims(planTool.preview(toolCursor?.p ?? null), T));
+        if (toolCursor?.snapped && toolCursor.kind) out += snapMarkerSvg(toolCursor.kind, T.to(toolCursor.p), toolCursor.ref && T.to(toolCursor.ref), px);
         if (toolCursor && planTool.snap) {
-          const [x, y] = toolCursor.p;
+          const [x, y] = T.to(toolCursor.p);
           const k = 14 * px;
           out += `<line x1="${f3(x - k)}" y1="${f3(-y)}" x2="${f3(x + k)}" y2="${f3(-y)}" stroke="#0ea5e9" stroke-width="1" vector-effect="non-scaling-stroke"/><line x1="${f3(x)}" y1="${f3(-y - k)}" x2="${f3(x)}" y2="${f3(-y + k)}" stroke="#0ea5e9" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
         }
@@ -760,15 +787,20 @@ export function PlanEditor({ viewer, model, store, storey, cutHeight, selection,
             fillRule="evenodd"
             fill="#6b7280"
             fillOpacity={0.28}
-            d={`M${vb.x - vb.w} ${vb.y - vb.h}h${vb.w * 3}v${vb.h * 3}h${-vb.w * 3}Z M${viewDef.region.min[0]} ${-viewDef.region.max[1]}H${viewDef.region.max[0]}V${-viewDef.region.min[1]}H${viewDef.region.min[0]}Z`}
+            d={`M${vb.x - vb.w} ${vb.y - vb.h}h${vb.w * 3}v${vb.h * 3}h${-vb.w * 3}Z M${(
+              [viewDef.region.min, [viewDef.region.max[0], viewDef.region.min[1]], viewDef.region.max, [viewDef.region.min[0], viewDef.region.max[1]]] as P2[]
+            )
+              .map((q) => T.to(q))
+              .map((q) => `${q[0]} ${-q[1]}`)
+              .join(" L")}Z`}
           />
         )}
         <g pointerEvents="none" dangerouslySetInnerHTML={{ __html: toolSvg }} />
         {moveDrag && (
           <g pointerEvents="none">
-            <line x1={moveDrag.a[0]} y1={-moveDrag.a[1]} x2={moveDrag.b[0]} y2={-moveDrag.b[1]} stroke="#7c3aed" strokeWidth={2} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
-            <circle cx={moveDrag.b[0]} cy={-moveDrag.b[1]} r={5 * metersPerPx()} fill="#7c3aed" />
-            <text x={moveDrag.b[0] + 8 * metersPerPx()} y={-moveDrag.b[1] - 8 * metersPerPx()} fontSize={13 * metersPerPx()} fill="#5b21b6" fontFamily="Arial">
+            <line x1={T.to(moveDrag.a)[0]} y1={-T.to(moveDrag.a)[1]} x2={T.to(moveDrag.b)[0]} y2={-T.to(moveDrag.b)[1]} stroke="#7c3aed" strokeWidth={2} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
+            <circle cx={T.to(moveDrag.b)[0]} cy={-T.to(moveDrag.b)[1]} r={5 * metersPerPx()} fill="#7c3aed" />
+            <text x={T.to(moveDrag.b)[0] + 8 * metersPerPx()} y={-T.to(moveDrag.b)[1] - 8 * metersPerPx()} fontSize={13 * metersPerPx()} fill="#5b21b6" fontFamily="Arial">
               {`Δx ${(moveDrag.b[0] - moveDrag.a[0]).toFixed(2).replace(".", ",")} · Δy ${(moveDrag.b[1] - moveDrag.a[1]).toFixed(2).replace(".", ",")} m`}
             </text>
           </g>

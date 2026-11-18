@@ -77,6 +77,8 @@ export interface ViewDef {
   range?: { below: number; above: number };
   /** Visibilidade só nesta vista (modelos, tipos, sistemas e elementos ocultos). */
   hidden?: HideRules;
+  /** Plantas: rotação na tela e na folha ("auto" ou ausente: maior eixo na horizontal; graus: anti-horário, 0 = norte do projeto). */
+  rotation?: "auto" | number;
 }
 
 export const DEFAULT_LABELS: PlanLabels = { tags: true, circuits: true, power: true, sizes: true };

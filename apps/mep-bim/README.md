@@ -225,6 +225,16 @@ Em **Arquivo › Importar elementos em IFC**. Neste app, *elemento* = família.
 - **Cortes 2D:** as emendas internas da triangulação das faces (comuns em paredes com aberturas) não aparecem mais como linhas.
 - **Abas de vista:** o botão **×** fecha a vista aberta. Num corte, ampliação ou planta extra, volta à planta do pavimento. Numa vista 3D salva ou recortada, volta ao modelo completo sem recortes. Na folha, volta à planta.
 
+### Rotação das plantas e modelos com coordenadas de mapa
+
+- **Rotação:** nas Propriedades da vista (sem nada selecionado), as plantas e ampliações têm o campo **Rotação**:
+  - **Automática** (padrão): o eixo de maior extensão do edifício fica na horizontal da tela e da folha. A direção vem das paredes cortadas.
+  - **Norte do projeto (0°)** ou um **ângulo escolhido**.
+- **Só a exibição gira:** o modelo, os pontos, os trechos e as anotações continuam nas coordenadas do projeto. O encaixe e o ortogonal passam a seguir os eixos da tela (os do edifício).
+- **Textos:** os horizontais (ambientes, etiquetas) continuam horizontais; os inclinados giram junto e ficam legíveis.
+- **Na folha:** o norte acompanha a rotação.
+- **Coordenadas de mapa:** IFCs com coordenadas UTM (centenas de milhares ou milhões de metros) são desenhados a partir de uma origem local. Antes, o desenho da planta perdia precisão e saía com linhas tortas e triângulos.
+
 ### Modelo exportado do Revit (.sebmod)
 
 O plugin do Revit (aba **SmartEasyBIM › Exportar modelo**) leva o modelo para o app sem passar pelo IFC. Só o modelo vai; plantas, vistas e folhas são montadas no SmartEasyBIM.
