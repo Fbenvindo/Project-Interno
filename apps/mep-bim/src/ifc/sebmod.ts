@@ -182,6 +182,63 @@ function paramGroups(title: string, list: SebParam[] | undefined): PropertyGroup
   return [...byGroup.values()];
 }
 
+/**
+ * Normais por vértice com quinas vivas: o Revit manda os vértices compartilhados entre faces;
+ * um vértice cujas faces se dobram mais que ~40° é duplicado (uma normal para cada lado da quina).
+ */
+export function withNormals(positions: Float32Array, indices: Uint32Array): { positions: Float32Array; normals: Float32Array; indices: Uint32Array } {
+  const COS = Math.cos((40 * Math.PI) / 180);
+  const nTri = indices.length / 3;
+  const fn = new Float32Array(nTri * 3);
+  for (let t = 0; t < nTri; t++) {
+    const a = indices[t * 3] * 3, b = indices[t * 3 + 1] * 3, c = indices[t * 3 + 2] * 3;
+    const ux = positions[b] - positions[a], uy = positions[b + 1] - positions[a + 1], uz = positions[b + 2] - positions[a + 2];
+    const vx = positions[c] - positions[a], vy = positions[c + 1] - positions[a + 1], vz = positions[c + 2] - positions[a + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    fn[t * 3] = nx / l;
+    fn[t * 3 + 1] = ny / l;
+    fn[t * 3 + 2] = nz / l;
+  }
+  // Grupos de cada vértice original: (normal acumulada, novo índice).
+  const groups: { n: [number, number, number]; idx: number }[][] = [];
+  const outPos: number[] = [];
+  const acc: number[] = [];
+  const outIdx = new Uint32Array(indices.length);
+  for (let t = 0; t < nTri; t++) {
+    const nx = fn[t * 3], ny = fn[t * 3 + 1], nz = fn[t * 3 + 2];
+    for (let k = 0; k < 3; k++) {
+      const v = indices[t * 3 + k];
+      const list = (groups[v] ??= []);
+      let g = list.find((x) => {
+        const l = Math.hypot(...x.n) || 1;
+        return (x.n[0] * nx + x.n[1] * ny + x.n[2] * nz) / l >= COS;
+      });
+      if (!g) {
+        g = { n: [0, 0, 0], idx: outPos.length / 3 };
+        outPos.push(positions[v * 3], positions[v * 3 + 1], positions[v * 3 + 2]);
+        acc.push(0, 0, 0);
+        list.push(g);
+      }
+      g.n[0] += nx;
+      g.n[1] += ny;
+      g.n[2] += nz;
+      acc[g.idx * 3] += nx;
+      acc[g.idx * 3 + 1] += ny;
+      acc[g.idx * 3 + 2] += nz;
+      outIdx[t * 3 + k] = g.idx;
+    }
+  }
+  const normals = new Float32Array(acc.length);
+  for (let i = 0; i < acc.length; i += 3) {
+    const l = Math.hypot(acc[i], acc[i + 1], acc[i + 2]) || 1;
+    normals[i] = acc[i] / l;
+    normals[i + 1] = acc[i + 1] / l;
+    normals[i + 2] = acc[i + 2] / l;
+  }
+  return { positions: Float32Array.from(outPos), normals, indices: outIdx };
+}
+
 /** Modelo do Revit → dados do app (como um IFC lido). */
 export function sebmodToData(f: SebModFile): IfcData {
   // Modelos longe da origem interna: desloca para perto (precisão do Float32 na cena).
@@ -274,7 +331,7 @@ export function sebmodToData(f: SebModFile): IfcData {
     sys.forEach((s) => systems.add(s));
     const discipline = classifyDiscipline({ ifcType, predefinedType, systems: sys.map((name) => ({ name })) });
     const category = getCategory(ifcType);
-    meshes.push({ expressID: id, positions, normals: new Float32Array(0), indices, color: [...hexColor(color), 1] });
+    meshes.push({ expressID: id, ...withNormals(positions, indices), color: [...hexColor(color), 1] });
     const bbox: BBox = { min, max };
     let frame: ElementInfo["frame"];
     let planSymbol: number[][] | undefined;

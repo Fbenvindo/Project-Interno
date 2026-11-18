@@ -1,6 +1,6 @@
 import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { isSebmod, readSebmodBytes, sebmodToData, type SebModFile } from "../src/ifc/sebmod";
+import { isSebmod, readSebmodBytes, sebmodToData, withNormals, type SebModFile } from "../src/ifc/sebmod";
 import { modelFromData } from "../src/ifc/loadIfc";
 import { buildPlan } from "../src/core/plan/build";
 import { DISCIPLINES } from "../src/core/disciplines";
@@ -93,6 +93,20 @@ describe("modelo exportado do Revit (.sebmod)", () => {
     expect(props.find((g) => g.name === "Revit")!.values.find((v) => v.name === "Família")!.value).toBe("Porta de abrir");
     expect(props.some((g) => g.values.some((v) => v.name === "Largura" && v.value === "800 mm"))).toBe(true);
     expect(toMap(model.georef.map!, [1, 2, 0])).toEqual([330001, 7390002, 760]);
+  });
+
+  it("3D: normais calculadas (sem elas o modelo fica preto) e quinas vivas", () => {
+    const model = modelFromData(sebmodToData(sample()));
+    for (const m of model.meshes) {
+      expect(m.normals.length).toBe(m.positions.length);
+      for (let i = 0; i < m.normals.length; i += 3) expect(Math.hypot(m.normals[i], m.normals[i + 1], m.normals[i + 2])).toBeCloseTo(1, 4);
+    }
+    // Caixa com 8 vértices compartilhados: 6 faces planas → 24 vértices (4 por face), normais retas.
+    const b = box(9, [0, 0, 0], [1, 1, 1]);
+    const r = withNormals(Float32Array.from(b.posicoes), Uint32Array.from(b.indices));
+    expect(r.positions.length / 3).toBe(24);
+    const axis = [...r.normals].map((v) => Math.abs(v)).filter((v) => v > 0.999).length;
+    expect(axis).toBe(24);
   });
 
   it("planta: parede cortada e a porta com o símbolo da família do Revit", () => {
