@@ -162,7 +162,6 @@ export function App() {
   const [leftOpen, setLeftOpen] = useState(true);
   /** Coluna esquerda: Propriedades (em cima) e Navegador (embaixo), cada um recolhível. */
   const [propsOpen, setPropsOpen] = useState(true);
-  const [navOpen, setNavOpen] = useState(true);
   const [browserOpen, setBrowserOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [theme, setTheme] = useState<Theme>(readTheme);
@@ -1963,7 +1962,7 @@ export function App() {
           {model && (
             <section className={`dock ${browserOpen ? "open" : ""}`}>
               <button className="dock-head" onClick={() => setBrowserOpen(!browserOpen)} aria-expanded={browserOpen}>
-                <span className={`caret ${browserOpen ? "open" : ""}`}>▸</span> Vistas e folhas
+                <span className={`caret ${browserOpen ? "open" : ""}`}>▸</span> Navegador
               </button>
               {browserOpen && (
                 <div className="dock-body">
@@ -1977,7 +1976,11 @@ export function App() {
                           ? floorKey(storey, subLevel)
                           : planKey
                         : view === "3d"
-                          ? view3dId && `view:${view3dId}`
+                          ? view3dId
+                            ? `view:${view3dId}`
+                            : storeyView
+                              ? `3d:pav:${storeyView}`
+                              : "3d:geral"
                           : view === "prancha" && sheetId
                             ? `sheet:${sheetId}`
                             : null
@@ -2008,39 +2011,32 @@ export function App() {
                       if (view3dId === id) setView3dId(null);
                     }}
                     onNewSheet={() => openSheet(newSheet().id)}
+                    storeys={model.storeys}
+                    storey3d={storeyView}
+                    onOpen3d={(st) => {
+                      setView3dId(null);
+                      chooseStorey(st);
+                      setView("3d");
+                    }}
                   />
+                  {view !== "fluxograma" && (
+                    <Navigator
+                      elements={allElements}
+                      systems={allSystems}
+                      filters={filters}
+                      onChange={setFilters}
+                      visibleCount={visibleElements.length}
+                      onIsolate={isolateDiscipline}
+                      points={store.points}
+                      circuits={store.circuits}
+                      onCircuit={showCircuit}
+                    />
+                  )}
                 </div>
               )}
             </section>
           )}
-          {model && view === "fluxograma" ? null : model ? (
-            <section className={`dock ${navOpen ? "open" : ""}`}>
-              <button className="dock-head" onClick={() => setNavOpen(!navOpen)} aria-expanded={navOpen}>
-                <span className={`caret ${navOpen ? "open" : ""}`}>▸</span> Navegador
-              </button>
-              {navOpen && (
-                <div className="dock-body">
-            <Navigator
-              elements={allElements}
-              storeys={model.storeys}
-              systems={allSystems}
-              filters={filters}
-              onChange={setFilters}
-              visibleCount={visibleElements.length}
-              onIsolate={isolateDiscipline}
-              storey={storey}
-              storeyView={storeyView}
-              onStorey={chooseStorey}
-              points={store.points}
-              circuits={store.circuits}
-              onCircuit={showCircuit}
-            />
-                </div>
-              )}
-            </section>
-          ) : (
-            <div className="empty-side">Abra um modelo IFC para navegar por pavimentos, disciplinas, sistemas e circuitos.</div>
-          )}
+          {!model && <div className="empty-side">Abra um modelo IFC para navegar por vistas, pavimentos, disciplinas, sistemas e circuitos.</div>}
         </aside>
 
         <section className="center">

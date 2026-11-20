@@ -225,6 +225,15 @@ Em **Arquivo › Importar elementos em IFC**. Neste app, *elemento* = família.
 - **Cortes 2D:** as emendas internas da triangulação das faces (comuns em paredes com aberturas) não aparecem mais como linhas.
 - **Abas de vista:** o botão **×** fecha a vista aberta. Num corte, ampliação ou planta extra, volta à planta do pavimento. Numa vista 3D salva ou recortada, volta ao modelo completo sem recortes. Na folha, volta à planta.
 
+### Navegador (coluna da esquerda)
+
+O antigo painel "Vistas e folhas" foi juntado ao **Navegador**:
+
+- **Vistas 3D:** Geral (modelo completo), uma por pavimento e as vistas 3D criadas.
+- **Plantas:** uma por pavimento e por nível de laje. Piso/Teto, Trabalho/Documentação, a base e os cortes inferior/superior ficam na barra de vistas.
+- **Ampliações, Cortes, Vistas específicas** (fluxogramas) e **Folhas**.
+- Embaixo: as disciplinas do projeto, a busca e os filtros por disciplina, sistema e quadros/circuitos.
+
 ### Rotação das plantas e modelos com coordenadas de mapa
 
 - **Rotação:** nas Propriedades da vista (sem nada selecionado), as plantas e ampliações têm o campo **Rotação**:

@@ -1,11 +1,12 @@
-// Navegador de vistas (como o do Revit): Pavimentos, Ampliações, Cortes, Vistas 3D, Fluxogramas
-// e Folhas. Cada pavimento (e cada nível de laje do pavimento) abre a planta de piso de
-// Trabalho; piso/teto e trabalho/documentação são trocados pelos botões da barra de vistas.
+// Navegador de vistas (como o do Revit): Vistas 3D (geral e uma por pavimento), Plantas,
+// Ampliações, Cortes, Vistas específicas (fluxogramas) e Folhas. Cada pavimento (e cada nível de
+// laje do pavimento) abre a planta de piso de Trabalho; piso/teto, trabalho/documentação e a faixa
+// de visualização (base, corte inferior e superior) ficam na barra de vistas.
 import { useState } from "react";
 import { DISCIPLINES } from "../../../core/disciplines";
 import type { Discipline } from "../../../core/types";
 import type { SheetDef } from "../../../core/viewDrawing";
-import { isFloorPlanId, KIND_LABEL, type PlanType, type ViewDef, type ViewKind, type ViewSection } from "../../../core/views";
+import { isFloorPlanId, type PlanType, type ViewDef, type ViewKind, type ViewSection } from "../../../core/views";
 
 /** Chave da vista aberta: "pav:<pavimento>::<nível>", "view:<id>" ou "sheet:<id>". */
 export type ViewKey = string;
@@ -31,9 +32,18 @@ interface Props {
   onRename: (id: string, name: string) => void;
   onDelete: (key: ViewKey) => void;
   onNewSheet: () => void;
+  /** Pavimentos do modelo (uma vista 3D para cada) e a vista 3D por pavimento aberta. */
+  storeys: string[];
+  storey3d: string | null;
+  /** Vista 3D: null = geral (modelo completo). */
+  onOpen3d: (storey: string | null) => void;
 }
 
-const KINDS: ViewKind[] = ["ampliacao", "corte", "3d", "fluxograma"];
+const KINDS: { kind: ViewKind; label: string }[] = [
+  { kind: "ampliacao", label: "Ampliações" },
+  { kind: "corte", label: "Cortes" },
+  { kind: "fluxograma", label: "Vistas específicas" },
+];
 const MEP = DISCIPLINES.filter((d) => d.isMep);
 
 export const floorKey = (storey: string, sub = 0) => `pav:${storey}::${sub}`;
@@ -44,7 +54,7 @@ export function parseFloorKey(key: ViewKey): { storey: string; sub: number } | n
   return i < 0 ? { storey: rest, sub: 0 } : { storey: rest.slice(0, i), sub: Number(rest.slice(i + 2)) || 0 };
 }
 
-export function VistasBrowser({ floors, views, sheets, active, disciplines, available, onDisciplines, onOpen, onRename, onDelete, onNewSheet }: Props) {
+export function VistasBrowser({ floors, views, sheets, active, disciplines, available, onDisciplines, onOpen, onRename, onDelete, onNewSheet, storeys, storey3d, onOpen3d }: Props) {
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<string | null>(null);
   const toggle = (k: string) => setClosed((c) => ({ ...c, [k]: !c[k] }));
@@ -108,6 +118,36 @@ export function VistasBrowser({ floors, views, sheets, active, disciplines, avai
 
   return (
     <div className="vistas-browser">
+      <ul className="vb-tree">
+        {group("3d", "Vistas 3D", [
+          <li key="3d:geral" className={`vb-item ${active === "3d:geral" ? "on" : ""}`} title="Modelo completo em 3D">
+            <button className="vb-open" onClick={() => onOpen3d(null)}>
+              Geral
+            </button>
+          </li>,
+          ...storeys.map((st) => (
+            <li key={`3d:${st}`} className={`vb-item ${storey3d === st && active === `3d:pav:${st}` ? "on" : ""}`} title={`3D só do pavimento ${st}`}>
+              <button className="vb-open" onClick={() => onOpen3d(st)}>
+                {st}
+              </button>
+            </li>
+          )),
+          ...custom("3d"),
+        ])}
+        {group("pav", "Plantas", [...floorItems, ...extraPlans])}
+        {KINDS.map(({ kind, label }) => group(`k:${kind}`, label, custom(kind), emptyHint(kind)))}
+        {group(
+          "folhas",
+          "Folhas",
+          sheets.map((s) => item(`sheet:${s.id}`, s.name, { deletable: true })),
+          undefined,
+          <li>
+            <button className="link vb-new" onClick={onNewSheet}>
+              + Nova folha
+            </button>
+          </li>,
+        )}
+      </ul>
       <div className="vb-disc">
         <div className="field-label" title="As disciplinas que o IFC deste projeto entrega. Na Documentação, só elas aparecem (as demais podem entrar em meio-tom).">
           Disciplinas do projeto (IFC)
@@ -124,21 +164,6 @@ export function VistasBrowser({ floors, views, sheets, active, disciplines, avai
         </div>
         {!disciplines.length && <div className="muted small">Nenhuma marcada: a documentação mostra todas as instalações.</div>}
       </div>
-      <ul className="vb-tree">
-        {group("pav", "Pavimentos", [...floorItems, ...extraPlans])}
-        {KINDS.map((kind) => group(`k:${kind}`, KIND_LABEL[kind], custom(kind), emptyHint(kind)))}
-        {group(
-          "folhas",
-          "Folhas",
-          sheets.map((s) => item(`sheet:${s.id}`, s.name, { deletable: true })),
-          undefined,
-          <li>
-            <button className="link vb-new" onClick={onNewSheet}>
-              + Nova folha
-            </button>
-          </li>,
-        )}
-      </ul>
     </div>
   );
 }

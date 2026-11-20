@@ -1,4 +1,4 @@
-// Navegador lateral: pavimentos, disciplinas, sistemas e quadros/circuitos.
+// Navegador lateral (abaixo das vistas): busca, disciplinas, sistemas e quadros/circuitos.
 import { useMemo, useState } from "react";
 import type { Circuit } from "../../../core/circuits";
 import { DISCIPLINES } from "../../../core/disciplines";
@@ -19,16 +19,11 @@ export const EMPTY_FILTERS: Filters = { hiddenDisciplines: new Set(), hiddenStor
 
 interface Props {
   elements: ElementInfo[];
-  storeys: string[];
   systems: string[];
   filters: Filters;
   onChange: (f: Filters) => void;
   visibleCount: number;
   onIsolate: (d: Discipline) => void;
-  /** Pavimento ativo (planta e prancha) e vista 3D isolada (null = modelo completo). */
-  storey: string;
-  storeyView: string | null;
-  onStorey: (storey: string | null) => void;
   points: PlacedPoint[];
   circuits: Circuit[];
   onCircuit: (circuit: Circuit) => void;
@@ -58,7 +53,7 @@ function Section({ title, children, extra, defaultOpen = true }: { title: string
 }
 
 export function Navigator(props: Props) {
-  const { elements, storeys, systems, filters, onChange, visibleCount, onIsolate, storey, storeyView, onStorey, points, circuits, onCircuit } = props;
+  const { elements, systems, filters, onChange, visibleCount, onIsolate, points, circuits, onCircuit } = props;
   const counts = useMemo(() => {
     const disciplines = new Map<Discipline, number>();
     const storeys = new Map<string, number>();
@@ -86,8 +81,6 @@ export function Navigator(props: Props) {
     return [...groups.values()];
   }, [points, circuits]);
 
-  const storeyList = storeys.filter((s) => counts.storeys.has(s));
-
   return (
     <div className="navigator">
       <input
@@ -100,24 +93,6 @@ export function Navigator(props: Props) {
       <div className="muted small nav-count">
         {visibleCount} de {elements.length} elementos visíveis
       </div>
-
-      <Section title="Pavimentos">
-        <button className={`nav-item ${storeyView == null ? "on" : ""}`} onClick={() => onStorey(null)} title="Modelo completo em 3D">
-          <span className="grow">Modelo completo</span>
-          <span className="count">{elements.length}</span>
-        </button>
-        {storeyList.map((s) => (
-          <button
-            key={s}
-            className={`nav-item ${storeyView === s || (storeyView == null && storey === s) ? (storeyView === s ? "on" : "current") : ""}`}
-            onClick={() => onStorey(s)}
-            title={`Planta e 3D do pavimento ${s}`}
-          >
-            <span className="grow">{s}</span>
-            <span className="count">{counts.storeys.get(s)}</span>
-          </button>
-        ))}
-      </Section>
 
       <Section
         title="Disciplinas"
