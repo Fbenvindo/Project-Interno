@@ -984,9 +984,16 @@ export function App() {
   const planTypeOpen: PlanType = floorPlan?.type ?? "piso";
   const subLevel = subByStorey[storey] ?? 0;
   const floorEntry = floorEntries.find((f) => f.storey === storey && f.sub === subLevel) ?? null;
-  const activeViewDef: ViewDef | null = floorPlan
+  const activeViewDefRaw: ViewDef | null = floorPlan
     ? floorPlanOf(store.views, floorPlan.section, floorPlan.type, storey, floorEntry?.sub ?? 0, floorEntry?.levelLabel ?? undefined)
     : resolveView(planKey.slice(5));
+  // A planta de pavimento ainda não gravada é montada de novo a cada renderização: sem esta
+  // âncora (mesmo objeto enquanto o conteúdo não muda), qualquer clique refazia o corte e a
+  // projeção do pavimento inteiro.
+  const viewAnchor = useRef<{ key: string; v: ViewDef | null }>({ key: "", v: null });
+  const viewKey = activeViewDefRaw ? JSON.stringify(activeViewDefRaw) : "";
+  if (viewKey !== viewAnchor.current.key) viewAnchor.current = { key: viewKey, v: activeViewDefRaw };
+  const activeViewDef = viewAnchor.current.v;
   /** Faixa de visualização da planta de pavimento aberta (nível base, abaixo e acima). */
   const planRange = useMemo(
     () => (planModel && activeViewDef && floorPlan ? planRangeOf(activeViewDef, planModel.elements, planModel.storeyLevels) : undefined),

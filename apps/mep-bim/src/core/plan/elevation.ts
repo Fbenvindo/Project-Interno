@@ -13,7 +13,7 @@ import type { CutDef } from "../views";
 import { boundsOf } from "./build";
 import { LAYER_PREFIX, PEN, PRINT_COLOR, type PlanDrawing, type Prim } from "./drawing";
 import { chainSegments, cutMesh, type P2 } from "./section";
-import { COLUMN_FILL, COLUMN_TYPES, isLayout, LAYOUT_GRAY, WALL_FILL } from "./style";
+import { COLUMN_FILL, COLUMN_TYPES, isLayoutElement, LAYOUT_GRAY, WALL_FILL } from "./style";
 
 export interface SectionInput {
   elements: ElementInfo[];
@@ -108,7 +108,7 @@ export function buildSection(input: SectionInput): PlanDrawing {
 
     const isMep = MEP_DISCIPLINES.includes(e.discipline);
     const prefix = LAYER_PREFIX[e.discipline];
-    const layout = isLayout(e.ifcType);
+    const layout = isLayoutElement(e);
     const color = layout ? LAYOUT_GRAY : isMep ? PRINT_COLOR[e.discipline] : "#222222";
     const { positions, indices } = mesh;
     const n = positions.length / 3;

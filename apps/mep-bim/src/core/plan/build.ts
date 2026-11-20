@@ -15,7 +15,7 @@ import { assemblySymbol, LEGEND_LINE, RISER_DOWN, RISER_UP, symbolFor, TEE_MARK 
 import { assemblyKey } from "../devices";
 import { draftPrims, type DraftEntity } from "../draft";
 import { pointSize } from "../points";
-import { BEAM_COLOR, BEAM_OPACITY, COLUMN_FILL, COLUMN_TYPES, isLayout, LAYOUT_GRAY, minAreaRect, WALL_FILL } from "./style";
+import { BEAM_COLOR, BEAM_OPACITY, COLUMN_FILL, COLUMN_TYPES, isLayoutElement, LAYOUT_GRAY, minAreaRect, WALL_FILL } from "./style";
 import type { PlanRange } from "./levels";
 import { BOX_LABEL, INSTALL_LABEL, INSTALL_ZONE, isApparent, type BoxKind, type PullBox } from "../conduits";
 
@@ -102,6 +102,8 @@ export const BOX_SYMBOL: Record<BoxKind, SymbolPrim[]> = {
 /** Tipos cortados com hachura cheia (poché). */
 const POCHE_TYPES = new Set(["IFCWALL", "IFCWALLSTANDARDCASE", "IFCCOLUMN", "IFCCURTAINWALL", "IFCMEMBER", "IFCPILE"]);
 const OPENING_TYPES = new Set(["IFCDOOR", "IFCWINDOW"]);
+/** Cortados (não projetados) mesmo atravessando o plano de corte. */
+const NO_PROJECTION = new Set(["IFCBEAM", "IFCSLAB", "IFCROOF", "IFCCOVERING", "IFCPLATE", "IFCFOOTING", "IFCSTAIR", "IFCSTAIRFLIGHT", "IFCRAMP", "IFCRAMPFLIGHT"]);
 
 export function buildPlan(input: PlanInput): PlanDrawing {
   const { cs, scale, storey, labels } = input;
@@ -144,10 +146,10 @@ export function buildPlan(input: PlanInput): PlanDrawing {
   const pushElement = (e: ElementInfo, raw: { a: Vec3; b: Vec3 }[], projected: boolean) => {
     const segs = raw.map(({ a, b }): [P2, P2] => [plan(a), plan(b)]);
     if (!segs.length) return;
-    const isMep = MEP_DISCIPLINES.includes(e.discipline);
-    const prefix = LAYER_PREFIX[e.discipline];
     // Layout e equipamentos da arquitetura (inclusive louças e metais): cinza, sempre.
-    const layout = isLayout(e.ifcType);
+    const layout = isLayoutElement(e);
+    const isMep = MEP_DISCIPLINES.includes(e.discipline) && !layout;
+    const prefix = LAYER_PREFIX[e.discipline];
     const color = layout ? LAYOUT_GRAY : PRINT_COLOR[e.discipline];
     const poche = !isMep && !projected && POCHE_TYPES.has(e.ifcType);
     const weight = layout ? PEN.vista : isMep ? PEN.mep : poche ? PEN.corte : OPENING_TYPES.has(e.ifcType) ? PEN.porta : PEN.vista;
@@ -170,7 +172,23 @@ export function buildPlan(input: PlanInput): PlanDrawing {
     if (!input.disciplines.has(e.discipline) || !e.bbox) continue;
     const mesh = input.meshes.get(e.expressID);
     if (!mesh) continue;
-    const isMep = MEP_DISCIPLINES.includes(e.discipline);
+    const isMep = MEP_DISCIPLINES.includes(e.discipline) && !isLayoutElement(e);
+    // Famílias do Revit com símbolo de planta (mobiliário, louças, bancadas): o símbolo, como no Revit.
+    if (e.planSymbol?.length && !OPENING_TYPES.has(e.ifcType)) {
+      const lo0 = e.bbox.min[1];
+      const hi0 = e.bbox.max[1];
+      const inPlan = R ? R.type === "piso" && lo0 < archHi && hi0 > archLo - 0.05 : inStorey(lo0);
+      if (inPlan) {
+        const layout = isLayoutElement(e);
+        for (const line of e.planSymbol) {
+          const pts: P2[] = [];
+          for (let i = 0; i + 1 < line.length; i += 2) pts.push([line[i], line[i + 1]]);
+          if (pts.length >= 2)
+            prims.push({ t: "poly", pts, closed: false, weight: PEN.vista, layer: layout ? "ARQ-LAYOUT" : `${LAYER_PREFIX[e.discipline]}-ELEMENTOS`, color: layout ? LAYOUT_GRAY : "#666666", id: e.expressID });
+        }
+      }
+      if (e.planSymbolOnly) continue;
+    }
     // Portas e janelas do pavimento (piso ou teto): tratadas à parte, sempre visíveis.
     if (!isMep && OPENING_TYPES.has(e.ifcType)) {
       if (e.bbox.min[1] >= level - 0.2 && e.bbox.min[1] < nextFloor - 0.3) openings.push({ e, mesh });
@@ -196,6 +214,10 @@ export function buildPlan(input: PlanInput): PlanDrawing {
       const b = Math.min(hi, archHi);
       if (b - a < 0.01) continue;
       y = (a + b) / 2;
+      projected = true;
+    } else if (R && !POCHE_TYPES.has(e.ifcType) && !NO_PROJECTION.has(e.ifcType)) {
+      // Cruza o plano de corte (cama com cabeceira, armário, bancada com espelho): a parte abaixo
+      // do corte aparece vista de cima, com o contorno no corte, como no Revit.
       projected = true;
     }
     if (projected) {

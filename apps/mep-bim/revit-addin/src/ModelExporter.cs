@@ -56,6 +56,14 @@ namespace SmartEasyBIM.Revit
 
         private static readonly HashSet<string> Openings = new HashSet<string> { "OST_Doors", "OST_Windows" };
 
+        /** Categorias cujas famílias levam o símbolo de planta (linhas simbólicas), como o Revit desenha. */
+        private static readonly HashSet<string> SymbolCategories = new HashSet<string>
+        {
+            "OST_Doors", "OST_Windows", "OST_Furniture", "OST_FurnitureSystems", "OST_Casework", "OST_PlumbingFixtures",
+            "OST_SpecialityEquipment", "OST_GenericModel", "OST_Planting", "OST_Entourage", "OST_Parking",
+            "OST_MechanicalEquipment", "OST_ElectricalEquipment", "OST_ElectricalFixtures", "OST_LightingFixtures",
+        };
+
         private static bool Exportable(Element e) =>
             e.Category != null &&
             e.Category.CategoryType == CategoryType.Model &&
@@ -400,7 +408,7 @@ namespace SmartEasyBIM.Revit
             var meshes = new List<GeoMesh>();
             var shared = new Dictionary<string, int>();
             var typesUsed = new Dictionary<long, ElementType>();
-            var openingSymbols = new Dictionary<long, FamilySymbol>();
+            var symbolTypes = new Dictionary<long, FamilySymbol>();
 
             var elements = new FilteredElementCollector(doc).WhereElementIsNotElementType()
                 .Where(e => Exportable(e) && categoryIds.Contains(FamilyExporter.IdValue(e.Category.Id)))
@@ -546,9 +554,18 @@ namespace SmartEasyBIM.Revit
                             w.Prop("espelhada", fi.Mirrored);
                             if (fi.Host != null) w.Prop("hospedeiro", FamilyExporter.IdValue(fi.Host.Id));
                             w.EndObject();
-                            openingSymbols[FamilyExporter.IdValue(fi.Symbol.Id)] = fi.Symbol;
                         }
                         catch { /* sem orientação */ }
+                    }
+                    // Instâncias de família: matriz (posição, rotação, espelhamento) para o símbolo de planta.
+                    if (fi != null && bic != null && SymbolCategories.Contains(bic))
+                    {
+                        try
+                        {
+                            Matrix(w, "matriz", fi.GetTransform());
+                            symbolTypes[FamilyExporter.IdValue(fi.Symbol.Id)] = fi.Symbol;
+                        }
+                        catch { /* sem matriz */ }
                     }
 
                     // Sistemas (instalações).
@@ -571,18 +588,19 @@ namespace SmartEasyBIM.Revit
                 w.EndArray();
 
                 // Tipos: família, nome, parâmetros e o símbolo de planta das portas e janelas.
-                var planLines = ReadOpeningSymbols(doc, openingSymbols.Values.ToList(), result);
+                var planLines = ReadPlanSymbols(doc, symbolTypes.Values.ToList(), result);
                 w.Name("tipos").BeginArray();
                 foreach (var kv in typesUsed)
                 {
                     var t = kv.Value;
                     w.BeginObject().Prop("id", kv.Key).Prop("familia", t.FamilyName).Prop("nome", t.Name);
                     WriteParams(w, "parametros", ReadParams(t));
-                    if (planLines.TryGetValue(kv.Key, out var lines) && lines.Count > 0)
+                    if (planLines.TryGetValue(kv.Key, out var sym) && sym.Lines.Count > 0)
                     {
                         w.Name("planta").BeginArray();
-                        foreach (var l in lines) w.Numbers(null, l, 4);
+                        foreach (var l in sym.Lines) w.Numbers(null, l, 4);
                         w.EndArray();
+                        w.Prop("solidosEmPlanta", sym.SolidsInPlan);
                     }
                     w.EndObject();
                 }
@@ -658,13 +676,40 @@ namespace SmartEasyBIM.Revit
             return result;
         }
 
-        /// <summary>
-        /// Símbolo de planta (linhas simbólicas: folha, arco, caixilho) de cada tipo de porta e janela,
-        /// lido no editor de famílias, em metros nas coordenadas da família. Nada é gravado.
-        /// </summary>
-        private static Dictionary<long, List<List<double>>> ReadOpeningSymbols(Document doc, List<FamilySymbol> symbols, ModelExportResult result)
+        private sealed class PlanSymbol
         {
-            var outMap = new Dictionary<long, List<List<double>>>();
+            public List<List<double>> Lines;
+            /// <summary>O 3D da família aparece em planta (senão o Revit mostra só as linhas simbólicas).</summary>
+            public bool SolidsInPlan;
+        }
+
+        /// <summary>O 3D da família aparece nas plantas? (formas visíveis em planta, famílias aninhadas ou importações).</summary>
+        private static bool SolidsShownInPlan(Document fam)
+        {
+            foreach (var e in new FilteredElementCollector(fam).WhereElementIsNotElementType())
+            {
+                try
+                {
+                    if (e is GenericForm gf)
+                    {
+                        if (!gf.IsSolid) continue;
+                        var v = gf.GetVisibility();
+                        if (v == null || v.IsShownInTopBottom) return true;
+                    }
+                    else if (e is FamilyInstance || e is ImportInstance) return true;
+                }
+                catch { return true; }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Símbolo de planta (linhas simbólicas: folha e arco das portas, caixilhos, mobiliário, louças) de
+        /// cada tipo, lido no editor de famílias, em metros nas coordenadas da família. Nada é gravado.
+        /// </summary>
+        private static Dictionary<long, PlanSymbol> ReadPlanSymbols(Document doc, List<FamilySymbol> symbols, ModelExportResult result)
+        {
+            var outMap = new Dictionary<long, PlanSymbol>();
             foreach (var group in symbols.GroupBy(s => FamilyExporter.IdValue(s.Family.Id)))
             {
                 var family = group.First().Family;
@@ -691,7 +736,11 @@ namespace SmartEasyBIM.Revit
                             }
                             var et = new ExportedType { Name = sym.Name };
                             FamilyExporter.ReadPlanLines(fam, et);
-                            outMap[FamilyExporter.IdValue(sym.Id)] = et.PlanLines.Select(l => l.Select(v => v / 1000.0).ToList()).ToList();
+                            outMap[FamilyExporter.IdValue(sym.Id)] = new PlanSymbol
+                            {
+                                Lines = et.PlanLines.Select(l => l.Select(v => v / 1000.0).ToList()).ToList(),
+                                SolidsInPlan = SolidsShownInPlan(fam),
+                            };
                         }
                         tg.RollBack();
                     }

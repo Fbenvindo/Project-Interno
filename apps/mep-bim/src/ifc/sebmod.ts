@@ -29,6 +29,8 @@ interface SebType {
   parametros?: SebParam[];
   /** Linhas do símbolo em planta (polilinhas x, y em m, nas coordenadas da família). */
   planta?: number[][];
+  /** false: o 3D da família não aparece em planta no Revit (a planta mostra só o símbolo). */
+  solidosEmPlanta?: boolean;
 }
 
 interface SebMesh {
@@ -54,6 +56,8 @@ interface SebElement {
   sistemas?: string[];
   /** Portas e janelas: posição, eixos (x ao longo da parede, y para onde abre) e símbolo. */
   porta?: { origem: number[]; x: number[]; y: number[]; matriz?: number[]; espelhada?: boolean; hospedeiro?: number | null };
+  /** Instâncias de família: posição, rotação e espelhamento (para o símbolo de planta). */
+  matriz?: number[];
   comprimento?: number | null;
 }
 
@@ -335,19 +339,20 @@ export function sebmodToData(f: SebModFile): IfcData {
     const bbox: BBox = { min, max };
     let frame: ElementInfo["frame"];
     let planSymbol: number[][] | undefined;
+    // Símbolo de planta da família (portas, janelas, mobiliário, louças…), levado pela matriz da instância.
+    const sm = e.porta?.matriz ?? e.matriz;
+    if (sm && type?.planta?.length) {
+      planSymbol = type.planta.map((line) => {
+        const out: number[] = [];
+        for (let i = 0; i + 1 < line.length; i += 2) out.push(sm[0] * line[i] + sm[3] * line[i + 1] + sm[9], sm[1] * line[i] + sm[4] * line[i + 1] + sm[10]);
+        return out;
+      });
+    }
     if (e.porta) {
       const o = e.porta.origem;
       const s0 = toScene(o[0], o[1], o[2]);
       const dir = (d: number[]): Vec3 => [d[0], d[2], -d[1]];
       frame = { o: s0, x: dir(e.porta.x), y: dir(e.porta.y) };
-      const m = e.porta.matriz;
-      if (m && type?.planta?.length) {
-        planSymbol = type.planta.map((line) => {
-          const out: number[] = [];
-          for (let i = 0; i + 1 < line.length; i += 2) out.push(m[0] * line[i] + m[3] * line[i + 1] + m[9], m[1] * line[i] + m[4] * line[i + 1] + m[10]);
-          return out;
-        });
-      }
     }
     elements.push({
       expressID: id,
@@ -365,7 +370,7 @@ export function sebmodToData(f: SebModFile): IfcData {
       length: e.comprimento ?? null,
       size: null,
       ...(frame ? { frame, operation: null } : {}),
-      ...(planSymbol ? { planSymbol } : {}),
+      ...(planSymbol ? { planSymbol, ...(type?.solidosEmPlanta === false && !e.porta ? { planSymbolOnly: true } : {}) } : {}),
     });
     // Propriedades: identidade, parâmetros de instância e de tipo (grupos de tipo compartilhados).
     const own = propertyGroups.length;

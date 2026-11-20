@@ -67,6 +67,8 @@ export interface ElementInfo {
   frame?: { o: Vec3; x: Vec3; y: Vec3 };
   /** Símbolo em planta da família do Revit (polilinhas x, y nas coordenadas do projeto): porta com folha e arco, janela. */
   planSymbol?: number[][];
+  /** Família cujo 3D não aparece em planta no Revit: a planta mostra só o símbolo. */
+  planSymbolOnly?: boolean;
   /** Portas: tipo de abertura do IFC (ex.: SINGLE_SWING_LEFT, DOUBLE_DOOR_SINGLE_SWING). */
   operation?: string | null;
 }

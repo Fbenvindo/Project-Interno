@@ -25,9 +25,21 @@ const KEEP_COLOR = new Set(["IFCLIGHTFIXTURE", "IFCOUTLET", "IFCAIRTERMINAL"]);
 
 export const isLayout = (ifcType: string) => LAYOUT_TYPES.has(ifcType) && !KEEP_COLOR.has(ifcType);
 
+/** Louças, metais e bancadas pelo nome (quando o IFC os exporta como elemento genérico ou de instalação). */
+const FIXTURE_NAME = /lavat|\bcuba|\bpia\b|bacia|vaso sanit|chuveiro|ducha|tanque|banheira|mict[oó]rio|bid[eê]|torneira|misturador|bancada|lou[çc]a|sanit[aá]ri|sink|basin|lavatory|toilet|shower|bathtub|urinal|faucet|plumbing fixture/i;
+const FIXTURE_TYPES = new Set(["IFCBUILDINGELEMENTPROXY", "IFCFLOWTERMINAL", "IFCFLOWCONTROLLER", "IFCFLOWFITTING", "IFCDISTRIBUTIONELEMENT", "IFCDISTRIBUTIONFLOWELEMENT", "IFCENERGYCONVERSIONDEVICE", "IFCVALVE", "IFCFURNISHINGELEMENT"]);
+
+/** Layout do modelo de referência (mobiliário, louças, metais): cinza e visto de cima, nunca como rede. */
+export function isLayoutElement(e: Pick<ElementInfo, "ifcType" | "name" | "objectType" | "typeObjectName" | "origin">): boolean {
+  if (e.origin === "locacao") return false;
+  if (isLayout(e.ifcType)) return true;
+  if (KEEP_COLOR.has(e.ifcType) || !FIXTURE_TYPES.has(e.ifcType)) return false;
+  return FIXTURE_NAME.test(`${e.name} ${e.objectType ?? ""} ${e.typeObjectName ?? ""}`);
+}
+
 /** Cor no 3D (modo "por disciplina"): layout em cinza, pilares mais escuros. */
-export function color3d(e: Pick<ElementInfo, "ifcType">, disciplineColor: string): string {
-  if (isLayout(e.ifcType)) return "#a3a3a3";
+export function color3d(e: Pick<ElementInfo, "ifcType"> & Partial<Pick<ElementInfo, "name" | "objectType" | "typeObjectName" | "origin">>, disciplineColor: string): string {
+  if (isLayout(e.ifcType) || (e.name != null && isLayoutElement(e as ElementInfo))) return "#a3a3a3";
   if (COLUMN_TYPES.has(e.ifcType)) return "#6b6b6b";
   return disciplineColor;
 }
