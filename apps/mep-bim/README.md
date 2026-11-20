@@ -282,7 +282,11 @@ Fora de qualquer comando, o app está sempre em **Selecionar**, em todas as vist
   - **da esquerda para a direita** (linha contínua, azul): só os elementos que ficam **inteiros** dentro da janela;
   - **da direita para a esquerda** (tracejada, verde): **todos** os que a janela toca, mesmo parcialmente.
 - **Botão do meio** desloca a vista e a **roda** dá zoom. No 3D, o **botão direito** (ou Shift + botão do meio) gira a vista.
-- **Cubo de vistas** (canto superior direito do 3D): clique numa face (topo, base, frente, fundos, direita, esquerda) para olhar o modelo por aquele lado. O cubo gira junto com a câmera.
+- **Cubo de vistas** (canto superior direito do 3D, como o do Revit): o cubo gira junto com a câmera.
+  - O centro de cada face leva à vista daquela face (topo, base, frente, fundos, direita, esquerda).
+  - As bordas levam à vista pela aresta, entre duas faces.
+  - Os cantos levam à vista pelo vértice (isométrica daquele canto).
+  - Com a vista alinhada a uma face, quatro setas em volta do cubo levam à face vizinha de cima, de baixo, da esquerda ou da direita da tela.
 - **Zoom janela** (lupa, no 3D e nas vistas 2D): clique em dois cantos para aproximar naquela área; Esc desiste. **Enquadrar** (moldura) mostra o modelo ou a folha inteira.
 - **Esc** encerra o comando em andamento e volta a Selecionar. Vale para texto, linha, poligonal (gravada como está), copiar/mover, locar e traçar (o trecho em andamento é gravado). Em Selecionar, o Esc limpa a seleção.
 - **Texto:** clique onde o texto começa, digite no próprio local e tecle **Enter**. O texto é gravado e o app volta a Selecionar.

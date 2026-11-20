@@ -2755,21 +2755,81 @@ h3 {
 .view-cube-face {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   font: 600 9px/1 Inter, sans-serif;
   letter-spacing: 0.04em;
   color: #334155;
   background: rgba(241, 245, 249, 0.92);
   border: 1px solid #94a3b8;
   backface-visibility: hidden;
-  cursor: pointer;
-  padding: 0;
+  box-sizing: border-box;
 }
-.view-cube-face:hover {
-  background: #bae6fd;
-  color: #0c4a6e;
+.view-cube-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 1;
+}
+/* Regiões da face: centro (face), bordas (arestas) e cantos (vértices). */
+.view-cube-cell {
+  position: absolute;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.view-cube-cell:hover {
+  background: rgba(14, 165, 233, 0.45);
+}
+.view-cube-cell.face:hover {
+  background: rgba(186, 230, 253, 0.9);
+}
+/* Setas em volta do cubo (vista alinhada a uma face). */
+.view-cube-holder {
+  position: relative;
+  padding: 14px;
+}
+.view-cube-holder .view-cube-scene {
+  margin: 0;
+}
+.view-cube-arrow {
+  position: absolute;
+  width: 18px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  fill: #64748b;
+}
+.view-cube-arrow:hover {
+  fill: #0284c7;
+}
+.view-cube-arrow.up {
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.view-cube-arrow.down {
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%) rotate(180deg);
+}
+.view-cube-arrow.left {
+  left: -2px;
+  top: 50%;
+  transform: translateY(-50%) rotate(-90deg);
+}
+.view-cube-arrow.right {
+  right: -2px;
+  top: 50%;
+  transform: translateY(-50%) rotate(90deg);
 }
 /* Zoom janela e enquadrar na planta 2D */
 .plan-zoom-tools {
