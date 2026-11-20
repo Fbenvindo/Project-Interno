@@ -36,8 +36,8 @@ describe("biblioteca levada no projeto", () => {
     const local: LibraryEntry = { ...own, designs: [{ ...design("a"), name: "local" } as ElementDesign] };
     const incoming: LibraryEntry = { ...own, designs: [{ ...design("a"), name: "do projeto" } as ElementDesign, design("c")] };
     const keep = mergeEntry(local, incoming, "local");
-    expect(keep.designs!.map((d) => `${d.uid}:${(d as { name: string }).name}`)).toEqual(["a:local", "c:c"]);
+    expect(keep.designs!.map((d) => `${d.uid}:${(d as unknown as { name: string }).name}`)).toEqual(["a:local", "c:c"]);
     const take = mergeEntry(local, incoming, "incoming");
-    expect(take.designs!.find((d) => d.uid === "a")!.name).toBe("do projeto");
+    expect((take.designs!.find((d) => d.uid === "a") as unknown as { name: string }).name).toBe("do projeto");
   });
 });
