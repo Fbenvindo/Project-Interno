@@ -225,6 +225,13 @@ Em **Arquivo › Importar elementos em IFC**. Neste app, *elemento* = família.
 - **Cortes 2D:** as emendas internas da triangulação das faces (comuns em paredes com aberturas) não aparecem mais como linhas.
 - **Abas de vista:** o botão **×** fecha a vista aberta. Num corte, ampliação ou planta extra, volta à planta do pavimento. Numa vista 3D salva ou recortada, volta ao modelo completo sem recortes. Na folha, volta à planta.
 
+### Biblioteca de elementos: onde fica e como levar para outro computador
+
+- **Onde fica:** os elementos criados no app, os importados de IFC e as famílias do Revit (`.sebfam`) ficam na biblioteca deste computador. Ela fica na pasta de dados do app (no Windows, `%APPDATA%\SmartEasyBIM`).
+- **No projeto:** o arquivo `.seb` leva junto os elementos da biblioteca que o projeto usa (geometria, parâmetros, ajustes). Ao abrir o projeto em outro computador, os que faltarem entram na biblioteca de lá; os que já existem lá não são trocados.
+- **Backup:** **Arquivo › Biblioteca › Exportar biblioteca** grava a biblioteca inteira num arquivo `.seblib`, para backup ou para levar o padrão do escritório para outras máquinas. **Importar biblioteca** junta o arquivo à biblioteca deste computador, e os elementos que já existem são atualizados pelos do arquivo.
+- **Projetos antigos:** se um projeto salvo antes disso usar elementos que não existem aqui, a mensagem lista quais faltam. Importe a biblioteca de origem para abri-lo.
+
 ### Navegador (coluna da esquerda)
 
 O antigo painel "Vistas e folhas" foi juntado ao **Navegador**:

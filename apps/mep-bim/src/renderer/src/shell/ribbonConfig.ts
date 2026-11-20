@@ -68,6 +68,8 @@ export type ActionId =
   | "folhasPlantas"
   | "propriedades"
   | "novoElemento"
+  | "exportarBiblioteca"
+  | "importarBiblioteca"
   | "fluxogramas"
   | "novoFluxograma"
   | "fluxogramasAgua"
@@ -166,6 +168,8 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
       buttons: [
         { key: "familias", label: "Importar elementos em IFC", icon: "familia", tool: { kind: "biblioteca" } },
         { key: "novo-elemento-arq", label: "Novo elemento", icon: "elNovo", action: "novoElemento" },
+        { key: "exportar-biblioteca", label: "Exportar biblioteca", icon: "exportar", action: "exportarBiblioteca" },
+        { key: "importar-biblioteca", label: "Importar biblioteca", icon: "importar", action: "importarBiblioteca" },
       ],
     },
     {

@@ -41,7 +41,7 @@ import { VistaPanel } from "./shell/VistaPanel";
 import { connectedPairs, runElements, runFittings, runIdOfElement, segmentIndexOf, runProperties, runSegments, RUN_TYPE_BY_ID, segmentElementId, fittingElementId } from "../../core/runs";
 import { usePointsStore } from "./locacao/usePointsStore";
 import { alignKey, DEFAULT_ALIGN, federate, prepareLink, type LinkData, type LinkMeta } from "../../ifc/federate";
-import { openIfcMany, readIfcPath } from "./platform";
+import { openIfcMany, openTextFile, readIfcPath, saveFile } from "./platform";
 import { moveNetwork, type MoveSelection } from "../../core/runEdit";
 import { applyInstall, boxElements, boxIndexOf, boxProperties, DEFAULT_INSTALL, isConduitRun, pullBoxes, runFloorProbeY, type InstallMode } from "../../core/conduits";
 import { storeyAt } from "../../core/points";
@@ -64,7 +64,7 @@ import { VinculosPanel } from "./links/VinculosPanel";
 import { CoordenadasPanel } from "./coords/CoordenadasPanel";
 import { useCursor } from "./coords/cursor";
 import { EMPTY_GEOREF, effectiveGeoref, fmtCoord, toMap, type Georef } from "../../core/georef";
-import { loadFamilyLibrary, newDesignUid, saveDesign } from "./library/familyLibrary";
+import { exportLibrary, importLibrary, loadFamilyLibrary, newDesignUid, saveDesign } from "./library/familyLibrary";
 import { ElementEditor } from "./library/ElementEditor";
 import { designComponentId, newDesign, type ElementDesign } from "../../core/elementDesign";
 import { useDraftTool, CMD_LABEL, isCreateCmd, isMeasureCmd } from "./desenho/useDraftTool";
@@ -885,6 +885,24 @@ export function App() {
           return newFlowRef.current("agua-fria");
         case "novoElemento":
           return setDesigning(newDesign(undefined, newDesignUid()));
+        case "exportarBiblioteca":
+          return void (async () => {
+            const { text, count } = await exportLibrary();
+            if (!count) return files.setMessage("A biblioteca deste computador está vazia.");
+            const saved = await saveFile({ defaultName: "biblioteca-smarteasybim.seblib", content: text, filters: [{ name: "Biblioteca SmartEasyBIM", extensions: ["seblib"] }] });
+            if (saved) files.setMessage(`Biblioteca exportada (${count} elementos): ${saved}`);
+          })();
+        case "importarBiblioteca":
+          return void (async () => {
+            const f = await openTextFile([{ name: "Biblioteca SmartEasyBIM", extensions: ["seblib", "json"] }]);
+            if (!f) return;
+            try {
+              const n = await importLibrary(f.content);
+              files.setMessage(`Biblioteca ${f.name} importada: ${n} elemento(s) novo(s); os que já existiam foram atualizados.`);
+            } catch (e) {
+              files.setMessage(`Não foi possível importar: ${e instanceof Error ? e.message : e}`);
+            }
+          })();
         case "vincularIfc":
           chooseTool({ kind: "vinculos" });
           return void addLinks();

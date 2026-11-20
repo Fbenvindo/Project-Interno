@@ -5,6 +5,22 @@ import type { Discipline } from "../../../core/types";
 import { effectiveGeoref } from "../../../core/georef";
 import { deserializeProject, serializeProject } from "../../../core/project";
 import { archDiscipline } from "../../../core/arch";
+import { COMPONENT_BY_ID } from "../../../core/library";
+import { libraryForProject, mergeLibrary } from "../library/familyLibrary";
+
+/** Componentes da biblioteca usados no projeto: pontos locados e os citados no programa de necessidades. */
+function usedComponents(store: PointsStore): Set<string> {
+  const used = new Set(store.points.map((p) => p.componentId));
+  const scan = (v: unknown) => {
+    if (typeof v === "string") {
+      if (COMPONENT_BY_ID[v]?.source) used.add(v);
+    } else if (Array.isArray(v)) v.forEach(scan);
+    else if (v && typeof v === "object") Object.values(v).forEach(scan);
+  };
+  scan(store.program);
+  scan(store.choices);
+  return used;
+}
 import type { LoadedModel } from "../../../ifc/loadIfc";
 import { desktop, openTextFile, saveFile } from "../platform";
 import type { PointsStore } from "./usePointsStore";
@@ -59,6 +75,8 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel | null, f
             fileName,
           ),
           modeloIfcCaminho: hostPath,
+          // Os elementos da biblioteca usados vão junto: o projeto abre em qualquer computador.
+          biblioteca: libraryForProject(usedComponents(store)),
         },
         null,
         2,
@@ -97,12 +115,17 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel | null, f
           return;
         }
       }
+      // Elementos da biblioteca que vieram no projeto e faltam neste computador (os daqui não são trocados).
+      const added = Array.isArray(json.biblioteca) ? await mergeLibrary(json.biblioteca, "local") : 0;
       const d = deserializeProject(json, m.coordinates);
       store.reset(d);
       setProjectFile({ path: f.path, name: f.name });
       const { points, runs, circuits } = d;
       onOpened?.();
-      setMessage(`Projeto ${f.name}: ${points.length} pontos, ${runs.length} trechos e ${circuits.length} circuitos.`);
+      setMessage(
+        `Projeto ${f.name}: ${points.length} pontos, ${runs.length} trechos e ${circuits.length} circuitos.` +
+          (added ? ` ${added} elemento(s) da biblioteca do projeto foram acrescentados à biblioteca deste computador.` : ""),
+      );
     } catch (e) {
       setMessage(`Não foi possível abrir: ${e instanceof Error ? e.message : e}`);
     }

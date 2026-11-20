@@ -5,7 +5,7 @@
 import { useSyncExternalStore } from "react";
 import { packageComponents, parseFamilyPackage, type FamilyOverride, type FamilyPackage } from "../../../core/families";
 import { ifcComponentId, ifcElementComponent, type IfcElementDef, type IfcElementOverride } from "../../../core/ifcElements";
-import { designComponent, OWN_PACKAGE_ID, type ElementDesign } from "../../../core/elementDesign";
+import { designComponent, designComponentId, OWN_PACKAGE_ID, type ElementDesign } from "../../../core/elementDesign";
 import { COMPONENT_BY_ID, registerComponents } from "../../../core/library";
 
 export interface LibraryEntry {
@@ -54,7 +54,7 @@ async function tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBReq
 }
 
 let entries: LibraryEntry[] = [];
-let loaded = false;
+let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 
@@ -73,10 +73,13 @@ function register(e: LibraryEntry) {
   registerComponents(e.id, entryComponents(e));
 }
 
-/** Carrega a biblioteca salva e registra os componentes (uma vez, na abertura do app). */
-export async function loadFamilyLibrary(): Promise<void> {
-  if (loaded) return;
-  loaded = true;
+/** Carrega a biblioteca salva e registra os componentes (uma vez, na abertura do app; chamadas seguintes esperam a mesma leitura). */
+export function loadFamilyLibrary(): Promise<void> {
+  loading ??= readLibrary();
+  return loading;
+}
+
+async function readLibrary(): Promise<void> {
   try {
     entries = (await tx<LibraryEntry[]>("readonly", (s) => s.getAll() as IDBRequest<LibraryEntry[]>)) ?? [];
   } catch (e) {
@@ -235,4 +238,92 @@ export async function importDesigns(text: string): Promise<number> {
   for (const d of data.elementos as ElementDesign[]) if (d?.uid && Array.isArray(d.solids)) map.set(d.uid, d);
   update({ ...e, designs: [...map.values()] });
   return data.elementos.length;
+}
+
+// ---- Biblioteca no projeto e cópia da biblioteca ----------------------------------------------------
+
+/** Ids dos componentes de uma entrada, por item (desenho, elemento do IFC ou família do Revit). */
+function itemIds(e: LibraryEntry): { designs: Map<string, string[]>; elements: Map<string, string[]>; families: Map<string, string[]> } {
+  const designs = new Map((e.designs ?? []).map((d) => [d.uid, [designComponentId(d.uid)]]));
+  const elements = new Map((e.elements ?? []).map((el) => [el.uid, [e.replaces?.[el.uid] ?? ifcComponentId(e.id, el.uid)]]));
+  const families = new Map(
+    (e.pkg?.familias ?? []).map((f) => [f.uid, packageComponents(e.id, { ...e.pkg!, familias: [f] }, e.overrides).map((c) => c.id)]),
+  );
+  return { designs, elements, families };
+}
+
+/**
+ * Parte da biblioteca usada pelos componentes dados (para gravar no projeto): só os elementos
+ * criados, os elementos de IFC e as famílias que o projeto usa, com os ajustes de cada um.
+ */
+export function libraryForProject(used: Set<string>, from: LibraryEntry[] = entries): LibraryEntry[] {
+  const out: LibraryEntry[] = [];
+  for (const e of from) {
+    const ids = itemIds(e);
+    const uses = (list: string[] | undefined) => !!list?.some((id) => used.has(id));
+    if (e.kind === "proprio") {
+      const designs = (e.designs ?? []).filter((d) => uses(ids.designs.get(d.uid)));
+      if (designs.length) out.push({ ...e, designs });
+    } else if (e.kind === "ifc") {
+      const elements = (e.elements ?? []).filter((el) => uses(ids.elements.get(el.uid)));
+      if (elements.length) out.push({ ...e, elements });
+    } else if (e.pkg) {
+      const familias = e.pkg.familias.filter((f) => uses(ids.families.get(f.uid)));
+      if (familias.length) out.push({ ...e, pkg: { ...e.pkg, familias } });
+    }
+  }
+  return out;
+}
+
+const byUid = <T extends { uid: string }>(local: T[] = [], incoming: T[] = [], prefer: "local" | "incoming"): T[] => {
+  const map = new Map(local.map((x) => [x.uid, x]));
+  for (const x of incoming) if (prefer === "incoming" || !map.has(x.uid)) map.set(x.uid, x);
+  return [...map.values()];
+};
+
+/** Junta duas versões de uma entrada: `local` (prefere o que já está aqui) ou `incoming` (o que chega substitui). */
+export function mergeEntry(local: LibraryEntry, incoming: LibraryEntry, prefer: "local" | "incoming"): LibraryEntry {
+  const pick = <T>(a: Record<string, T> | undefined, b: Record<string, T> | undefined) => (prefer === "local" ? { ...(b ?? {}), ...(a ?? {}) } : { ...(a ?? {}), ...(b ?? {}) });
+  return {
+    ...local,
+    designs: local.designs || incoming.designs ? byUid(local.designs, incoming.designs, prefer) : undefined,
+    elements: local.elements || incoming.elements ? byUid(local.elements, incoming.elements, prefer) : undefined,
+    pkg: local.pkg || incoming.pkg ? { ...(local.pkg ?? incoming.pkg)!, familias: byUid(local.pkg?.familias, incoming.pkg?.familias, prefer) } : undefined,
+    overrides: pick(local.overrides, incoming.overrides),
+    ifcOverrides: pick(local.ifcOverrides, incoming.ifcOverrides),
+    replaces: pick(local.replaces, incoming.replaces),
+  };
+}
+
+const isEntry = (x: unknown): x is LibraryEntry => !!x && typeof x === "object" && typeof (x as LibraryEntry).id === "string" && typeof (x as LibraryEntry).name === "string";
+
+/**
+ * Leva entradas para a biblioteca deste computador (do projeto aberto ou de um arquivo .seblib).
+ * Devolve quantos componentes passaram a existir aqui.
+ */
+export async function mergeLibrary(incoming: unknown[], prefer: "local" | "incoming"): Promise<number> {
+  await loadFamilyLibrary();
+  const before = new Set(entries.flatMap((e) => entryComponents(e).map((c) => c.id)));
+  for (const raw of incoming) {
+    if (!isEntry(raw)) continue;
+    const local = entries.find((e) => e.id === raw.id);
+    update(local ? mergeEntry(local, raw, prefer) : { ...raw, overrides: raw.overrides ?? {} });
+  }
+  return entries.flatMap((e) => entryComponents(e).map((c) => c.id)).filter((id) => !before.has(id)).length;
+}
+
+export const LIBRARY_FORMAT = "smarteasybim-biblioteca";
+
+/** Cópia da biblioteca inteira (.seblib): backup ou o padrão do escritório para outros computadores. */
+export async function exportLibrary(): Promise<{ text: string; count: number }> {
+  await loadFamilyLibrary();
+  const count = entries.reduce((n, e) => n + entryComponents(e).length, 0);
+  return { text: JSON.stringify({ formato: LIBRARY_FORMAT, versao: 1, exportadoEm: new Date().toISOString(), entradas: entries }), count };
+}
+
+/** Importa uma cópia da biblioteca; elementos que já existem são atualizados pelos do arquivo. */
+export async function importLibrary(text: string): Promise<number> {
+  const data = JSON.parse(text);
+  if (data?.formato !== LIBRARY_FORMAT || !Array.isArray(data.entradas)) throw new Error("o arquivo não é uma biblioteca do SmartEasyBIM (.seblib)");
+  return mergeLibrary(data.entradas, "incoming");
 }

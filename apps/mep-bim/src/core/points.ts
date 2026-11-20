@@ -235,8 +235,13 @@ export function deserializePoints(json: unknown, cs: CoordinateSystem): PlacedPo
   if (!file || file.formato !== LOCACAO_FORMAT || !Array.isArray(file.pontos)) {
     throw new Error("Arquivo de locação inválido.");
   }
+  const missing = [...new Set(file.pontos.map((s) => s.componente).filter((c) => !COMPONENT_BY_ID[c]))];
+  if (missing.length)
+    throw new Error(
+      `o projeto usa ${missing.length} elemento(s) que não estão na biblioteca deste computador (${missing.slice(0, 5).join(", ")}${missing.length > 5 ? "…" : ""}). ` +
+        "Importe a biblioteca de origem (Arquivo › Importar biblioteca) ou abra o projeto salvo numa versão que leva a biblioteca junto.",
+    );
   return file.pontos.map((s) => {
-    if (!COMPONENT_BY_ID[s.componente]) throw new Error(`Componente desconhecido: ${s.componente}`);
     const [x, y] = s.posicao;
     return {
       id: newPointId(),
