@@ -38,7 +38,7 @@ export function openReport({ win, empreendimento, analise, items, estados, filtr
           <tr><th>Ponto (IFC)</th><td>${esc(fmtCoords(c.ponto))} m</td></tr>
           ${c.grupo_nome ? `<tr><th>Grupo</th><td>${esc(c.grupo_nome)}</td></tr>` : ''}
           <tr><th>Responsável</th><td>${esc(c.responsavel_nome || '—')}</td></tr>
-          ${c.comentario ? `<tr><th>Comentário</th><td>${esc(c.comentario)}</td></tr>` : ''}
+          ${(c.comentarios || []).filter((k) => k.origem !== 'sistema').slice(-3).map((k) => `<tr><th>Comentário</th><td>${esc(k.texto)} <span class="small muted">— ${esc(k.autor)}, ${new Date(k.created_at).toLocaleDateString('pt-BR')}</span></td></tr>`).join('')}
         </table>
       </div>
     </div>`,

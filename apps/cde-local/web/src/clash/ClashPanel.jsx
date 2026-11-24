@@ -64,6 +64,7 @@ export default function ClashPanel({ empreendimento, canApprove, onOpen }) {
           folga: p?.folga ?? false,
           distancia: cmOf(p?.distancia ?? 0.05),
           ignorar: (p?.ignorar ?? d.ignorarPadrao).join(', '),
+          auto: p?.auto ?? true,
         };
       });
     } catch (e) {
@@ -121,6 +122,9 @@ export default function ClashPanel({ empreendimento, canApprove, onOpen }) {
               <input type="checkbox" checked={form.colisao} onChange={(e) => setForm({ ...form, colisao: e.target.checked })} /> Colisão física · tolerância
               <Input className="w-16 h-8" value={form.tolerancia} onChange={(e) => setForm({ ...form, tolerancia: e.target.value })} /> cm
             </label>
+            <label className="flex items-center gap-2" title="Quando um dos modelos receber revisão nova (emitida, ou enviada se a análise usa a versão atual), a análise roda de novo e é comparada com esta">
+              <input type="checkbox" checked={form.auto} onChange={(e) => setForm({ ...form, auto: e.target.checked })} /> Reexecutar sozinha a cada revisão nova
+            </label>
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={form.folga} onChange={(e) => setForm({ ...form, folga: e.target.checked })} /> Folga mínima
               <Input className="w-16 h-8" value={form.distancia} onChange={(e) => setForm({ ...form, distancia: e.target.value })} /> cm
@@ -148,6 +152,7 @@ export default function ClashPanel({ empreendimento, canApprove, onOpen }) {
                       folga: form.folga,
                       distancia: mOf(form.distancia),
                       ignorar: form.ignorar.split(/[,;\s]+/).filter(Boolean),
+                      auto: form.auto,
                     }),
                   'Análise na fila: o servidor processa e a lista abaixo mostra o andamento.',
                 )
@@ -187,7 +192,7 @@ export default function ClashPanel({ empreendimento, canApprove, onOpen }) {
                       {a.nome}
                     </button>
                     <div className="text-xs text-gray-500">
-                      {fmtDate(a.created_at)} · {a.criado_por}
+                      {fmtDate(a.created_at)} · {a.automatica ? 'automática (revisão nova)' : a.criado_por}
                     </div>
                   </td>
                   <td className="p-2 text-xs text-gray-600">
@@ -204,6 +209,12 @@ export default function ClashPanel({ empreendimento, canApprove, onOpen }) {
                         <b>{a.resumo.total}</b> interferência(s): {a.resumo.colisao} colisão(ões), {a.resumo.folga} folga(s)
                         {a.resumo.grupos ? ` · ${a.resumo.grupos} grupo(s)` : ''}
                         <div className={a.abertas ? 'text-amber-700' : 'text-green-700'}>{a.abertas ? `${a.abertas} em aberto` : 'nenhuma em aberto'}</div>
+                        {a.resumo.comparacao && (
+                          <div className="text-gray-500">
+                            vs. anterior: {a.resumo.comparacao.novas} nova(s), {a.resumo.comparacao.resolvidas} resolvida(s)
+                            {a.resumo.comparacao.reabertas ? `, ${a.resumo.comparacao.reabertas} reaberta(s)` : ''}
+                          </div>
+                        )}
                       </>
                     )}
                     {(a.estado === 'fila' || a.estado === 'processando') && (

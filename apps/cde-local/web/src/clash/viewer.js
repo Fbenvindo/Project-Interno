@@ -168,14 +168,22 @@ export class ClashViewer {
     this.render();
   }
 
-  /** Imagem da vista atual (JPEG), no tamanho indicado. */
-  snapshot(width = 640, height = 420) {
+  /** Câmera atual em coordenadas de cena absolutas (para o ponto de vista do BCF). */
+  cameraState() {
+    const o = this.origin;
+    const p = this.camera.position;
+    const t = this.controls.target;
+    return { pos: [p.x + o[0], p.y + o[1], p.z + o[2]], target: [t.x + o[0], t.y + o[1], t.z + o[2]] };
+  }
+
+  /** Imagem da vista atual (JPEG ou PNG), no tamanho indicado. */
+  snapshot(width = 640, height = 420, type = 'image/jpeg') {
     const prev = [this.container.clientWidth, this.container.clientHeight];
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.render();
-    const url = this.renderer.domElement.toDataURL('image/jpeg', 0.82);
+    const url = this.renderer.domElement.toDataURL(type, 0.82);
     this.renderer.setSize(prev[0] || 1, prev[1] || 1);
     this.camera.aspect = (prev[0] || 1) / (prev[1] || 1);
     this.camera.updateProjectionMatrix();

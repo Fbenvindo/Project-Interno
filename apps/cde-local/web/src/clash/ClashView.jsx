@@ -1,20 +1,25 @@
 // Resultado de uma análise: lista de interferências (agrupadas, com filtros), visualizador 3D,
 // detalhes da pendência (estado, responsável, comentário), edição em lote e relatório PDF.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ChevronDown, ChevronRight, Eye, EyeOff, FileDown, Maximize2 } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ChevronRight, Eye, EyeOff, FileDown, FileUp, Maximize2, Share2 } from 'lucide-react';
 import { clashApi } from '../api';
 import { Button, Input } from '../ui';
 import { ClashViewer, parseGeometry } from './viewer';
 import { clashMeasure, fmtCoords, openReport, typeLabel } from './report';
+import { buildBcf, downloadBytes, readBcf } from './bcf';
 
 const STATE_STYLE = { nova: 'bg-red-100 text-red-700', ativa: 'bg-amber-100 text-amber-800', resolvida: 'bg-green-100 text-green-700', aprovada: 'bg-indigo-100 text-indigo-700' };
 const sel = 'h-8 rounded-md border border-gray-300 bg-white px-2 text-xs';
+const SIT_STYLE = { nova: 'text-blue-700', mantida: 'text-gray-500', reaberta: 'text-red-700' };
+const fmtDate = (d) => (d ? new Date(d).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '');
 
 export default function ClashView({ empreendimento, analiseId, canApprove, onBack }) {
   const [an, setAn] = useState(null);
   const [users, setUsers] = useState([]);
   const [msg, setMsg] = useState(null);
-  const [filtro, setFiltro] = useState({ estado: 'abertas', tipo: '', pavimento: '', responsavel: '', texto: '' });
+  const [filtro, setFiltro] = useState({ estado: 'abertas', tipo: '', pavimento: '', responsavel: '', situacao: '', texto: '' });
+  const [showResolved, setShowResolved] = useState(false);
+  const bcfInput = useRef(null);
   const [selected, setSelected] = useState(null);
   const [checked, setChecked] = useState(new Set());
   const [open, setOpen] = useState(new Set());
@@ -84,6 +89,7 @@ export default function ClashView({ empreendimento, analiseId, canApprove, onBac
         (!filtro.tipo || c.tipo === filtro.tipo) &&
         (!filtro.pavimento || c.pavimento === filtro.pavimento) &&
         (!filtro.responsavel || (filtro.responsavel === '-' ? !c.responsavel_id : String(c.responsavel_id) === filtro.responsavel)) &&
+        (!filtro.situacao || c.situacao === filtro.situacao) &&
         (!q || [c.a.nome, c.b.nome, c.a.tipo, c.b.tipo, c.grupo_nome, c.comentario, String(c.numero)].some((s) => String(s || '').toLowerCase().includes(q))),
     );
   }, [clashes, filtro]);
@@ -110,7 +116,7 @@ export default function ClashView({ empreendimento, analiseId, canApprove, onBac
   const current = clashes.find((c) => c.id === selected) || null;
   useEffect(() => {
     if (!current) return setEdit(null);
-    setEdit({ estado: current.estado, responsavel_id: current.responsavel_id ?? '', comentario: current.comentario ?? '' });
+    setEdit({ estado: current.estado, responsavel_id: current.responsavel_id ?? '', comentario: '' });
     if (!geoState) viewer.current?.focus(current, modelIdx(current.a.documento_id), modelIdx(current.b.documento_id));
   }, [current?.id, geoState]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -161,7 +167,43 @@ export default function ClashView({ empreendimento, analiseId, canApprove, onBac
     openReport({ win, empreendimento, analise: an, items, estados: an.estados, filtroTexto });
   };
 
+  /** BCF das interferências filtradas: ponto de vista, elementos (GlobalId) e imagem de cada uma. */
+  const exportBcf = async () => {
+    if (!shown.length || geoState) return;
+    const items = [];
+    const limit = 1000;
+    const list = shown.slice(0, limit);
+    for (let i = 0; i < list.length; i++) {
+      setReport(`Preparando BCF ${i + 1} de ${list.length}…`);
+      const c = list[i];
+      viewer.current.focus(c, modelIdx(c.a.documento_id), modelIdx(c.b.documento_id));
+      items.push({ clash: c, image: viewer.current.snapshot(800, 520, 'image/png'), camera: viewer.current.cameraState() });
+      if (i % 5 === 4) await new Promise((r) => setTimeout(r, 0));
+    }
+    if (current) viewer.current.focus(current, modelIdx(current.a.documento_id), modelIdx(current.b.documento_id));
+    setReport(null);
+    const zip = buildBcf({ empreendimento, analise: an, items, users, author: 'CDE' });
+    const safe = an.nome.replace(/[^A-Za-z0-9._-]+/g, '_');
+    downloadBytes(zip, `Interferencias_${safe}_${new Date().toISOString().slice(0, 10)}.bcf`, 'application/zip');
+    setMsg(`BCF com ${items.length} interferência(s) gerado${shown.length > limit ? ` (primeiras ${limit} de ${shown.length})` : ''}. Abra no Revit (BCF Manager), Navisworks, Solibri ou BIMcollab.`);
+  };
+
+  const importBcf = async (file) => {
+    setMsg(null);
+    try {
+      const topicos = readBcf(new Uint8Array(await file.arrayBuffer()));
+      const r = await clashApi.bcfImport(an.id, topicos);
+      await load();
+      setMsg(
+        `BCF importado: ${r.encontrados} de ${r.topicos} tópico(s) desta análise, ${r.estados} estado(s) atualizado(s), ${r.comentarios} comentário(s) novo(s)${r.ignorados ? ` · ${r.ignorados} tópico(s) de outras análises ignorado(s)` : ''}.`,
+      );
+    } catch (e) {
+      setMsg(`Erro: ${e.message}`);
+    }
+  };
+
   if (!an) return <p className="text-sm text-gray-500">{msg || 'Carregando análise…'}</p>;
+  const cmp = an.resumo?.comparacao;
   const allShownChecked = shown.length > 0 && shown.every((c) => checked.has(c.id));
 
   return (
@@ -179,8 +221,59 @@ export default function ClashView({ empreendimento, analiseId, canApprove, onBac
           <Button size="sm" variant="outline" disabled={!!report || !!geoState || !shown.length} onClick={makeReport} title="Relatório das interferências filtradas, com imagens">
             <FileDown className="w-4 h-4 mr-1" /> Relatório PDF ({Math.min(shown.length, 300)})
           </Button>
+          <Button size="sm" variant="outline" disabled={!!report || !!geoState || !shown.length} onClick={exportBcf} title="BCF das interferências filtradas, para Revit, Navisworks, Solibri, BIMcollab…">
+            <Share2 className="w-4 h-4 mr-1" /> Exportar BCF
+          </Button>
+          <Button size="sm" variant="outline" disabled={!!report} onClick={() => bcfInput.current?.click()} title="Traz de volta o status e os comentários feitos em outro software">
+            <FileUp className="w-4 h-4 mr-1" /> Importar BCF
+          </Button>
+          <input
+            ref={bcfInput}
+            type="file"
+            accept=".bcf,.bcfzip,.zip"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = '';
+              if (f) importBcf(f);
+            }}
+          />
         </div>
       </div>
+
+      {an.automatica ? <p className="text-xs text-gray-500">Rodada automaticamente quando chegou revisão nova de um dos modelos.</p> : null}
+      {cmp && (
+        <div className="rounded-lg border bg-white px-3 py-2 text-sm">
+          Comparada com a análise de {fmtDate(an.anterior?.concluida_at)}
+          {an.anterior ? ` (${an.anterior.modelos.map((m) => `${m.codigo.split('-').slice(-3).join('-')} ${m.revisao}`).join(', ')})` : ''}:{' '}
+          <button className="text-blue-700 hover:underline" onClick={() => setFiltro({ ...filtro, estado: '', situacao: 'nova' })}>
+            {cmp.novas} nova(s)
+          </button>
+          {' · '}
+          <button className="text-gray-700 hover:underline" onClick={() => setFiltro({ ...filtro, estado: '', situacao: 'mantida' })}>
+            {cmp.mantidas} continuam
+          </button>
+          {' · '}
+          <button className="text-red-700 hover:underline" onClick={() => setFiltro({ ...filtro, estado: '', situacao: 'reaberta' })}>
+            {cmp.reabertas} reaberta(s)
+          </button>
+          {' · '}
+          <button className="text-green-700 hover:underline" onClick={() => setShowResolved(!showResolved)}>
+            {cmp.resolvidas} resolvida(s) pela revisão {showResolved ? '▴' : '▾'}
+          </button>
+          {showResolved && (
+            <div className="mt-2 max-h-40 overflow-auto text-xs text-gray-600 border-t pt-1">
+              {cmp.resolvidasLista.map((r) => (
+                <div key={r.guid || r.numero}>
+                  #{r.numero} (análise anterior) · {r.tipo === 'colisao' ? 'colisão' : 'folga'} · {r.a.nome} × {r.b.nome}
+                  {r.pavimento ? ` · ${r.pavimento}` : ''}
+                </div>
+              ))}
+              {!cmp.resolvidasLista.length && 'Nenhuma.'}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid gap-3" style={{ gridTemplateColumns: 'minmax(340px, 430px) 1fr', height: 'calc(100vh - 150px)', minHeight: 520 }}>
         {/* Lista */}
@@ -216,6 +309,16 @@ export default function ClashView({ empreendimento, analiseId, canApprove, onBac
                   </option>
                 ))}
               </select>
+              {cmp && (
+                <select className={sel} value={filtro.situacao} onChange={(e) => setFiltro({ ...filtro, situacao: e.target.value })}>
+                  <option value="">Novas e antigas</option>
+                  {Object.entries(an.situacoes).map(([k, l]) => (
+                    <option key={k} value={k}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
             <Input className="h-8 text-xs" placeholder="Buscar nº, elemento, tipo, comentário…" value={filtro.texto} onChange={(e) => setFiltro({ ...filtro, texto: e.target.value })} />
             <div className="flex items-center gap-2 text-xs text-gray-600">
@@ -291,6 +394,7 @@ export default function ClashView({ empreendimento, analiseId, canApprove, onBac
                     <div className="truncate text-[11px] text-gray-500">
                       {r.c.pavimento || 'sem pavimento'} · {clashMeasure(r.c)}
                       {r.c.responsavel_nome ? ` · ${r.c.responsavel_nome}` : ''}
+                      {cmp && r.c.situacao !== 'mantida' ? <span className={`ml-1 ${SIT_STYLE[r.c.situacao]}`}>· {r.c.situacao === 'nova' ? 'nova' : 'reaberta'}</span> : null}
                     </div>
                   </div>
                 </div>
@@ -362,16 +466,30 @@ export default function ClashView({ empreendimento, analiseId, canApprove, onBac
                     ))}
                   </select>
                 </div>
+                <div className="max-h-28 overflow-auto space-y-1 text-xs">
+                  {(current.comentarios || []).map((k) => (
+                    <div key={k.id} className={`rounded px-2 py-1 ${k.origem === 'sistema' ? 'bg-gray-50 text-gray-500' : k.origem === 'bcf' ? 'bg-indigo-50' : k.origem === 'smarteasybim' ? 'bg-sky-50' : 'bg-amber-50'}`}>
+                      <span className="text-gray-500">
+                        {k.autor} · {fmtDate(k.created_at)}
+                        {k.origem === 'bcf' ? ' · BCF' : k.origem === 'smarteasybim' ? ' · SmartEasyBIM' : ''}
+                      </span>
+                      <div>{k.texto}</div>
+                    </div>
+                  ))}
+                  {!(current.comentarios || []).length && <div className="text-gray-400">Sem comentários.</div>}
+                </div>
                 <textarea
-                  className="w-full h-16 rounded-md border border-gray-300 p-2 text-xs"
-                  placeholder="Comentário (ex.: desviar a tubulação por baixo da viga)"
+                  className="w-full h-14 rounded-md border border-gray-300 p-2 text-xs"
+                  placeholder="Novo comentário (ex.: desviar a tubulação por baixo da viga)"
                   value={edit.comentario}
                   onChange={(e) => setEdit({ ...edit, comentario: e.target.value })}
                 />
                 <Button
                   size="sm"
                   onClick={() =>
-                    save([current.id], { estado: edit.estado, responsavel_id: edit.responsavel_id === '' ? null : Number(edit.responsavel_id), comentario: edit.comentario }, 'Interferência atualizada.')
+                    save([current.id], { estado: edit.estado, responsavel_id: edit.responsavel_id === '' ? null : Number(edit.responsavel_id), comentario: edit.comentario }, 'Interferência atualizada.').then(() =>
+                      setEdit((x) => x && { ...x, comentario: '' }),
+                    )
                   }
                 >
                   Salvar

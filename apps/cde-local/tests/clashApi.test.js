@@ -99,7 +99,8 @@ test('análise de interferências pelo CDE', async () => {
   const proj = users.find((u) => u.name === 'Proj');
   r = await call('PATCH', `/api/clash/analises/${a.id}/interferencias`, { ids: [c.id], estado: 'ativa', responsavel_id: proj.id, comentario: 'Desviar por baixo' }, colab.token);
   assert.equal(r.data[0].responsavel_nome, 'Proj');
-  assert.equal(r.data[0].comentario, 'Desviar por baixo');
+  assert.equal(r.data[0].comentarios.length, 1, 'comentário entra no histórico');
+  assert.equal(r.data[0].comentarios[0].texto, '[Nova → Ativa] Desviar por baixo');
   assert.equal((await call('PATCH', `/api/clash/analises/${a.id}/interferencias`, { ids: [c.id], estado: 'aprovada' }, colab.token)).status, 403);
   assert.equal((await call('PATCH', `/api/clash/analises/${a.id}/interferencias`, { ids: [c.id], estado: 'aprovada' }, admin)).data[0].estado, 'aprovada');
 
