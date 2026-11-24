@@ -5,6 +5,7 @@ import type { Discipline } from "../../../core/types";
 import { effectiveGeoref } from "../../../core/georef";
 import { deserializeProject, serializeProject } from "../../../core/project";
 import { archDiscipline } from "../../../core/arch";
+import { docFileName, hasCoding, modelDocMeta } from "../../../core/cde";
 import { COMPONENT_BY_ID } from "../../../core/library";
 import { libraryForProject, mergeLibrary } from "../library/familyLibrary";
 
@@ -70,7 +71,7 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel | null, f
       const json = JSON.stringify(
         {
           ...serializeProject(
-            { points: store.points, runs: store.runs, circuits: store.circuits, program: store.program, links: store.links, georef: store.georef, drafts: store.drafts, views: store.views, sheets: store.sheets, disciplines: store.disciplines, choices: store.choices, installSettings: store.installSettings, profile: store.profile, visibility: store.visibility, doors: store.doors, arch: store.arch },
+            { points: store.points, runs: store.runs, circuits: store.circuits, program: store.program, links: store.links, georef: store.georef, drafts: store.drafts, views: store.views, sheets: store.sheets, disciplines: store.disciplines, choices: store.choices, installSettings: store.installSettings, profile: store.profile, visibility: store.visibility, doors: store.doors, arch: store.arch, cde: store.cde },
             model.coordinates,
             fileName,
           ),
@@ -161,7 +162,9 @@ export function useProjectFiles(store: PointsStore, model: LoadedModel | null, f
           arch: store.arch,
           archOnly,
         });
-        const path = await saveFile({ defaultName: `${base(fileName)}-${g.suffix}.ifc`, content: text, filters: [{ name: "IFC", extensions: ["ifc"] }] });
+        // Projeto com codificação ISO 19650: o modelo de uma disciplina sai com código e revisão.
+        const coded = hasCoding(store.cde.coding) && g.disc?.length === 1 ? docFileName(store.cde.coding, modelDocMeta(store.cde, g.disc[0]), "ifc") : null;
+        const path = await saveFile({ defaultName: coded ?? `${base(fileName)}-${g.suffix}.ifc`, content: text, filters: [{ name: "IFC", extensions: ["ifc"] }] });
         if (path) saved.push(path);
         else if (perDiscipline) break;
       }

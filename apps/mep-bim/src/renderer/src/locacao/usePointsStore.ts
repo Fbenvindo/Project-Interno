@@ -15,6 +15,7 @@ import { DEFAULT_INSTALL_SETTINGS, type InstallSettings } from "../../../core/co
 import type { HideRules } from "../../../core/visibility";
 import type { DoorOverride } from "../../../core/plan/build";
 import type { ArchElement } from "../../../core/arch";
+import { EMPTY_CDE, type CdeData } from "../../../core/cde";
 
 interface ProjectState {
   points: PlacedPoint[];
@@ -40,6 +41,8 @@ interface ProjectState {
   doors: Record<string, DoorOverride>;
   /** Arquitetura e estrutura modeladas no app (paredes, portas, janelas, lajes, pilares, vigas). */
   arch: ArchElement[];
+  /** Gestão da informação (ISO 19650): codificação, modelos e emissões. */
+  cde: CdeData;
 }
 
 export type ProjectSnapshot = ProjectState;
@@ -54,7 +57,7 @@ interface History {
 }
 
 const LIMIT = 200;
-const EMPTY: ProjectState = { points: [], runs: [], circuits: [], program: EMPTY_PROGRAM, links: [], georef: null, drafts: [], views: [], sheets: [], disciplines: [], choices: EMPTY_CHOICES, installSettings: DEFAULT_INSTALL_SETTINGS, profile: null, visibility: {}, doors: {}, arch: [] };
+const EMPTY: ProjectState = { points: [], runs: [], circuits: [], program: EMPTY_PROGRAM, links: [], georef: null, drafts: [], views: [], sheets: [], disciplines: [], choices: EMPTY_CHOICES, installSettings: DEFAULT_INSTALL_SETTINGS, profile: null, visibility: {}, doors: {}, arch: [], cde: EMPTY_CDE };
 
 type Patch<T> = (item: T) => Partial<T>;
 
@@ -172,6 +175,7 @@ export function usePointsStore() {
   const setProfile = useCallback((fn: (p: BuildingProfile | null) => BuildingProfile | null, key: string | null = "perfil") => commit((cur) => ({ ...cur, profile: fn(cur.profile) }), key), [commit]);
   /** Arquitetura e estrutura (agrupa edições seguidas do mesmo campo). */
   const setArch = useCallback((fn: (a: ArchElement[]) => ArchElement[], key: string | null = null) => commit((cur) => ({ ...cur, arch: fn(cur.arch ?? []) }), key && `arq:${key}`), [commit]);
+  const setCde = useCallback((fn: (c: CdeData) => CdeData, key: string | null = null) => commit((cur) => ({ ...cur, cde: fn(cur.cde ?? EMPTY_CDE) }), key && `cde:${key}`), [commit]);
   const setChoices = useCallback((fn: (c: ProjectChoices) => ProjectChoices) => commit((cur) => ({ ...cur, choices: fn(cur.choices) })), [commit]);
 
   /** Substitui todo o projeto e zera o histórico (abrir arquivo ou novo modelo). */
@@ -219,6 +223,7 @@ export function usePointsStore() {
       visibility: h.present.visibility ?? {},
       doors: h.present.doors ?? {},
       arch: h.present.arch ?? [],
+      cde: h.present.cde ?? EMPTY_CDE,
       canUndo: h.past.length > 0,
       canRedo: h.future.length > 0,
       dirty: h.present !== h.saved,
@@ -248,12 +253,13 @@ export function usePointsStore() {
       setVisibility,
       setDoors,
       setArch,
+      setCde,
       reset,
       markSaved,
       undo,
       redo,
     }),
-    [h, add, update, remove, addRuns, updateRuns, removeRuns, addCircuits, updateCircuits, removeCircuits, assignPoints, mutate, setProgram, setLinks, setGeoref, setDrafts, setViews, setSheets, setDisciplines, setChoices, setInstallSettings, setProfile, setVisibility, setDoors, setArch, reset, markSaved, undo, redo],
+    [h, add, update, remove, addRuns, updateRuns, removeRuns, addCircuits, updateCircuits, removeCircuits, assignPoints, mutate, setProgram, setLinks, setGeoref, setDrafts, setViews, setSheets, setDisciplines, setChoices, setInstallSettings, setProfile, setVisibility, setDoors, setArch, setCde, reset, markSaved, undo, redo],
   );
 }
 

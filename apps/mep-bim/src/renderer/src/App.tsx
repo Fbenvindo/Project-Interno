@@ -12,6 +12,10 @@ import { HideSelectionBar, VisibilityEditor, type VisibilityCatalog } from "./sh
 import { ViewCube } from "./viewer/ViewCube";
 import { archIdOf, archProperties, buildArch, moveArch, raiseArch, storeyZ as archStoreyZ, worldMesh } from "../../core/arch";
 import { ArqPanel, readArchParams, saveArchParams, useArchTool, type ArchParams } from "./arq/ArqPanel";
+import { GestaoPanel } from "./gestao/GestaoPanel";
+import { DISCIPLINE_CODE, docCode, hasCoding, levelCode, sheetDocMeta, STATE_LABEL } from "../../core/cde";
+import { disciplinesInUse } from "../../core/ifcExport";
+import { archDiscipline } from "../../core/arch";
 import { linkSlotOf } from "../../ifc/federate";
 import { cacheClear, cacheList } from "./ifc/modelCache";
 import { deletedText, deleteSelection } from "./desenho/deleteSelection";
@@ -125,6 +129,7 @@ const TOOL_HINT: Record<ToolSpec["kind"], string> = {
   perfil: "Torres, pavimentos comuns ou por torre, alturas e cotas do empreendimento",
   visibilidade: "O que fica oculto em todas as vistas, folhas e no 3D: modelos IFC, tipos de elemento, sistemas e elementos",
   desenho: "Siga as instruções sobre a planta · Enter conclui · Esc cancela",
+  gestao: "Codificação ISO 19650, revisões, estados e emissões (GRD) das folhas e dos modelos",
   arq: "Desenhe na planta (encaixe e ortogonal valem) · Enter ou botão direito termina · Esc volta a Selecionar",
 };
 
@@ -341,6 +346,23 @@ export function App() {
     ],
     [floorEntries, store.views],
   );
+  // ---- Gestão da informação (ISO 19650) ----
+  /** Disciplinas com modelo (IFC) no projeto: as marcadas no projeto, as com pontos/trechos e as da arquitetura/estrutura. */
+  const modelDisciplines = useMemo(
+    () => [...new Set([...store.disciplines, ...disciplinesInUse(store.points, store.runs), ...store.arch.map(archDiscipline)])],
+    [store.disciplines, store.points, store.runs, store.arch],
+  );
+  /** Nível (pelo pavimento da primeira vista) e disciplina padrão do código de uma folha. */
+  const sheetDefaults = useCallback(
+    (sh: SheetDef) => {
+      const v = sh.viewports[0] ? resolveView(sh.viewports[0].viewId) : null;
+      const levels = model ? model.storeyLevels.map((l) => ({ name: l.name, level: model.coordinates.worldToIfc([0, l.level, 0])[2] })) : [];
+      const nivel = levelCode(v?.storey ?? null, levels);
+      const ds = store.disciplines.length ? store.disciplines : modelDisciplines;
+      return { nivel, disciplina: ds.length === 1 ? DISCIPLINE_CODE[ds[0]] : "MP" };
+    },
+    [resolveView, model, store.disciplines, modelDisciplines],
+  );
   const sheetRender = useMemo(() => {
     if (view !== "prancha" || !model || !activeSheet) return null;
     const ctx: ModelContext = {
@@ -383,10 +405,16 @@ export function App() {
       drawings.set(v.id, d);
       vps.push({ id: v.id, title: viewTitle(v), subtitle: viewSubtitle(v), drawing: d, pos: vp.pos });
     }
-    const info = { ...activeSheet.info, conteudo: activeSheet.info.conteudo || activeSheet.name };
+    const def = sheetDefaults(activeSheet);
+    const meta = hasCoding(store.cde.coding) ? sheetDocMeta(activeSheet, store.sheets.indexOf(activeSheet), def.nivel, def.disciplina) : null;
+    const info = {
+      ...activeSheet.info,
+      conteudo: activeSheet.info.conteudo || activeSheet.name,
+      ...(meta ? { codigo: docCode(store.cde.coding, meta), revisao: meta.revisao, estado: STATE_LABEL[meta.estado], finalidade: meta.finalidade } : {}),
+    };
     const result = renderSheetViews(vps, activeSheet.format, info, titleBlocks.find((t) => t.id === activeSheet.titleBlockId) ?? null, sheetAngle ? (georef.trueNorthDeg ?? 0) + (sheetAngle * 180) / Math.PI : georef.trueNorthDeg);
     return { result, drawings };
-  }, [view, model, planModel, activeSheet, meshById, store.points, store.runs, store.drafts, store.views, store.disciplines, boxes, resolveView, snapshots, titleBlocks, georef.trueNorthDeg, hiddenFor, store.doors]);
+  }, [view, model, planModel, activeSheet, meshById, store.points, store.runs, store.drafts, store.views, store.disciplines, boxes, resolveView, snapshots, titleBlocks, georef.trueNorthDeg, hiddenFor, store.doors, store.cde, store.sheets, sheetDefaults]);
 
   const allSystems = useMemo(
     () =>
@@ -1668,6 +1696,8 @@ export function App() {
     switch (tool.kind) {
       case "propriedades":
         return null;
+      case "gestao":
+        return <GestaoPanel store={store} modelDisciplines={modelDisciplines} sheetDefaults={sheetDefaults} onOpenSheet={openSheet} />;
       case "arq":
         return (
           <ArqPanel
@@ -1814,6 +1844,12 @@ export function App() {
         if (!activeSheet || !sheetRender) return <div className="empty-side">Abra a vista Prancha para montar a folha.</div>;
         return (
           <FolhaPanel
+            docName={(() => {
+              if (!hasCoding(store.cde.coding)) return null;
+              const d = sheetDefaults(activeSheet);
+              const m = sheetDocMeta(activeSheet, store.sheets.indexOf(activeSheet), d.nivel, d.disciplina);
+              return `${docCode(store.cde.coding, m)}_${m.revisao}`;
+            })()}
             sheet={activeSheet}
             onChange={(sh) => store.setSheets((l) => l.map((x) => (x.id === sh.id ? sh : x)), sh.id)}
             docViews={docViews}

@@ -2851,3 +2851,72 @@ h3 {
 .plan-editor.zooming {
   cursor: crosshair;
 }
+/* Gestão da informação (ISO 19650) */
+.gestao h4 {
+  margin: 0 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gestao-docs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.gestao-doc {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 0;
+}
+.gestao-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gestao-code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  flex: 1;
+  text-align: left;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gestao-title {
+  padding-left: 22px;
+  display: flex;
+  gap: 8px;
+}
+.gestao-state {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: #e5e7eb;
+  color: #374151;
+  white-space: nowrap;
+}
+.gestao-state.compartilhado {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.gestao-state.publicado {
+  background: #dcfce7;
+  color: #15803d;
+}
+.gestao-state.arquivado {
+  background: #f3f4f6;
+  color: #6b7280;
+  text-decoration: line-through;
+}
+.gestao-edit {
+  padding: 4px 0 4px 22px;
+}
+.gestao-hist {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 11px;
+  border-collapse: collapse;
+}
+.gestao-hist td {
+  padding: 2px 4px;
+  border-top: 1px solid var(--border);
+}

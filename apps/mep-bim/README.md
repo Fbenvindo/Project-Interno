@@ -225,6 +225,22 @@ Em **Arquivo › Importar elementos em IFC**. Neste app, *elemento* = família.
 - **Cortes 2D:** as emendas internas da triangulação das faces (comuns em paredes com aberturas) não aparecem mais como linhas.
 - **Abas de vista:** o botão **×** fecha a vista aberta. Num corte, ampliação ou planta extra, volta à planta do pavimento. Numa vista 3D salva ou recortada, volta ao modelo completo sem recortes. Na folha, volta à planta.
 
+### Gestão da informação (ISO 19650)
+
+Em **Pranchas › Documentos e emissões**:
+
+- **Codificação do projeto:** projeto, originador, volume/zona e responsável. Com projeto e originador preenchidos, cada documento ganha o código `Projeto-Originador-Volume-Nível-Tipo-Disciplina-Número` (ex.: `HTL-SEB-ZZ-01-DR-EL-0001`).
+- **Documentos:** as folhas e os modelos IFC de cada disciplina.
+  - O nível sai do pavimento da folha (térreo 00, acima 01…, abaixo B1…).
+  - O tipo é DR para pranchas e M3 para modelos.
+  - Nível, tipo, disciplina, número e volume podem ser editados.
+- **Revisões e estados:** Em andamento (S0), Compartilhado (S1 coordenação, S2 informação, S3 comentários, S4 aprovação), Publicado (A1 construção, A2 licitação, A3 fabricação, B1 com comentários) e Arquivado.
+  - Compartilhar gera P01, P02…; publicar passa para C01, C02….
+  - Cada mudança fica no histórico do documento.
+- **Emitir (GRD):** marque os documentos, o estado, a finalidade e o destinatário. A emissão gera a revisão de cada documento e registra a GRD, que pode ser baixada em PDF (A4) e em CSV.
+- **Carimbo e arquivos:** o carimbo mostra o código, a revisão, o estado e a finalidade (campos `{{codigo}}`, `{{estado}}` e `{{finalidade}}` nos carimbos personalizados). O PDF, o SVG e o DXF das folhas e o IFC por disciplina saem com o nome padronizado (`código_revisão`).
+- **No projeto:** tudo fica gravado no `.seb`.
+
 ### Biblioteca de elementos: onde fica e como levar para outro computador
 
 - **Onde fica:** os elementos criados no app, os importados de IFC e as famílias do Revit (`.sebfam`) ficam na biblioteca deste computador. Ela fica na pasta de dados do app (no Windows, `%APPDATA%\SmartEasyBIM`).

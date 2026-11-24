@@ -39,6 +39,7 @@ export type ToolSpec =
   | { kind: "visibilidade" }
   | { kind: "desenho"; cmd: DraftCmd }
   | { kind: "arq"; elem: ArchKind; structural?: boolean }
+  | { kind: "gestao" }
   | { kind: "programa"; section: "tipos" | "ambientes" };
 
 export type Tool = ToolSpec & { n: number };
@@ -466,6 +467,10 @@ export const RIBBON: Record<TopTab, RibbonGroup[]> = {
         { key: "nova-folha", label: "Nova folha", icon: "prancha", action: "novaFolha", needsModel: true },
         { key: "folhas-plantas", label: "Folhas das plantas", icon: "planta", action: "folhasPlantas", needsModel: true },
       ],
+    },
+    {
+      label: "Gestão (ISO 19650)",
+      buttons: [{ key: "gestao", label: "Documentos e emissões", icon: "quantitativos", tool: { kind: "gestao" }, needsModel: true }],
     },
   ],
 };

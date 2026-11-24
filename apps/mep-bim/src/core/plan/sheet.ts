@@ -15,7 +15,7 @@ export const SHEETS: Record<SheetFormat, { w: number; h: number; margin: number 
 };
 const LEFT_MARGIN = 25; // margem de encadernação
 const SIDE_WIDTH = 175; // coluna da legenda e do carimbo
-const TITLE_HEIGHT = 50;
+const TITLE_HEIGHT = 61;
 
 export interface SheetInfo {
   projeto: string;
@@ -26,6 +26,10 @@ export interface SheetInfo {
   revisao: string;
   /** Campos adicionais dos carimbos personalizados ({{nome}}). */
   extras?: Record<string, string>;
+  /** Código do documento (ISO 19650), estado e finalidade, quando o projeto tem codificação. */
+  codigo?: string;
+  estado?: string;
+  finalidade?: string;
 }
 
 export interface SheetResult {
@@ -243,6 +247,7 @@ export function renderSheetViews(
       ["PROJETO", info.projeto],
       ["CONTEÚDO", info.conteudo],
       ["RESPONSÁVEL TÉCNICO", info.responsavel],
+      ["CÓDIGO (ISO 19650)", info.codigo ? `${info.codigo}${info.estado ? `  ·  ${info.estado}${info.finalidade ? ` (${info.finalidade})` : ""}` : ""}` : ""],
     ];
     out.push(`<rect x="${tb.x}" y="${tb.y}" width="${tb.w}" height="${tb.h}" fill="none" stroke="#000" stroke-width="0.5"/>`);
     rows.forEach(([label, value], i) => {
@@ -260,7 +265,7 @@ export function renderSheetViews(
       ["FOLHA", info.folha],
     ];
     const cw = tb.w / cells.length;
-    const cy0 = tb.y + 33;
+    const cy0 = tb.y + rows.length * 11;
     cells.forEach(([label, value], i) => {
       const cx = tb.x + i * cw;
       if (i) out.push(`<line x1="${cx}" y1="${cy0}" x2="${cx}" y2="${tb.y + tb.h}" stroke="#000" stroke-width="0.25"/>`);
@@ -287,6 +292,9 @@ function customTitleBlock(tbDef: TitleBlock, box: { x: number; y: number; w: num
     data: info.data,
     revisao: info.revisao,
     folha: info.folha,
+    codigo: info.codigo ?? "",
+    estado: info.estado ?? "",
+    finalidade: info.finalidade ?? "",
     escala: info.scale,
     formato: info.format,
     pavimento: info.storey,

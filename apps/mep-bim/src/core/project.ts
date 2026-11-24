@@ -11,6 +11,7 @@ import type { LinkMeta } from "../ifc/federate";
 import { isEmptyRules, type HideRules } from "./visibility";
 import type { DoorOverride } from "./plan/build";
 import { readArch, writeArch, type ArchElement } from "./arch";
+import { EMPTY_CDE, EMPTY_CODING, type CdeData } from "./cde";
 import type { GeorefSettings } from "./georef";
 import { syncDraftIds, type DraftEntity } from "./draft";
 import { migrateViews, type ViewDef } from "./views";
@@ -58,6 +59,8 @@ export interface ProjectData {
   doors?: Record<string, DoorOverride>;
   /** Arquitetura e estrutura modeladas no app (coordenadas do IFC). */
   arch?: ArchElement[];
+  /** Gestão da informação (ISO 19650). */
+  cde?: CdeData;
 }
 
 interface StoredCircuit {
@@ -105,6 +108,7 @@ export interface ProjectFile extends LocacaoFile {
   visibilidade?: HideRules;
   portas?: Record<string, DoorOverride>;
   arquitetura?: Omit<ArchElement, "id">[];
+  gestao?: CdeData;
   variantes?: Record<string, string>;
   vinculos?: { id: string; nome: string; caminho: string | null; disciplina: LinkMeta["discipline"]; visivel: boolean; transparente: boolean; alinhamento?: LinkMeta["align"] }[];
 }
@@ -154,6 +158,7 @@ export function serializeProject(data: ProjectData, cs: CoordinateSystem, modelN
     ...(!isEmptyRules(data.visibility) ? { visibilidade: data.visibility } : {}),
     ...(data.doors && Object.keys(data.doors).length ? { portas: data.doors } : {}),
     ...(data.arch?.length ? { arquitetura: writeArch(data.arch) } : {}),
+    ...(data.cde && (data.cde.coding.projeto || data.cde.emissoes.length || Object.keys(data.cde.modelos).length) ? { gestao: data.cde } : {}),
     ...(data.links?.length
       ? { vinculos: data.links.map((l) => ({ id: l.id, nome: l.name, caminho: l.path, disciplina: l.discipline, visivel: l.visible, transparente: l.translucent, ...(l.align ? { alinhamento: l.align } : {}) })) }
       : {}),
@@ -214,5 +219,9 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
     visibility: file.visibilidade && typeof file.visibilidade === "object" ? file.visibilidade : {},
     doors: file.portas && typeof file.portas === "object" ? file.portas : {},
     arch: readArch(file.arquitetura),
+    cde:
+      file.gestao && typeof file.gestao === "object"
+        ? { coding: { ...EMPTY_CODING, ...(file.gestao.coding ?? {}) }, modelos: file.gestao.modelos ?? {}, emissoes: Array.isArray(file.gestao.emissoes) ? file.gestao.emissoes : [] }
+        : EMPTY_CDE,
   };
 }

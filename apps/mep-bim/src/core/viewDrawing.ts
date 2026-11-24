@@ -140,6 +140,8 @@ export interface SheetDef {
   titleBlockId: string | null;
   info: SheetInfo;
   viewports: SheetViewportDef[];
+  /** Gestão da informação (ISO 19650): código, revisão, estado e histórico. */
+  cde?: import("./cde").DocMeta;
 }
 
 let sheetSeq = 0;

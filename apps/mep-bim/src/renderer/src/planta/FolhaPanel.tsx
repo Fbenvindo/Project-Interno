@@ -24,6 +24,8 @@ interface Props {
   onMoveMode: (on: boolean) => void;
   onOpenView: (viewId: string) => void;
   onRefreshImage: (viewId: string) => void;
+  /** Nome padronizado (ISO 19650: código_revisão) para os arquivos exportados, se o projeto tiver codificação. */
+  docName?: string | null;
 }
 
 const slug = (s: string) =>
@@ -34,7 +36,7 @@ const slug = (s: string) =>
     .replace(/^-|-$/g, "")
     .toLowerCase();
 
-export function FolhaPanel({ sheet, onChange, docViews, rendered, drawings, fileName, georef, moveMode, onMoveMode, onOpenView, onRefreshImage }: Props) {
+export function FolhaPanel({ docName, sheet, onChange, docViews, rendered, drawings, fileName, georef, moveMode, onMoveMode, onOpenView, onRefreshImage }: Props) {
   const [message, setMessage] = useState<string | null>(null);
   const set = <K extends keyof SheetDef>(k: K, v: SheetDef[K]) => onChange({ ...sheet, [k]: v });
   const setInfo = (k: Exclude<keyof SheetInfo, "extras">, v: string) => onChange({ ...sheet, info: { ...sheet.info, [k]: v } });
@@ -59,7 +61,7 @@ export function FolhaPanel({ sheet, onChange, docViews, rendered, drawings, file
     upsertTitleBlock({ ...current, width, height: Math.round(((width * current.height) / current.width) * 10) / 10 });
     onChange({ ...sheet });
   };
-  const base = `${(fileName ?? "modelo").replace(/\.ifc$/i, "")}-${slug(sheet.name)}`;
+  const base = docName ?? `${(fileName ?? "modelo").replace(/\.(ifc|sebmod)$/i, "")}-${slug(sheet.name)}`;
   const byId = new Map(docViews.map((v) => [v.id, v]));
   const free = docViews.filter((v) => !sheet.viewports.some((vp) => vp.viewId === v.id));
 
