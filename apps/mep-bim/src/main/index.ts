@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from 
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join, normalize, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { FileFilter, OpenedFile, OpenedTextFile, PdfRequest, SaveRequest } from "../shared/ipc";
+import type { FileFilter, HttpRequest, HttpResponse, OpenedFile, OpenedTextFile, PdfRequest, SaveRequest } from "../shared/ipc";
 
 // Em produção o renderer é servido por um protocolo próprio (app://), com
 // origem estável e cabeçalho CSP, em vez de file://.
@@ -152,25 +152,35 @@ ipcMain.handle("file:savePdf", async (_e, req: PdfRequest): Promise<string | nul
   });
   if (res.canceled || !res.filePath) return null;
   if (await refuseReadOnly(res.filePath)) return null;
+  await writeFile(res.filePath, await renderPdf(req));
+  return res.filePath;
+});
+
+async function renderPdf(req: PdfRequest): Promise<Buffer> {
   const html =
     `<!doctype html><html><head><meta charset="utf-8"><style>@page{size:${req.widthMm}mm ${req.heightMm}mm;margin:0}` +
     `html,body{margin:0;padding:0}svg{display:block;width:${req.widthMm}mm;height:${req.heightMm}mm}</style></head><body>${req.svg}</body></html>`;
-  const tmp = join(app.getPath("temp"), `mep-bim-prancha-${Date.now()}.html`);
+  const tmp = join(app.getPath("temp"), `mep-bim-prancha-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.html`);
   await writeFile(tmp, html, "utf8");
   const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false } });
   try {
     await win.loadFile(tmp);
-    const pdf = await win.webContents.printToPDF({
-      printBackground: true,
-      preferCSSPageSize: true,
-      margins: { top: 0, bottom: 0, left: 0, right: 0 },
-    });
-    await writeFile(res.filePath, pdf);
+    return await win.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { top: 0, bottom: 0, left: 0, right: 0 } });
   } finally {
     win.destroy();
     await rm(tmp, { force: true });
   }
-  return res.filePath;
+}
+
+// PDF em memória (envio das folhas ao CDE).
+ipcMain.handle("file:pdfBytes", async (_e, req: PdfRequest): Promise<Uint8Array> => new Uint8Array(await renderPdf(req)));
+
+// CDE: requisições ao servidor e ao armazenamento (S3) pelo processo principal — o renderer
+// tem CSP restrita (só o próprio app) e o S3 exigiria CORS para a origem do app.
+ipcMain.handle("net:http", async (_e, req: HttpRequest): Promise<HttpResponse> => {
+  if (!/^https?:\/\//i.test(req.url)) throw new Error("Endereço inválido.");
+  const r = await fetch(req.url, { method: req.method, headers: req.headers, body: req.body as BodyInit | undefined });
+  return { status: r.status, contentType: r.headers.get("content-type"), body: new Uint8Array(await r.arrayBuffer()) };
 });
 
 ipcMain.handle("file:save", async (_e, req: SaveRequest): Promise<string | null> => {

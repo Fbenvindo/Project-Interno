@@ -104,6 +104,8 @@ export interface DocMeta {
   estado: CdeState;
   finalidade: string;
   historico: Revision[];
+  /** Documento correspondente no CDE do servidor (quando o projeto está ligado a um empreendimento). */
+  cdeId?: number;
 }
 
 /** Item de uma emissão (GRD). */
@@ -136,6 +138,8 @@ export interface CdeData {
   /** Modelos (IFC por disciplina), pela disciplina do app. */
   modelos: Partial<Record<Discipline, DocMeta>>;
   emissoes: Emission[];
+  /** CDE do servidor (sistema de gestão) ao qual o projeto está ligado. */
+  servidor?: { url: string; empreendimentoId: number; empreendimento: string };
 }
 
 export const EMPTY_CDE: CdeData = { coding: EMPTY_CODING, modelos: {}, emissoes: [] };

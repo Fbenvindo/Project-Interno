@@ -241,6 +241,23 @@ Em **Pranchas › Documentos e emissões**:
 - **Carimbo e arquivos:** o carimbo mostra o código, a revisão, o estado e a finalidade (campos `{{codigo}}`, `{{estado}}` e `{{finalidade}}` nos carimbos personalizados). O PDF, o SVG e o DXF das folhas e o IFC por disciplina saem com o nome padronizado (`código_revisão`).
 - **No projeto:** tudo fica gravado no `.seb`.
 
+### CDE do servidor (sistema de gestão)
+
+Em **Pranchas › Documentos e emissões › CDE do servidor**:
+
+- **Entrar:** com o usuário do sistema de gestão (endereço do servidor, e-mail e senha). A sessão fica guardada neste computador.
+- **Ligar o projeto a um empreendimento:** a codificação (projeto, originador, volume) passa a vir do CDE. Os documentos do projeto se ligam aos do servidor pelo código.
+- **Enviar ao CDE:** os documentos marcados vão como nova versão.
+  - As folhas vão em PDF (no app instalado; no navegador, em SVG).
+  - Os modelos vão como IFC da disciplina.
+  - O documento é criado no servidor se ainda não existir.
+- **Emitir no CDE:** envia e emite a GRD no servidor (compartilhar S1–S4; publicar A1… só para a coordenação). As revisões e os estados voltam para o projeto.
+- **Modelos das outras disciplinas:** lista os IFC/`.sebmod` compartilhados ou publicados no empreendimento.
+  - **Vincular** baixa e carrega o modelo como vínculo.
+  - Quando sai uma revisão nova, aparece **Atualizar para Pxx/Cxx**.
+  - Os vínculos do CDE reabrem com o projeto (baixados de novo, com o login no CDE).
+- **No app instalado:** as requisições passam pelo processo principal do app, sem depender de CORS.
+
 ### Biblioteca de elementos: onde fica e como levar para outro computador
 
 - **Onde fica:** os elementos criados no app, os importados de IFC e as famílias do Revit (`.sebfam`) ficam na biblioteca deste computador. Ela fica na pasta de dados do app (no Windows, `%APPDATA%\SmartEasyBIM`).

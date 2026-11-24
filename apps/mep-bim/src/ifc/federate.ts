@@ -21,6 +21,8 @@ export interface LinkMeta {
    * (pelo survey point / IfcMapConversion de cada arquivo) ou "manual" (deslocamento e rotação).
    */
   align?: LinkAlign;
+  /** Vínculo vindo do CDE do servidor: documento, revisão carregada e código. */
+  cde?: { docId: number; revisao: string; codigo: string };
 }
 
 export interface LinkAlign {

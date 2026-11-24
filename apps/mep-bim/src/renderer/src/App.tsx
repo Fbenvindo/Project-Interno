@@ -14,7 +14,10 @@ import { archIdOf, archProperties, buildArch, moveArch, raiseArch, storeyZ as ar
 import { ArqPanel, readArchParams, saveArchParams, useArchTool, type ArchParams } from "./arq/ArqPanel";
 import { GestaoPanel } from "./gestao/GestaoPanel";
 import { DISCIPLINE_CODE, docCode, hasCoding, levelCode, sheetDocMeta, STATE_LABEL } from "../../core/cde";
-import { disciplinesInUse } from "../../core/ifcExport";
+import { disciplinesInUse, exportPointsIfc, filterByDisciplines } from "../../core/ifcExport";
+import { SHEETS } from "../../core/plan/sheet";
+import { cde as cdeApi, loadSession, type ServerDoc } from "./gestao/cdeClient";
+import { docFileName, modelDocMeta } from "../../core/cde";
 import { archDiscipline } from "../../core/arch";
 import { linkSlotOf } from "../../ifc/federate";
 import { cacheClear, cacheList } from "./ifc/modelCache";
@@ -363,8 +366,9 @@ export function App() {
     },
     [resolveView, model, store.disciplines, modelDisciplines],
   );
-  const sheetRender = useMemo(() => {
-    if (view !== "prancha" || !model || !activeSheet) return null;
+  /** Monta uma folha (qualquer uma: a aberta, ou as enviadas ao CDE). */
+  const renderSheet = useCallback((sheet: SheetDef) => {
+    if (!model) return null;
     const ctx: ModelContext = {
       elements: planModel?.elements ?? model.elements,
       meshes: meshById,
@@ -383,7 +387,7 @@ export function App() {
     const drawings = new Map<string, PlanDrawing>();
     const vps: SheetViewport[] = [];
     let sheetAngle: number | null = null;
-    for (const vp of activeSheet.viewports) {
+    for (const vp of sheet.viewports) {
       const v = resolveView(vp.viewId);
       if (!v || v.section !== "documentacao") continue;
       if (v.kind === "3d") {
@@ -405,16 +409,53 @@ export function App() {
       drawings.set(v.id, d);
       vps.push({ id: v.id, title: viewTitle(v), subtitle: viewSubtitle(v), drawing: d, pos: vp.pos });
     }
-    const def = sheetDefaults(activeSheet);
-    const meta = hasCoding(store.cde.coding) ? sheetDocMeta(activeSheet, store.sheets.indexOf(activeSheet), def.nivel, def.disciplina) : null;
+    const def = sheetDefaults(sheet);
+    const meta = hasCoding(store.cde.coding) ? sheetDocMeta(sheet, store.sheets.indexOf(sheet), def.nivel, def.disciplina) : null;
     const info = {
-      ...activeSheet.info,
-      conteudo: activeSheet.info.conteudo || activeSheet.name,
+      ...sheet.info,
+      conteudo: sheet.info.conteudo || sheet.name,
       ...(meta ? { codigo: docCode(store.cde.coding, meta), revisao: meta.revisao, estado: STATE_LABEL[meta.estado], finalidade: meta.finalidade } : {}),
     };
-    const result = renderSheetViews(vps, activeSheet.format, info, titleBlocks.find((t) => t.id === activeSheet.titleBlockId) ?? null, sheetAngle ? (georef.trueNorthDeg ?? 0) + (sheetAngle * 180) / Math.PI : georef.trueNorthDeg);
+    const result = renderSheetViews(vps, sheet.format, info, titleBlocks.find((t) => t.id === sheet.titleBlockId) ?? null, sheetAngle ? (georef.trueNorthDeg ?? 0) + (sheetAngle * 180) / Math.PI : georef.trueNorthDeg);
     return { result, drawings };
-  }, [view, model, planModel, activeSheet, meshById, store.points, store.runs, store.drafts, store.views, store.disciplines, boxes, resolveView, snapshots, titleBlocks, georef.trueNorthDeg, hiddenFor, store.doors, store.cde, store.sheets, sheetDefaults]);
+  }, [model, planModel, meshById, store.points, store.runs, store.drafts, store.views, store.disciplines, boxes, resolveView, snapshots, titleBlocks, georef.trueNorthDeg, hiddenFor, store.doors, store.cde, store.sheets, sheetDefaults]);
+  const sheetRender = useMemo(() => (view === "prancha" && activeSheet ? renderSheet(activeSheet) : null), [view, activeSheet, renderSheet]);
+  /** Arquivo de um documento para o CDE: folha em PDF (no navegador, SVG) ou o IFC da disciplina. */
+  const makeCdeFile = useCallback(
+    async (docId: string): Promise<{ name: string; bytes: Uint8Array; contentType: string } | null> => {
+      if (!model) return null;
+      const coded = hasCoding(store.cde.coding);
+      if (docId.startsWith("modelo:")) {
+        const d = docId.slice(7) as Discipline;
+        const sel = filterByDisciplines(store.points, store.runs, store.circuits, new Set([d]));
+        const text = exportPointsIfc(sel.points, {
+          modelName: fileName,
+          storeys: model.storeyLevels,
+          cs: model.coordinates,
+          runs: sel.runs,
+          circuits: sel.circuits,
+          georef,
+          title: DISCIPLINE_BY_ID[d].label,
+          arch: store.arch,
+          archOnly: (e) => archDiscipline(e) === d,
+        });
+        const name = coded ? docFileName(store.cde.coding, modelDocMeta(store.cde, d), "ifc") : `${(fileName ?? "modelo").replace(/\.(ifc|sebmod)$/i, "")}-${d}.ifc`;
+        return { name, bytes: new TextEncoder().encode(text), contentType: "application/x-step" };
+      }
+      const sheet = store.sheets.find((x) => x.id === docId);
+      const r = sheet ? renderSheet(sheet) : null;
+      if (!sheet || !r) return null;
+      const def = sheetDefaults(sheet);
+      const meta = sheetDocMeta(sheet, store.sheets.indexOf(sheet), def.nivel, def.disciplina);
+      const base = coded ? `${docCode(store.cde.coding, meta)}_${meta.revisao}` : sheet.name;
+      if (desktop?.pdfBytes) {
+        const f = SHEETS[sheet.format];
+        return { name: `${base}.pdf`, bytes: await desktop.pdfBytes({ defaultName: `${base}.pdf`, svg: r.result.svg, widthMm: f.w, heightMm: f.h }), contentType: "application/pdf" };
+      }
+      return { name: `${base}.svg`, bytes: new TextEncoder().encode(r.result.svg), contentType: "image/svg+xml" };
+    },
+    [model, store, fileName, georef, renderSheet, sheetDefaults],
+  );
 
   const allSystems = useMemo(
     () =>
@@ -711,6 +752,34 @@ export function App() {
     [store],
   );
 
+  /** Vincula (ou atualiza) um modelo de outra disciplina baixado do CDE do servidor. */
+  const linkFromCde = useCallback(
+    async (doc: ServerDoc) => {
+      const session = loadSession();
+      if (!session) throw new Error("Entre no CDE primeiro.");
+      const f = await cdeApi.download(session, doc.id);
+      const existing = linksRef.current.find((l) => l.cde?.docId === doc.id);
+      const cdeRef = { docId: doc.id, revisao: doc.revisao, codigo: doc.codigo };
+      if (existing) {
+        store.setLinks((l) => l.map((x) => (x.id === existing.id ? { ...x, name: f.name, path: null, cde: cdeRef } : x)));
+        setLinkData((cur) => {
+          const d = cur.get(existing.id);
+          if (!d) return cur;
+          d.raw.close();
+          const next = new Map(cur);
+          next.delete(existing.id);
+          return next;
+        });
+        await loadLink(existing.id, f);
+        return;
+      }
+      const id = `lk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      store.setLinks((l) => [...l, { id, name: f.name, path: null, discipline: "auto", visible: true, translucent: false, cde: cdeRef }]);
+      await loadLink(id, f);
+    },
+    [store, loadLink],
+  );
+
   /** Localizar de novo um vínculo (arquivo movido ou projeto aberto no navegador). */
   const relocateLink = useCallback(
     async (id: string) => {
@@ -736,6 +805,19 @@ export function App() {
     for (const m of store.links) {
       if (linkData.has(m.id) || linkStatus[m.id]) continue;
       setLinkStatus((s) => ({ ...s, [m.id]: "carregando" }));
+      // Vínculo do CDE: baixa a revisão atual do servidor (precisa estar logado no CDE).
+      if (m.cde && !m.path) {
+        const session = loadSession();
+        if (!session) {
+          setLinkStatus((s) => ({ ...s, [m.id]: "entre no CDE (Pranchas › Documentos e emissões)" }));
+          continue;
+        }
+        void cdeApi
+          .download(session, m.cde.docId)
+          .then((f) => loadLink(m.id, f))
+          .catch((e) => setLinkStatus((s) => ({ ...s, [m.id]: `CDE: ${e instanceof Error ? e.message : e}` })));
+        continue;
+      }
       void readIfcPath(m.path).then((f) => {
         if (f) void loadLink(m.id, f);
         else setLinkStatus((s) => ({ ...s, [m.id]: "não encontrado" }));
@@ -1697,7 +1779,18 @@ export function App() {
       case "propriedades":
         return null;
       case "gestao":
-        return <GestaoPanel store={store} modelDisciplines={modelDisciplines} sheetDefaults={sheetDefaults} onOpenSheet={openSheet} />;
+        return (
+          <GestaoPanel
+            store={store}
+            modelDisciplines={modelDisciplines}
+            sheetDefaults={sheetDefaults}
+            onOpenSheet={openSheet}
+            makeFile={makeCdeFile}
+            onLinkFromCde={linkFromCde}
+            links={store.links}
+            linkStatus={linkStatus}
+          />
+        );
       case "arq":
         return (
           <ArqPanel

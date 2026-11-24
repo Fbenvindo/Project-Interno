@@ -30,6 +30,19 @@ export interface PdfRequest {
   heightMm: number;
 }
 
+/** Requisição HTTP feita pelo processo principal (CDE: sem CORS/CSP do renderer). */
+export interface HttpRequest {
+  url: string;
+  method: string;
+  headers?: Record<string, string>;
+  body?: string | Uint8Array;
+}
+export interface HttpResponse {
+  status: number;
+  contentType: string | null;
+  body: Uint8Array;
+}
+
 export interface DesktopApi {
   openIfc(): Promise<OpenedFile | null>;
   /** Vários IFC de uma vez (vínculos). */
@@ -41,5 +54,8 @@ export interface DesktopApi {
   saveFile(req: SaveRequest): Promise<string | null>;
   openTextFile(filters: FileFilter[]): Promise<OpenedTextFile | null>;
   savePdf(req: PdfRequest): Promise<string | null>;
+  /** PDF da prancha em memória (para enviar ao CDE). */
+  pdfBytes(req: PdfRequest): Promise<Uint8Array>;
+  http(req: HttpRequest): Promise<HttpResponse>;
   on(channel: "menu:open" | "menu:fit" | "ifc:pending-available", cb: () => void): () => void;
 }

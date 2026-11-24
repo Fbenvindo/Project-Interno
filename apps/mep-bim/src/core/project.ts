@@ -110,7 +110,7 @@ export interface ProjectFile extends LocacaoFile {
   arquitetura?: Omit<ArchElement, "id">[];
   gestao?: CdeData;
   variantes?: Record<string, string>;
-  vinculos?: { id: string; nome: string; caminho: string | null; disciplina: LinkMeta["discipline"]; visivel: boolean; transparente: boolean; alinhamento?: LinkMeta["align"] }[];
+  vinculos?: { id: string; nome: string; caminho: string | null; disciplina: LinkMeta["discipline"]; visivel: boolean; transparente: boolean; alinhamento?: LinkMeta["align"]; cde?: LinkMeta["cde"] }[];
 }
 
 const round6 = (v: number) => Math.round(v * 1e6) / 1e6;
@@ -158,9 +158,9 @@ export function serializeProject(data: ProjectData, cs: CoordinateSystem, modelN
     ...(!isEmptyRules(data.visibility) ? { visibilidade: data.visibility } : {}),
     ...(data.doors && Object.keys(data.doors).length ? { portas: data.doors } : {}),
     ...(data.arch?.length ? { arquitetura: writeArch(data.arch) } : {}),
-    ...(data.cde && (data.cde.coding.projeto || data.cde.emissoes.length || Object.keys(data.cde.modelos).length) ? { gestao: data.cde } : {}),
+    ...(data.cde && (data.cde.coding.projeto || data.cde.emissoes.length || Object.keys(data.cde.modelos).length || data.cde.servidor) ? { gestao: data.cde } : {}),
     ...(data.links?.length
-      ? { vinculos: data.links.map((l) => ({ id: l.id, nome: l.name, caminho: l.path, disciplina: l.discipline, visivel: l.visible, transparente: l.translucent, ...(l.align ? { alinhamento: l.align } : {}) })) }
+      ? { vinculos: data.links.map((l) => ({ id: l.id, nome: l.name, caminho: l.path, disciplina: l.discipline, visivel: l.visible, transparente: l.translucent, ...(l.align ? { alinhamento: l.align } : {}), ...(l.cde ? { cde: l.cde } : {}) })) }
       : {}),
   };
 }
@@ -206,6 +206,7 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
     visible: v.visivel !== false,
     translucent: !!v.transparente,
     ...(v.alinhamento ? { align: v.alinhamento } : {}),
+    ...(v.cde && typeof v.cde.docId === "number" ? { cde: v.cde } : {}),
   }));
   const drafts = Array.isArray(file.desenhos) ? file.desenhos : [];
   syncDraftIds(drafts);
@@ -221,7 +222,12 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
     arch: readArch(file.arquitetura),
     cde:
       file.gestao && typeof file.gestao === "object"
-        ? { coding: { ...EMPTY_CODING, ...(file.gestao.coding ?? {}) }, modelos: file.gestao.modelos ?? {}, emissoes: Array.isArray(file.gestao.emissoes) ? file.gestao.emissoes : [] }
+        ? {
+            coding: { ...EMPTY_CODING, ...(file.gestao.coding ?? {}) },
+            modelos: file.gestao.modelos ?? {},
+            emissoes: Array.isArray(file.gestao.emissoes) ? file.gestao.emissoes : [],
+            ...(file.gestao.servidor?.empreendimentoId ? { servidor: file.gestao.servidor } : {}),
+          }
         : EMPTY_CDE,
   };
 }
