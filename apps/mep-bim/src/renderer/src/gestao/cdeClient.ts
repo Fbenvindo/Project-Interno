@@ -1,4 +1,4 @@
-// Cliente do CDE do sistema de gestão (servidor): login, empreendimentos, documentos, envio e
+// Cliente do CDE do servidor (SmartEasyBIM CDE na rede do escritório, ou a versão em nuvem): login, empreendimentos, documentos, envio e
 // download de arquivos e emissões. No app desktop as requisições passam pelo processo principal
 // (a CSP do app não deixa o renderer acessar a rede, e o S3 exigiria CORS); no navegador, fetch.
 import { desktop } from "../platform";
@@ -35,7 +35,8 @@ export interface Overview {
   armazenamento: "s3" | "local";
 }
 
-export const DEFAULT_CDE_URL = "https://project-interno-rati.onrender.com";
+/** Endereço padrão: o servidor do CDE no próprio computador (troque pelo do servidor do escritório). */
+export const DEFAULT_CDE_URL = "http://localhost:4000";
 const KEY = "smarteasybim.cde";
 
 export function loadSession(): CdeSession | null {

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>SmartEasyBIM CDE</title>
+    <style>
+      body { font: 14px/1.45 system-ui, "Segoe UI", sans-serif; margin: 0; background: #f9fafb; color: #111827; }
+      main { padding: 20px 24px; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      .sub { color: #6b7280; margin: 0 0 16px; }
+      .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; }
+      .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; margin: 0 0 8px; }
+      .status { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+      .dot { width: 10px; height: 10px; border-radius: 50%; background: #9ca3af; }
+      .on .dot { background: #16a34a; }
+      .err { color: #dc2626; margin-top: 6px; }
+      ul { margin: 6px 0 0; padding-left: 18px; }
+      code { background: #f3f4f6; padding: 1px 6px; border-radius: 4px; user-select: all; }
+      button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; }
+      button.primary { background: #1d6ed8; color: #fff; border-color: #1d6ed8; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      input[type=number] { width: 90px; font: inherit; padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 6px; }
+      .muted { color: #6b7280; font-size: 12px; }
+      .path { word-break: break-all; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>SmartEasyBIM CDE</h1>
+      <p class="sub">Ambiente Comum de Dados (ISO 19650) servido por este computador para a rede do escritório.</p>
+
+      <div class="card" id="statusCard">
+        <div class="status"><span class="dot"></span><span id="statusText">Iniciando…</span></div>
+        <div class="err" id="error" hidden></div>
+        <div id="addresses" hidden>
+          <p style="margin: 10px 0 0">Os colegas acessam pelo navegador (e o SmartEasyBIM se conecta) em:</p>
+          <ul id="urls"></ul>
+          <p class="muted">Use o endereço com o nome do computador ou o número (IP). "localhost" só funciona neste computador.</p>
+        </div>
+        <div class="row" style="margin-top: 10px">
+          <button class="primary" id="open">Abrir o CDE no navegador</button>
+          <button id="restart">Reiniciar o servidor</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Dados</h2>
+        <div class="path" id="dataDir"></div>
+        <p class="muted">Banco (cde.sqlite), arquivos enviados (pasta "arquivos") e cópias diárias do banco ("backups"). Faça backup desta pasta.</p>
+        <div class="row">
+          <button id="openFolder">Abrir a pasta</button>
+          <button id="chooseFolder">Usar outra pasta…</button>
+        </div>
+        <p class="muted">Ao trocar de pasta, o CDE passa a usar a nova (vazia, ou uma pasta de dados copiada de outro servidor).</p>
+      </div>
+
+      <div class="card">
+        <h2>Configuração</h2>
+        <div class="row">
+          <label>Porta <input type="number" id="port" min="1024" max="65535" /></label>
+          <button id="savePort">Aplicar</button>
+        </div>
+        <div class="row" style="margin-top: 10px">
+          <label><input type="checkbox" id="autostart" /> Iniciar o CDE junto com o Windows (fica na bandeja)</label>
+        </div>
+        <p class="muted">Fechar esta janela não desliga o CDE: ele continua na bandeja do sistema. Para desligar, use "Sair" no ícone da bandeja. Na primeira vez, permita o acesso à rede quando o Firewall do Windows perguntar.</p>
+      </div>
+      <p class="muted" id="version"></p>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      function render(s) {
+        $('statusCard').className = 'card' + (s.running ? ' on' : '');
+        $('statusText').textContent = s.running ? `CDE no ar (porta ${s.port})` : 'CDE parado';
+        $('error').hidden = !s.error;
+        $('error').textContent = s.error || '';
+        $('addresses').hidden = !s.running;
+        $('urls').innerHTML = '';
+        [s.hostUrl, ...s.urls].filter(Boolean).forEach((u) => {
+          const li = document.createElement('li');
+          const c = document.createElement('code');
+          c.textContent = u;
+          li.appendChild(c);
+          $('urls').appendChild(li);
+        });
+        $('open').disabled = !s.running;
+        $('dataDir').textContent = s.dataDir;
+        if (document.activeElement !== $('port')) $('port').value = s.port;
+        $('autostart').checked = s.autostart;
+        $('version').textContent = `Versão ${s.version}`;
+      }
+      const act = (fn) => async () => {
+        try {
+          const s = await fn();
+          if (s) render(s);
+        } catch (e) {
+          alert(e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''));
+        }
+      };
+      $('open').onclick = act(() => window.cde.openBrowser());
+      $('restart').onclick = act(() => window.cde.restart());
+      $('openFolder').onclick = act(() => window.cde.openFolder());
+      $('chooseFolder').onclick = act(() => window.cde.chooseFolder());
+      $('savePort').onclick = act(() => window.cde.setPort($('port').value));
+      $('autostart').onchange = act(() => window.cde.setAutostart($('autostart').checked));
+      window.cde.onState(render);
+      window.cde.state().then(render);
+    </script>
+  </body>
+</html>
