@@ -152,6 +152,11 @@ async function openDb(dataDir) {
       touch();
       return { id, changes };
     },
+    /** Executa SQL sem parâmetros (criação de tabelas). */
+    exec(sql) {
+      db.exec(sql);
+      touch();
+    },
     /** Executa `fn` numa transação (tudo ou nada). Síncrono: nada intercala no meio. */
     tx(fn) {
       db.run('BEGIN');

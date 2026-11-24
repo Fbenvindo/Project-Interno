@@ -89,3 +89,19 @@ export const cdeApi = {
     return call('POST', `/api/cde/documentos/${id}/arquivo`, { key: u.key, nome: file.name, content_type: file.type || null, descricao });
   },
 };
+
+export const clashApi = {
+  overview: (empId) => call('GET', `/api/clash/${empId}`),
+  create: (empId, body) => call('POST', `/api/clash/${empId}/analises`, body),
+  get: (id) => call('GET', `/api/clash/analises/${id}`),
+  rerun: (id) => call('POST', `/api/clash/analises/${id}/reexecutar`),
+  remove: (id) => call('DELETE', `/api/clash/analises/${id}`),
+  update: (id, body) => call('PATCH', `/api/clash/analises/${id}/interferencias`, body),
+  /** Geometria (cache binário) de um modelo da análise. */
+  async geometry(id, idx) {
+    const token = loadSession()?.token;
+    const r = await fetch(`/api/clash/analises/${id}/geometria/${idx}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!r.ok) throw new Error(`Geometria indisponível (${r.status}).`);
+    return r.arrayBuffer();
+  },
+};
