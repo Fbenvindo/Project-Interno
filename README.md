@@ -94,3 +94,7 @@ Templates de variáveis:
 - Testar login e fluxos críticos (cadastros, planejamento, documentos, relatórios).
 - Monitorar logs da API e erros de navegador nas primeiras horas.
 - Validar backup e plano de rollback do banco.
+
+## Outros aplicativos neste repositório
+
+- [`apps/mep-bim`](apps/mep-bim/README.md): aplicativo desktop (Electron) para projetos MEP em BIM/IFC. É independente deste sistema de gestão, com dependências e build próprios.

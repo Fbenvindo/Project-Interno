@@ -1,0 +1,2550 @@
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { DISCIPLINE_BY_ID, DISCIPLINES, getTypeLabel } from "../../core/disciplines";
+import { COMPONENT_BY_ID } from "../../core/library";
+import { sizeMeters } from "../../core/placement";
+import { pointProperties, pointSize, pointToElement, type PlacedPoint } from "../../core/points";
+import type { Circuit } from "../../core/circuits";
+import type { Discipline, ElementInfo, Vec3 } from "../../core/types";
+import type { LoadedModel } from "../../ifc/loadIfc";
+import { cancelIfcLoad, loadIfcModel, warmIfcWorker } from "./ifc/ifcLoader";
+import { addToRule, elementKey, hiddenIds, MODEL_HOST, MODEL_PROJECT, type HideRules } from "../../core/visibility";
+import { HideSelectionBar, VisibilityEditor, type VisibilityCatalog } from "./shell/VisibilityEditor";
+import { ViewCube } from "./viewer/ViewCube";
+import { archIdOf, archProperties, buildArch, moveArch, raiseArch, storeyZ as archStoreyZ, worldMesh } from "../../core/arch";
+import { ArqPanel, readArchParams, saveArchParams, useArchTool, type ArchParams } from "./arq/ArqPanel";
+import { GestaoPanel } from "./gestao/GestaoPanel";
+import { DISCIPLINE_CODE, docCode, hasCoding, levelCode, sheetDocMeta, STATE_LABEL } from "../../core/cde";
+import { disciplinesInUse, exportPointsIfc, filterByDisciplines } from "../../core/ifcExport";
+import { SHEETS } from "../../core/plan/sheet";
+import { cde as cdeApi, loadSession, type ServerDoc } from "./gestao/cdeClient";
+import { docFileName, modelDocMeta } from "../../core/cde";
+import { archDiscipline } from "../../core/arch";
+import { linkSlotOf } from "../../ifc/federate";
+import { cacheClear, cacheList } from "./ifc/modelCache";
+import { deletedText, deleteSelection } from "./desenho/deleteSelection";
+import { desktop, openIfc } from "./platform";
+import { Viewer, type ColorMode } from "./viewer/Viewer";
+import { QuantitiesPanel } from "./components/QuantitiesPanel";
+import { ClashPanel } from "./components/ClashPanel";
+import { CalcPanel } from "./components/CalcPanel";
+import type { OpenedFile } from "../../shared/ipc";
+import { LocacaoPanel } from "./locacao/LocacaoPanel";
+import { TracadoPanel } from "./tracado/TracadoPanel";
+import { CircuitosPanel } from "./circuitos/CircuitosPanel";
+import { PlanView } from "./planta/PlanView";
+import { PlanEditor } from "./planta/PlanEditor";
+import { NO_SECTION, SectionTools, sectionToPlanes, type SectionState } from "./viewer/SectionTools";
+import { FolhaPanel } from "./planta/FolhaPanel";
+import { renderSheetViews, type SheetFormat, type SheetViewport } from "../../core/plan/sheet";
+import { boundsOf } from "../../core/plan/build";
+import { displayTransform, transformPrims, viewAngle } from "../../core/plan/orient";
+import type { PlanDrawing } from "../../core/plan/drawing";
+import { beamOptions, docPlanOf, floorPlanOf, floorPlanOfId, isFloorPlanId, parseFloorPlanId, rangeOf, viewFilter, type PlanType, type ViewDef } from "../../core/views";
+import { newSheetId, viewDrawing, viewSubtitle, viewTitle, type ModelContext, type SheetDef } from "../../core/viewDrawing";
+import { sectionFrame } from "../../core/plan/elevation";
+import { floorKey, parseFloorKey, parsePlanKey, PLAN_PREFIX, VistasBrowser, type FloorEntry } from "./shell/VistasBrowser";
+import { floorSubLevels, planRangeOf } from "../../core/plan/levels";
+import { VistaPanel } from "./shell/VistaPanel";
+import { connectedPairs, runElements, runFittings, runIdOfElement, segmentIndexOf, runProperties, runSegments, RUN_TYPE_BY_ID, segmentElementId, fittingElementId } from "../../core/runs";
+import { usePointsStore } from "./locacao/usePointsStore";
+import { alignKey, DEFAULT_ALIGN, federate, prepareLink, type LinkData, type LinkMeta } from "../../ifc/federate";
+import { openIfcMany, openTextFile, readIfcPath, saveFile } from "./platform";
+import { moveNetwork, type MoveSelection } from "../../core/runEdit";
+import { applyInstall, boxElements, boxIndexOf, boxProperties, DEFAULT_INSTALL, isConduitRun, pullBoxes, runFloorProbeY, type InstallMode } from "../../core/conduits";
+import { storeyAt } from "../../core/points";
+import { InstalacoesPanel } from "./tracado/InstalacoesPanel";
+import { defaultTitleBlockId, titleBlockById, useTitleBlocks } from "./planta/titleBlocks";
+import { setHostLoader, setProjectFile, useProjectFile, useProjectFiles } from "./locacao/useProjectFiles";
+import { EMPTY_FILTERS, Navigator, NO_STOREY, type Filters } from "./shell/Navigator";
+import { Ribbon } from "./shell/Ribbon";
+import { DrawAidsBar, useDrawAidsKeys } from "./shell/DrawAidsBar";
+import { useDrawAids } from "./desenho/drawAids";
+import { FlowCanvas, FlowPanel, FlowSidebar, type FlowMode, type FlowSel } from "./fluxo/FlowEditor";
+import { applyProfile, blockStorey as blockStoreyOf, checkFlow, flowPrims, flowSystem, newFlow, newFlowId, type FlowContext, type FlowData, type FlowSystem } from "../../core/flow";
+import { PerfilPanel } from "./shell/PerfilPanel";
+import { exampleTwoTowersBusway, exampleTwoTowersWater } from "../../core/flowExamples";
+import { pointPowerVA } from "../../core/circuits";
+import { ParamsPanel } from "./shell/ParamsPanel";
+import { BibliotecaPanel } from "./library/BibliotecaPanel";
+import { ProgramaPanel, ProgramaTiposOnly } from "./programa/ProgramaPanel";
+import { VinculosPanel } from "./links/VinculosPanel";
+import { CoordenadasPanel } from "./coords/CoordenadasPanel";
+import { useCursor } from "./coords/cursor";
+import { EMPTY_GEOREF, effectiveGeoref, fmtCoord, toMap, type Georef } from "../../core/georef";
+import { exportLibrary, importLibrary, loadFamilyLibrary, newDesignUid, saveDesign } from "./library/familyLibrary";
+import { ElementEditor } from "./library/ElementEditor";
+import { designComponentId, newDesign, type ElementDesign } from "../../core/elementDesign";
+import { useDraftTool, CMD_LABEL, isCreateCmd, isMeasureCmd } from "./desenho/useDraftTool";
+import { DesenhoPanel } from "./desenho/DesenhoPanel";
+import { CoordinateSystem } from "../../core/math";
+import { color3d } from "../../core/plan/style";
+import { getLibraryVersion, onLibraryChange } from "../../core/library";
+import { makeCeilingResolver, makeSlabProbe } from "./locacao/ceiling";
+import { Icon, LogoMark } from "./shell/icons";
+import { DISCIPLINE_TABS, TOP_TABS, type ActionId, type DisciplineTab, type Tool, type ToolSpec, type TopTab } from "./shell/ribbonConfig";
+
+type View = "planta" | "3d" | "prancha" | "fluxograma" | "vazio";
+type TabView = Exclude<View, "vazio">;
+const TABS: TabView[] = ["planta", "3d", "prancha", "fluxograma"];
+const TAB_LABEL: Record<TabView, string> = { planta: "Planta", "3d": "Vista 3D", prancha: "Prancha", fluxograma: "Fluxograma" };
+const IDENTITY_CS = new CoordinateSystem();
+/** Cota em metros com sinal (ex.: "+0,45"). */
+const fmtLevel = (z: number) => `${z >= 0 ? "+" : "−"}${Math.abs(z).toFixed(2).replace(".", ",")}`;
+type Theme = "claro" | "escuro";
+
+const THEME_KEY = "smarteasybim.tema";
+function readTheme(): Theme {
+  try {
+    return localStorage.getItem(THEME_KEY) === "escuro" ? "escuro" : "claro";
+  } catch {
+    return "claro";
+  }
+}
+
+/** Direção de enquadramento para pontos: de frente para a parede ou por baixo do teto. */
+function viewDirectionFor(points: PlacedPoint[]): Vec3 | undefined {
+  if (!points.length) return undefined;
+  const mountings = new Set(points.map((p) => COMPONENT_BY_ID[p.componentId].mounting));
+  if (mountings.size !== 1) return undefined;
+  const [m] = mountings;
+  if (m === "teto") return [0.5, -1, 0.7];
+  if (m === "piso") return [0.5, 1.2, 0.7];
+  const x = points.reduce((s, p) => s + Math.sin(p.rotation), 0);
+  const z = points.reduce((s, p) => s + Math.cos(p.rotation), 0);
+  const len = Math.hypot(x, z);
+  return len < 1e-6 ? undefined : [x / len, 0.35, z / len];
+}
+
+const TOOL_HINT: Record<ToolSpec["kind"], string> = {
+  propriedades: "Clique: selecionar (Ctrl soma) · arrastar →: só o que fica inteiro na janela · arrastar ←: tudo o que ela toca · botão do meio: deslocar a vista · botão direito sobre ponto ou trecho: arrastar para mover (setas também; no 3D, Alt = vertical) · 3D: botão direito no vazio gira · duplo clique em texto: editar · Esc: limpar",
+  locacao: "Clique na planta para locar · Esc cancela",
+  tracado: "Clique para inserir vértices · duplo clique ou Enter termina · Esc cancela",
+  circuitos: "Selecione pontos na vista e atribua ao circuito",
+  calc: "Selecione um segmento para aproveitar comprimento e dimensão",
+  quantitativos: "Clique em uma linha para localizar os elementos",
+  interferencias: "Clique em uma interferência para enquadrá-la",
+  pranchas: "Folhas com as vistas de Documentação · roda do mouse: zoom · arrastar: mover · duplo clique: abrir a vista",
+  biblioteca: "Importe elementos de IFC (ou famílias do Revit), confira a configuração e loque-os como qualquer item da biblioteca",
+  programa: "Defina as instalações por tipo de equipamento e por ambiente e gere os pontos no modelo",
+  vinculos: "Modelos de outras disciplinas sobrepostos ao principal, pelas coordenadas do projeto",
+  coordenadas: "Ponto base, survey point, sistema de referência e norte do projeto",
+  instalacoes: "Medidas de cada forma de instalação dos eletrodutos neste empreendimento",
+  perfil: "Torres, pavimentos comuns ou por torre, alturas e cotas do empreendimento",
+  visibilidade: "O que fica oculto em todas as vistas, folhas e no 3D: modelos IFC, tipos de elemento, sistemas e elementos",
+  desenho: "Siga as instruções sobre a planta · Enter conclui · Esc cancela",
+  gestao: "Codificação ISO 19650, revisões, estados e emissões (GRD) das folhas e dos modelos",
+  arq: "Desenhe na planta (encaixe e ortogonal valem) · Enter ou botão direito termina · Esc volta a Selecionar",
+};
+
+export function App() {
+  const viewerHost = useRef<HTMLDivElement>(null);
+  const viewerRef = useRef<Viewer | null>(null);
+  const modelRef = useRef<LoadedModel | null>(null);
+  /** Modelo principal (o IFC aberto). O app trabalha com o federado: principal + vínculos visíveis. */
+  const [hostModel, setModel] = useState<LoadedModel | null>(null);
+  const [linkData, setLinkData] = useState<Map<string, LinkData>>(() => new Map());
+  const [linkStatus, setLinkStatus] = useState<Record<string, string>>({});
+  const linkSlot = useRef(1);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [progressFrac, setProgressFrac] = useState<number | null>(null);
+  /** Como o último modelo foi aberto (do cache ou processado, e o tempo). */
+  const [loadNote, setLoadNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [selection, setSelection] = useState<number[]>([]);
+  const [colorMode, setColorMode] = useState<ColorMode>("disciplina");
+
+  // Casca: aba superior, ferramenta ativa, vista central, painéis e tema.
+  const [top, setTop] = useState<TopTab>("arquivo");
+  const toolCounter = useRef(0);
+  const [tool, setToolState] = useState<Tool>({ kind: "propriedades", n: 0 });
+  /** Disciplina em que a ferramenta foi escolhida (filtra biblioteca e tipos de trecho). */
+  const [toolDisc, setToolDisc] = useState<DisciplineTab | null>(null);
+  const [view, setView] = useState<View>("3d");
+  /** Abas fechadas pelo usuário (reabrem ao abrir uma vista desse tipo, ou pelo "+"). */
+  const [closedTabs, setClosedTabs] = useState<TabView[]>([]);
+  useEffect(() => {
+    if (view !== "vazio") setClosedTabs((c) => (c.includes(view) ? c.filter((x) => x !== view) : c));
+  }, [view]);
+  const [leftOpen, setLeftOpen] = useState(true);
+  /** Coluna esquerda: Propriedades (em cima) e Navegador (embaixo), cada um recolhível. */
+  const [propsOpen, setPropsOpen] = useState(true);
+  const [browserOpen, setBrowserOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(true);
+  const [theme, setTheme] = useState<Theme>(readTheme);
+  const [fitSignal, setFitSignal] = useState(0);
+
+  // Pavimento ativo (planta e prancha), vista 3D isolada e cortes.
+  const [storey, setStorey] = useState<string>("");
+  /** Nível de laje aberto em cada pavimento (0 = o primeiro). */
+  const [subByStorey, setSubByStorey] = useState<Record<string, number>>({});
+  const [storeyView, setStoreyView] = useState<string | null>(null);
+  const [editorCut, setEditorCut] = useState(1.2);
+  const [section, setSection] = useState<SectionState>(NO_SECTION);
+  const [sectionOpen, setSectionOpen] = useState(false);
+
+  // Famílias do Revit importadas: carregadas na abertura; mudanças redesenham o app.
+  useEffect(() => void loadFamilyLibrary(), []);
+  const libraryVersion = useSyncExternalStore(onLibraryChange, getLibraryVersion, getLibraryVersion);
+
+  const store = usePointsStore();
+  const fedLinks = useMemo(
+    () => store.links.filter((m) => linkData.has(m.id)).map((meta) => ({ meta, data: linkData.get(meta.id)! })),
+    [store.links, linkData],
+  );
+  const model = useMemo(() => (hostModel ? federate(hostModel, fedLinks) : null), [hostModel, fedLinks]);
+  /** Coordenadas efetivas do projeto: as do IFC principal ou as informadas no projeto. */
+  const georef = useMemo(() => (hostModel ? effectiveGeoref(hostModel.georef, store.georef) : EMPTY_GEOREF), [hostModel, store.georef]);
+  // ---- Vistas: Trabalho / Documentação, vistas 3D e folhas ----------------------------------
+  /** Planta aberta: "trab" ou "doc" do pavimento atual, ou "view:<id>" (ampliação, corte, planta extra). */
+  const [planKey, setPlanKey] = useState<string>("trab");
+  /** Plantas de trabalho: tipo (piso/teto) e vigas — as de documentação guardam isso na própria vista. */
+  const [workDisplay, setWorkDisplay] = useState<Pick<ViewDef, "planType" | "showBeams" | "showBeamText">>({ planType: "piso", showBeams: true, showBeamText: true });
+  const [view3dId, setView3dId] = useState<string | null>(null);
+  // ---- Fluxogramas (vistas do tipo "fluxograma") ----
+  const [flowId, setFlowId] = useState<string | null>(null);
+  const [flowSel, setFlowSel] = useState<FlowSel>(null);
+  const [flowMode, setFlowMode] = useState<FlowMode>({ kind: "sel" });
+  const openFlowsRef = useRef<(sys?: FlowSystem) => void>(() => {});
+  const newFlowRef = useRef<(sys?: FlowSystem) => void>(() => {});
+  const [sheetId, setSheetId] = useState<string | null>(null);
+  const [moveMode, setMoveMode] = useState(false);
+  const [snapshots, setSnapshots] = useState<Map<string, { href: string; aspect: number }>>(() => new Map());
+  /** Vista pelo id (as plantas de documentação existem mesmo sem terem sido alteradas). */
+  const resolveView = useCallback(
+    (id: string): ViewDef | null => store.views.find((v) => v.id === id) ?? floorPlanOfId(store.views, id),
+    [store.views],
+  );
+  const view3dDef = view3dId ? (store.views.find((v) => v.id === view3dId) ?? null) : null;
+  /** Ações de folhas da faixa (definidas mais abaixo, depois das funções de folha). */
+  const sheetActionRef = useRef<((a: "nova" | "plantas") => void) | null>(null);
+  const georefRef = useRef(georef);
+  georefRef.current = georef;
+  const linksRef = useRef(store.links);
+  linksRef.current = store.links;
+  // Alinhamento do vínculo (ou o survey point do projeto) mudou: reposiciona a partir do arquivo lido.
+  useEffect(() => {
+    if (!hostModel) return;
+    let changed = false;
+    const next = new Map(linkData);
+    for (const m of store.links) {
+      const d = linkData.get(m.id);
+      if (!d) continue;
+      const align = m.align ?? DEFAULT_ALIGN;
+      if (d.alignKey === alignKey(align, georef.map)) continue;
+      next.set(m.id, prepareLink(m.id, d.slot, d.raw, hostModel, align, georef.map));
+      changed = true;
+    }
+    if (changed) setLinkData(next);
+  }, [hostModel, store.links, linkData, georef]);
+  const [hostPath, setHostPath] = useState<string | null>(null);
+  const files = useProjectFiles(store, model, fileName, () => setSelection([]), hostPath);
+  /** Editor de elementos aberto (novo ou edição de um elemento criado no app). */
+  const [designing, setDesigning] = useState<ElementDesign | null>(null);
+  const pointElements = useMemo(() => store.points.map(pointToElement), [store.points]);
+  const runElementList = useMemo(() => (model ? runElements(store.runs, model.storeyLevels) : []), [store.runs, model]);
+  const boxes = useMemo(() => pullBoxes(store.runs, store.points), [store.runs, store.points]);
+  const boxElementList = useMemo(() => (model ? boxElements(boxes, store.runs, model.storeyLevels) : []), [boxes, store.runs, model]);
+  // Arquitetura e estrutura modeladas no app: entram como elementos de modelo (plantas, cortes, 3D).
+  const archPieces = useMemo(() => (model ? buildArch(store.arch, model.coordinates) : []), [store.arch, model]);
+  const archInfos = useMemo(() => archPieces.map((p) => p.info), [archPieces]);
+  const archMeshes = useMemo(() => (model ? archPieces.map((p) => worldMesh(p, model.coordinates)) : []), [archPieces, model]);
+  /** Modelo das plantas, cortes e folhas: o IFC (com vínculos) mais a arquitetura/estrutura do app. */
+  const planModel = useMemo(
+    () => (model && archPieces.length ? { ...model, elements: [...model.elements, ...archInfos], meshes: [...model.meshes, ...archMeshes] } : model),
+    [model, archPieces, archInfos, archMeshes],
+  );
+  const allElements = useMemo(
+    () => (model ? [...model.elements, ...archInfos, ...pointElements, ...runElementList, ...boxElementList] : []),
+    [model, archInfos, pointElements, runElementList, boxElementList],
+  );
+  const elementById = useMemo(() => new Map(allElements.map((e) => [e.expressID, e])), [allElements]);
+  // ---- Visibilidade (geral e por vista) ------------------------------------------------------
+  const slotToLink = useMemo(() => new Map(fedLinks.map((l) => [l.data.slot, l.meta.id])), [fedLinks]);
+  /** Modelo de um elemento: principal, vínculo (id) ou instalações do projeto. */
+  const modelOf = useCallback((id: number) => (id < 0 ? MODEL_PROJECT : linkSlotOf(id) ? (slotToLink.get(linkSlotOf(id)) ?? "vinculo") : MODEL_HOST), [slotToLink]);
+  const visibilityCatalog = useMemo<VisibilityCatalog>(() => {
+    const count = new Map<string, number>();
+    for (const e of allElements) count.set(modelOf(e.expressID), (count.get(modelOf(e.expressID)) ?? 0) + 1);
+    return {
+      models: [
+        { key: MODEL_HOST, label: `Modelo principal${fileName ? ` (${fileName})` : ""}`, count: count.get(MODEL_HOST) ?? 0 },
+        ...fedLinks.map((l) => ({ key: l.meta.id, label: `Vínculo: ${l.meta.name}`, count: count.get(l.meta.id) ?? 0 })),
+        { key: MODEL_PROJECT, label: "Criados no app (instalações, arquitetura e estrutura)", count: count.get(MODEL_PROJECT) ?? 0 },
+      ],
+      elements: allElements,
+    };
+  }, [allElements, fedLinks, modelOf, fileName]);
+  /** Ids ocultos numa vista (regras da vista e gerais). */
+  const hiddenFor = useCallback((v: ViewDef | null) => hiddenIds(allElements, modelOf, store.visibility, v?.hidden), [allElements, modelOf, store.visibility]);
+  const connected = useMemo(() => connectedPairs(store.runs, store.points), [store.runs, store.points]);
+  const meshById = useMemo(() => new Map(planModel?.meshes.map((m) => [m.expressID, m]) ?? []), [planModel]);
+
+  const chooseTool = useCallback(
+    (spec: ToolSpec, disc: DisciplineTab | null = null) => {
+      setToolState({ ...spec, n: ++toolCounter.current } as Tool);
+      setToolDisc(disc);
+      if (spec.kind === "pranchas") setView("prancha");
+      else if (spec.kind === "locacao" || spec.kind === "tracado" || spec.kind === "arq") setView("planta");
+      // Medir funciona na planta, nos cortes e no 3D: fica na vista atual (da folha vai para a planta).
+      else if (spec.kind === "desenho" && isMeasureCmd(spec.cmd)) setView((v) => (v === "prancha" || v === "vazio" ? "planta" : v));
+      else if (spec.kind === "desenho" && spec.cmd !== "corte-selecao") setView("planta");
+      setRightOpen(true);
+    },
+    [],
+  );
+
+  const chooseTop = useCallback(
+    (t: TopTab) => {
+      setTop(t);
+      // Arquivo mantém a ferramenta (salvar no meio da edição); as demais abas começam pela consulta.
+      if (t === "pranchas") chooseTool({ kind: "pranchas" });
+      else if (t === "programa" && t !== top) chooseTool({ kind: "programa", section: "ambientes" });
+      else if (t !== "arquivo" && t !== top) chooseTool({ kind: "propriedades" });
+    },
+    [chooseTool, top],
+  );
+
+  // ---- Tema ------------------------------------------------------------------
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme === "escuro" ? "dark" : "light";
+    viewerRef.current?.setTheme(theme === "escuro");
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      /* armazenamento indisponível */
+    }
+  }, [theme]);
+
+  // ---- Planta 2D e prancha ---------------------------------------------------
+  const planAvailable = useMemo(() => DISCIPLINES.map((d) => d.id).filter((d) => allElements.some((e) => e.discipline === d)), [allElements]);
+  useEffect(() => {
+    if (!model || model.storeys.includes(storey)) return;
+    // Pavimento padrão: o que tem mais pontos e trechos; senão, o que tem mais paredes.
+    const score = new Map<string, number>();
+    for (const p of store.points) if (p.storey) score.set(p.storey, (score.get(p.storey) ?? 0) + 10);
+    for (const e of model.elements) if (e.storey && e.ifcType.startsWith("IFCWALL")) score.set(e.storey, (score.get(e.storey) ?? 0) + 1);
+    const best = [...score.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? model.storeys[0] ?? "";
+    setStorey(best);
+  }, [model, storey, store.points]);
+
+  const titleBlocks = useTitleBlocks();
+  const activeSheet = store.sheets.find((x) => x.id === sheetId) ?? null;
+  /** Pavimentos do navegador: um por pavimento e por nível de laje (quando o pavimento tem mais de um). */
+  const floorEntries = useMemo<FloorEntry[]>(() => {
+    if (!model) return [];
+    const out: FloorEntry[] = [];
+    for (const st of model.storeys) {
+      const subs = floorSubLevels(model.elements, model.storeyLevels, st);
+      subs.forEach((y, i) => out.push({ storey: st, sub: i, levelLabel: subs.length > 1 ? fmtLevel(model.coordinates.worldToIfc([0, y, 0])[2]) : null }));
+    }
+    return out;
+  }, [model]);
+  /** Vistas de documentação que podem ir para as folhas. */
+  const docViews = useMemo(
+    () => [
+      ...floorEntries.flatMap((f) => [docPlanOf(store.views, f.storey, "piso", f.sub, f.levelLabel ?? undefined), docPlanOf(store.views, f.storey, "teto", f.sub, f.levelLabel ?? undefined)]),
+      ...store.views.filter((v) => v.section === "documentacao" && !isFloorPlanId(v.id)),
+    ],
+    [floorEntries, store.views],
+  );
+  // ---- Gestão da informação (ISO 19650) ----
+  /** Disciplinas com modelo (IFC) no projeto: as marcadas no projeto, as com pontos/trechos e as da arquitetura/estrutura. */
+  const modelDisciplines = useMemo(
+    () => [...new Set([...store.disciplines, ...disciplinesInUse(store.points, store.runs), ...store.arch.map(archDiscipline)])],
+    [store.disciplines, store.points, store.runs, store.arch],
+  );
+  /** Nível (pelo pavimento da primeira vista) e disciplina padrão do código de uma folha. */
+  const sheetDefaults = useCallback(
+    (sh: SheetDef) => {
+      const v = sh.viewports[0] ? resolveView(sh.viewports[0].viewId) : null;
+      const levels = model ? model.storeyLevels.map((l) => ({ name: l.name, level: model.coordinates.worldToIfc([0, l.level, 0])[2] })) : [];
+      const nivel = levelCode(v?.storey ?? null, levels);
+      const ds = store.disciplines.length ? store.disciplines : modelDisciplines;
+      return { nivel, disciplina: ds.length === 1 ? DISCIPLINE_CODE[ds[0]] : "MP" };
+    },
+    [resolveView, model, store.disciplines, modelDisciplines],
+  );
+  /** Monta uma folha (qualquer uma: a aberta, ou as enviadas ao CDE). */
+  const renderSheet = useCallback((sheet: SheetDef) => {
+    if (!model) return null;
+    const ctx: ModelContext = {
+      elements: planModel?.elements ?? model.elements,
+      meshes: meshById,
+      cs: model.coordinates,
+      storeyLevels: model.storeyLevels,
+      points: store.points,
+      runs: store.runs,
+      spaces: model.spaces,
+      boxes,
+      drafts: store.drafts,
+      views: store.views,
+      projectDisciplines: store.disciplines,
+      hidden: hiddenFor,
+      doors: store.doors,
+    };
+    const drawings = new Map<string, PlanDrawing>();
+    const vps: SheetViewport[] = [];
+    let sheetAngle: number | null = null;
+    for (const vp of sheet.viewports) {
+      const v = resolveView(vp.viewId);
+      if (!v || v.section !== "documentacao") continue;
+      if (v.kind === "3d") {
+        const snap = snapshots.get(v.id);
+        vps.push({ id: v.id, title: viewTitle(v), subtitle: viewSubtitle(v), image: snap ? { ...snap, widthMm: vp.widthMm ?? 150 } : undefined, pos: vp.pos });
+        continue;
+      }
+      let d = viewDrawing(v, ctx);
+      if (!d) continue;
+      // Plantas giradas (maior eixo na horizontal ou ângulo escolhido): a folha mostra igual à tela.
+      if (v.kind === "planta" || v.kind === "ampliacao") {
+        const a = viewAngle(v.rotation, d.prims);
+        if (a) {
+          const prims = transformPrims(d.prims, displayTransform([0, 0], a));
+          d = { ...d, prims, bounds: boundsOf(prims) };
+        }
+        if (sheetAngle == null) sheetAngle = a;
+      }
+      drawings.set(v.id, d);
+      vps.push({ id: v.id, title: viewTitle(v), subtitle: viewSubtitle(v), drawing: d, pos: vp.pos });
+    }
+    const def = sheetDefaults(sheet);
+    const meta = hasCoding(store.cde.coding) ? sheetDocMeta(sheet, store.sheets.indexOf(sheet), def.nivel, def.disciplina) : null;
+    const info = {
+      ...sheet.info,
+      conteudo: sheet.info.conteudo || sheet.name,
+      ...(meta ? { codigo: docCode(store.cde.coding, meta), revisao: meta.revisao, estado: STATE_LABEL[meta.estado], finalidade: meta.finalidade } : {}),
+    };
+    const result = renderSheetViews(vps, sheet.format, info, titleBlocks.find((t) => t.id === sheet.titleBlockId) ?? null, sheetAngle ? (georef.trueNorthDeg ?? 0) + (sheetAngle * 180) / Math.PI : georef.trueNorthDeg);
+    return { result, drawings };
+  }, [model, planModel, meshById, store.points, store.runs, store.drafts, store.views, store.disciplines, boxes, resolveView, snapshots, titleBlocks, georef.trueNorthDeg, hiddenFor, store.doors, store.cde, store.sheets, sheetDefaults]);
+  const sheetRender = useMemo(() => (view === "prancha" && activeSheet ? renderSheet(activeSheet) : null), [view, activeSheet, renderSheet]);
+  /** Arquivo de um documento para o CDE: folha em PDF (no navegador, SVG) ou o IFC da disciplina. */
+  const makeCdeFile = useCallback(
+    async (docId: string): Promise<{ name: string; bytes: Uint8Array; contentType: string } | null> => {
+      if (!model) return null;
+      const coded = hasCoding(store.cde.coding);
+      if (docId.startsWith("modelo:")) {
+        const d = docId.slice(7) as Discipline;
+        const sel = filterByDisciplines(store.points, store.runs, store.circuits, new Set([d]));
+        const text = exportPointsIfc(sel.points, {
+          modelName: fileName,
+          storeys: model.storeyLevels,
+          cs: model.coordinates,
+          runs: sel.runs,
+          circuits: sel.circuits,
+          georef,
+          title: DISCIPLINE_BY_ID[d].label,
+          arch: store.arch,
+          archOnly: (e) => archDiscipline(e) === d,
+        });
+        const name = coded ? docFileName(store.cde.coding, modelDocMeta(store.cde, d), "ifc") : `${(fileName ?? "modelo").replace(/\.(ifc|sebmod)$/i, "")}-${d}.ifc`;
+        return { name, bytes: new TextEncoder().encode(text), contentType: "application/x-step" };
+      }
+      const sheet = store.sheets.find((x) => x.id === docId);
+      const r = sheet ? renderSheet(sheet) : null;
+      if (!sheet || !r) return null;
+      const def = sheetDefaults(sheet);
+      const meta = sheetDocMeta(sheet, store.sheets.indexOf(sheet), def.nivel, def.disciplina);
+      const base = coded ? `${docCode(store.cde.coding, meta)}_${meta.revisao}` : sheet.name;
+      if (desktop?.pdfBytes) {
+        const f = SHEETS[sheet.format];
+        return { name: `${base}.pdf`, bytes: await desktop.pdfBytes({ defaultName: `${base}.pdf`, svg: r.result.svg, widthMm: f.w, heightMm: f.h }), contentType: "application/pdf" };
+      }
+      return { name: `${base}.svg`, bytes: new TextEncoder().encode(r.result.svg), contentType: "image/svg+xml" };
+    },
+    [model, store, fileName, georef, renderSheet, sheetDefaults],
+  );
+
+  const allSystems = useMemo(
+    () =>
+      [...new Set([...(model?.systems ?? []), ...store.points.map((p) => p.system), ...store.runs.map((r) => r.system)].filter(Boolean))].sort((a, b) =>
+        a.localeCompare(b, "pt-BR"),
+      ),
+    [model, store.points, store.runs],
+  );
+  const getProperties = useCallback(
+    (id: number) => {
+      const archId = archIdOf(id);
+      if (archId != null) {
+        const a = store.arch.find((x) => x.id === archId);
+        return a ? archProperties(a, store.arch) : [];
+      }
+      const runId = runIdOfElement(id);
+      if (runId != null) {
+        const r = store.runs.find((x) => x.id === runId);
+        return r ? runProperties(r) : [];
+      }
+      const boxIndex = boxIndexOf(id);
+      if (boxIndex != null) {
+        const b = boxes.find((x) => x.index === boxIndex);
+        return b ? boxProperties(b, store.runs) : [];
+      }
+      if (id < 0) {
+        const p = store.points.find((x) => x.id === id);
+        return p ? pointProperties(p) : [];
+      }
+      return model?.getProperties(id) ?? [];
+    },
+    [model, store.points, store.runs, store.arch, boxes],
+  );
+
+  // ---- Visualizador --------------------------------------------------------
+  useEffect(() => {
+    const viewer = new Viewer(viewerHost.current!);
+    viewerRef.current = viewer;
+    viewer.setTheme(readTheme() === "escuro");
+    return () => viewer.dispose();
+  }, []);
+
+  const pick = useCallback((id: number | null, additive: boolean) => {
+    setSelection((cur) => {
+      if (id == null) return additive ? cur : [];
+      if (!additive) return [id];
+      return cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    });
+  }, []);
+  useEffect(() => {
+    viewerRef.current!.onPick = pick;
+    viewerRef.current!.onPickMany = (ids, additive) => setSelection((cur) => (additive ? [...new Set([...cur, ...ids])] : ids));
+  }, [pick]);
+
+  // Selecionar um segmento destaca o trecho inteiro.
+  useEffect(() => {
+    const runIds = new Set(selection.map(runIdOfElement).filter((x): x is number => x != null));
+    if (!runIds.size) {
+      viewerRef.current?.setSelection(selection);
+      return;
+    }
+    const extra = runElementList.filter((e) => runIds.has(runIdOfElement(e.expressID)!)).map((e) => e.expressID);
+    viewerRef.current?.setSelection([...new Set([...selection, ...extra])]);
+  }, [selection, runElementList]);
+  useEffect(() => viewerRef.current?.setColorMode(colorMode), [colorMode]);
+
+  // Pontos locados na cena (recriados também após abrir outro modelo).
+  useEffect(() => {
+    viewerRef.current?.setPoints(
+      store.points.map((p) => {
+        const def = COMPONENT_BY_ID[p.componentId];
+        return { id: p.id, shape: def.shape, size: sizeMeters({ ...def, size: pointSize(p, def) }), position: p.position, rotation: p.rotation, color: DISCIPLINE_BY_ID[def.discipline].color, mesh: def.mesh };
+      }),
+    );
+  }, [store.points, model, libraryVersion]);
+
+  // Trechos na cena: segmentos e conexões.
+  useEffect(() => {
+    const visuals = store.runs.flatMap((r) => {
+      const t = RUN_TYPE_BY_ID[r.typeId];
+      const color = DISCIPLINE_BY_ID[t.discipline].color;
+      const w = r.size.width / 1000;
+      const h = r.size.height / 1000;
+      return runSegments(r).map((sg) => ({
+        id: segmentElementId(r.id, sg.index),
+        kind: "segmento" as const,
+        profile: t.profile,
+        width: w,
+        height: h,
+        start: sg.start,
+        end: sg.end,
+        color,
+      }));
+    });
+    const fittings = runFittings(store.runs).map((f) => {
+      const t = RUN_TYPE_BY_ID[f.typeId];
+      return {
+        id: fittingElementId(f.runId, f.index),
+        kind: "no" as const,
+        profile: t.profile,
+        width: f.size.width / 1000,
+        height: f.size.height / 1000,
+        position: f.position,
+        color: DISCIPLINE_BY_ID[t.discipline].color,
+      };
+    });
+    // Caixas de passagem dos eletrodutos, alinhadas ao eletroduto principal.
+    const boxVisuals = boxes.map((b) => ({
+      id: -(900_000 + b.index),
+      shape: "caixa" as const,
+      size: [b.spec.dims[0] / 1000, b.spec.dims[1] / 1000, b.spec.dims[2] / 1000] as Vec3,
+      position: b.position,
+      rotation: Math.atan2(-b.dir[2], b.dir[0]),
+      color: "#B45309",
+    }));
+    viewerRef.current?.setExtras("runs", [...visuals, ...fittings, ...boxVisuals]);
+  }, [store.runs, model, boxes]);
+
+  // Arquitetura e estrutura na cena: como malhas de modelo (blocos, seleção, cores, cortes).
+  // Só o que mudou sai e entra de novo; abrir outro modelo limpa a cena (e a lista).
+  const archInScene = useRef(new Map<number, string>());
+  useEffect(() => {
+    archInScene.current.clear();
+  }, [hostModel]);
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || !hostModel) return;
+    const sig = (m: (typeof archMeshes)[number]) => {
+      let h = m.positions.length;
+      for (let i = 0; i < m.positions.length; i += 7) h = (h * 31 + Math.round(m.positions[i] * 1000)) | 0;
+      return `${h}|${m.color.join(",")}`;
+    };
+    const want = new Map(archMeshes.map((m) => [m.expressID, sig(m)]));
+    const drop = [...archInScene.current].filter(([id, s]) => want.get(id) !== s).map(([id]) => id);
+    if (drop.length) viewer.removeModelMeshes(drop);
+    for (const id of drop) archInScene.current.delete(id);
+    const fresh = archMeshes.filter((m) => !archInScene.current.has(m.expressID));
+    if (fresh.length) {
+      const infoOf = new Map(archInfos.map((e) => [e.expressID, e]));
+      viewer.addModelMeshes(fresh, (id) => {
+        const e = infoOf.get(id);
+        return e ? color3d(e, DISCIPLINE_BY_ID[e.discipline].color) : "#9ca3af";
+      });
+      for (const m of fresh) archInScene.current.set(m.expressID, want.get(m.expressID)!);
+    }
+  }, [archMeshes, archInfos, hostModel]);
+
+  // Ganchos para testes automatizados da interface (somente em desenvolvimento).
+  useEffect(() => {
+    if (import.meta.env.DEV) Object.assign(window, { __mep: { viewer: viewerRef.current, model, store } });
+  }, [model, store]);
+
+  // Leitor IFC em segundo plano pronto antes do primeiro arquivo.
+  useEffect(() => {
+    const t = setTimeout(warmIfcWorker, 300);
+    return () => clearTimeout(t);
+  }, []);
+
+  const dirtyRef = useRef(false);
+  dirtyRef.current = store.dirty && !store.isEmpty;
+
+  // ---- Abertura de arquivos ------------------------------------------------
+  /** Abre um IFC como modelo base (somente leitura). Devolve o modelo carregado. */
+  const openFile = useCallback(async (file: OpenedFile, opts: { skipConfirm?: boolean } = {}): Promise<LoadedModel | null> => {
+    if (!opts.skipConfirm && dirtyRef.current && !window.confirm("Há alterações não salvas neste projeto. Continuar e descartá-las?")) return null;
+    setError(null);
+    setProgress("Inicializando leitor IFC…");
+    // Deixa a interface pintar a mensagem antes do processamento pesado.
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      modelRef.current?.close();
+      // Vínculos do modelo anterior são descartados com ele.
+      setLinkData((cur) => {
+        cur.forEach((l) => l.raw.close());
+        return new Map();
+      });
+      setLinkStatus({});
+      setProgressFrac(null);
+      // O arquivo vai para o leitor sem cópia (economiza memória em IFCs grandes).
+      const { model: loaded, info } = await loadIfcModel(
+        file,
+        (stage, f) => {
+          setProgress(stage);
+          setProgressFrac(f);
+        },
+        { transfer: true },
+      );
+      const secs = info.ms < 100 ? "menos de 0,1" : (info.ms / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 });
+      setLoadNote(info.fromCache ? `Aberto do cache em ${secs} s` : `Processado em ${secs} s`);
+      setProgress("Montando a vista 3D");
+      await new Promise((r) => setTimeout(r, 20));
+      modelRef.current = loaded;
+      const disciplineOf = new Map(loaded.elements.map((e) => [e.expressID, e.discipline]));
+      const byId = new Map(loaded.elements.map((e) => [e.expressID, e]));
+      viewerRef.current!.load(loaded.meshes, (id) => {
+        const e = byId.get(id);
+        const c = DISCIPLINE_BY_ID[disciplineOf.get(id) ?? "outros"].color;
+        return e ? color3d(e, c) : c;
+      });
+      store.reset();
+      setPlanKey("trab");
+      setView3dId(null);
+      setSheetId(null);
+      setSnapshots(new Map());
+      setModel(loaded);
+      setFileName(file.name);
+      setFilters(EMPTY_FILTERS);
+      setSelection([]);
+      setStoreyView(null);
+      setSection(NO_SECTION);
+      setView("3d");
+      setTop((t) => (t === "arquivo" ? "modelo" : t));
+      setHostPath(file.path);
+      return loaded;
+    } catch (e) {
+      console.error(e);
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "Leitura cancelada.") return null;
+      setError(
+        /allocation failed|out of memory|memory access out of bounds|Cannot enlarge memory|Aborted\(/i.test(msg)
+          ? `memória insuficiente para este IFC (${msg}). Feche outros programas (Revit, navegador) e tente de novo; para arquivos muito grandes, exporte o IFC por partes (por pavimento ou disciplina).`
+          : msg,
+      );
+      return null;
+    } finally {
+      setProgress(null);
+      setProgressFrac(null);
+    }
+  }, []);
+
+  // Abrir projeto: carrega o IFC base indicado no arquivo (pelo caminho salvo ou pedindo para localizar).
+  useEffect(() => {
+    setHostLoader(async (name, path) => {
+      let f = await readIfcPath(path);
+      if (!f) {
+        if (!window.confirm(`Este projeto usa o modelo IFC "${name ?? "?"}"${path ? ` (${path})` : ""}, que não foi encontrado. Localizar o arquivo?`)) return null;
+        f = await openIfc();
+      }
+      return f ? openFile(f, { skipConfirm: true }) : null;
+    });
+    return () => setHostLoader(null);
+  }, [openFile]);
+  const projectFile = useProjectFile();
+  useEffect(() => {
+    document.title = fileName ? `${projectFile.name ?? "Projeto sem nome"}${store.dirty && !store.isEmpty ? " •" : ""} — ${fileName} — SmartEasyBIM` : "SmartEasyBIM";
+  }, [fileName, projectFile.name, store.dirty, store.isEmpty]);
+
+  // ---- Vínculos IFC ----------------------------------------------------------------
+  /** Lê um IFC como vínculo do modelo principal. */
+  const loadLink = useCallback(
+    async (id: string, file: { name: string; data: Uint8Array }) => {
+      const host = modelRef.current;
+      if (!host) return;
+      setLinkStatus((s) => ({ ...s, [id]: "carregando" }));
+      await new Promise((r) => setTimeout(r, 20));
+      try {
+        const { model: raw } = await loadIfcModel(file, undefined, { transfer: true });
+        const meta = linksRef.current.find((m) => m.id === id);
+        const data = prepareLink(id, linkSlot.current++, raw, host, meta?.align ?? DEFAULT_ALIGN, georefRef.current.map);
+        setLinkData((cur) => new Map(cur).set(id, data));
+        setLinkStatus((s) => {
+          const { [id]: _drop, ...rest } = s;
+          return rest;
+        });
+      } catch (e) {
+        setLinkStatus((s) => ({ ...s, [id]: `erro: ${e instanceof Error ? e.message : e}` }));
+      }
+    },
+    [],
+  );
+
+  const addLinks = useCallback(async () => {
+    const files = await openIfcMany();
+    for (const f of files) {
+      const id = `lk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      const meta: LinkMeta = { id, name: f.name, path: f.path, discipline: "auto", visible: true, translucent: false };
+      store.setLinks((l) => [...l, meta]);
+      await loadLink(id, f);
+    }
+  }, [store, loadLink]);
+
+  const removeLink = useCallback(
+    (id: string) => {
+      store.setLinks((l) => l.filter((x) => x.id !== id));
+      setLinkData((cur) => {
+        const d = cur.get(id);
+        if (!d) return cur;
+        d.raw.close();
+        const next = new Map(cur);
+        next.delete(id);
+        return next;
+      });
+    },
+    [store],
+  );
+
+  /** Vincula (ou atualiza) um modelo de outra disciplina baixado do CDE do servidor. */
+  const linkFromCde = useCallback(
+    async (doc: ServerDoc) => {
+      const session = loadSession();
+      if (!session) throw new Error("Entre no CDE primeiro.");
+      const f = await cdeApi.download(session, doc.id);
+      const existing = linksRef.current.find((l) => l.cde?.docId === doc.id);
+      const cdeRef = { docId: doc.id, revisao: doc.revisao, codigo: doc.codigo };
+      if (existing) {
+        store.setLinks((l) => l.map((x) => (x.id === existing.id ? { ...x, name: f.name, path: null, cde: cdeRef } : x)));
+        setLinkData((cur) => {
+          const d = cur.get(existing.id);
+          if (!d) return cur;
+          d.raw.close();
+          const next = new Map(cur);
+          next.delete(existing.id);
+          return next;
+        });
+        await loadLink(existing.id, f);
+        return;
+      }
+      const id = `lk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      store.setLinks((l) => [...l, { id, name: f.name, path: null, discipline: "auto", visible: true, translucent: false, cde: cdeRef }]);
+      await loadLink(id, f);
+    },
+    [store, loadLink],
+  );
+
+  /** Localizar de novo um vínculo (arquivo movido ou projeto aberto no navegador). */
+  const relocateLink = useCallback(
+    async (id: string) => {
+      const [f] = await openIfcMany();
+      if (!f) return;
+      store.setLinks((l) => l.map((x) => (x.id === id ? { ...x, name: f.name, path: f.path } : x)));
+      setLinkData((cur) => {
+        const d = cur.get(id);
+        if (!d) return cur;
+        d.raw.close();
+        const next = new Map(cur);
+        next.delete(id);
+        return next;
+      });
+      await loadLink(id, f);
+    },
+    [store, loadLink],
+  );
+
+  // Projeto aberto com vínculos: tenta reabrir cada um pelo caminho salvo.
+  useEffect(() => {
+    if (!hostModel) return;
+    for (const m of store.links) {
+      if (linkData.has(m.id) || linkStatus[m.id]) continue;
+      setLinkStatus((s) => ({ ...s, [m.id]: "carregando" }));
+      // Vínculo do CDE: baixa a revisão atual do servidor (precisa estar logado no CDE).
+      if (m.cde && !m.path) {
+        const session = loadSession();
+        if (!session) {
+          setLinkStatus((s) => ({ ...s, [m.id]: "entre no CDE (Pranchas › Documentos e emissões)" }));
+          continue;
+        }
+        void cdeApi
+          .download(session, m.cde.docId)
+          .then((f) => loadLink(m.id, f))
+          .catch((e) => setLinkStatus((s) => ({ ...s, [m.id]: `CDE: ${e instanceof Error ? e.message : e}` })));
+        continue;
+      }
+      void readIfcPath(m.path).then((f) => {
+        if (f) void loadLink(m.id, f);
+        else setLinkStatus((s) => ({ ...s, [m.id]: "não encontrado" }));
+      });
+    }
+  }, [hostModel, store.links, linkData, linkStatus, loadLink]);
+
+  // Malhas dos vínculos na cena: entram quando visíveis; mudanças de disciplina/transparência recriam.
+  const linkInScene = useRef(new Map<string, { sig: string; ids: number[] }>());
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    const sigOf = (m: LinkMeta, d: LinkData) => `${m.discipline}|${m.translucent}|${d.alignKey}`;
+    const want = new Map(fedLinks.filter((l) => l.meta.visible).map((l) => [l.meta.id, sigOf(l.meta, l.data)]));
+    for (const [id, cur] of [...linkInScene.current]) {
+      if (want.get(id) === cur.sig) continue;
+      viewer.removeModelMeshes(cur.ids);
+      linkInScene.current.delete(id);
+    }
+    for (const l of fedLinks) {
+      if (!l.meta.visible || linkInScene.current.has(l.meta.id)) continue;
+      const byId = new Map(l.data.elements.map((e) => [e.expressID, e.discipline]));
+      const typeOf = new Map(l.data.elements.map((e) => [e.expressID, e]));
+      const color = (id: number) => {
+        const c = DISCIPLINE_BY_ID[l.meta.discipline !== "auto" ? l.meta.discipline : (byId.get(id) ?? "outros")].color;
+        const e = typeOf.get(id);
+        return e ? color3d(e, c) : c;
+      };
+      viewer.addModelMeshes(l.data.meshes, color, l.meta.translucent ? 0.3 : 1);
+      linkInScene.current.set(l.meta.id, { sig: sigOf(l.meta, l.data), ids: l.data.meshes.map((m) => m.expressID) });
+    }
+  }, [fedLinks]);
+  useEffect(() => {
+    if (!hostModel) linkInScene.current.clear();
+  }, [hostModel]);
+
+  /** Novo projeto: escolhe o modelo IFC base (de terceiros, só leitura) e começa um projeto vazio. */
+  const handleOpen = useCallback(async () => {
+    if (dirtyRef.current && !window.confirm("Há alterações não salvas neste projeto. Começar um novo e descartá-las?")) return;
+    const file = await openIfc();
+    if (!file) return;
+    const m = await openFile(file, { skipConfirm: true });
+    if (m) {
+      setProjectFile({ path: null, name: null });
+      files.setMessage(`Novo projeto sobre ${file.name}. O modelo é só referência (não é alterado); salve o projeto como arquivo .seb.`);
+    }
+  }, [openFile, files]);
+
+  const handleSample = useCallback(
+    async (name = "exemplo-mep.ifc") => {
+      const res = await fetch(new URL(`samples/${name}`, document.baseURI));
+      const m = await openFile({ name, path: null, data: new Uint8Array(await res.arrayBuffer()) });
+      if (m) setProjectFile({ path: null, name: null });
+    },
+    [openFile],
+  );
+
+  useEffect(() => {
+    const d = desktop;
+    if (!d) return;
+    const takePending = () => d.takePendingIfc().then((f) => f && openFile(f));
+    takePending();
+    const offs = [
+      d.on("menu:open", handleOpen),
+      d.on("menu:fit", () => viewerRef.current?.fitTo()),
+      d.on("ifc:pending-available", takePending),
+    ];
+    return () => offs.forEach((off) => off());
+  }, [handleOpen, openFile]);
+
+  // Arrastar e soltar um .ifc na janela.
+  useEffect(() => {
+    const over = (e: DragEvent) => e.preventDefault();
+    const drop = async (e: DragEvent) => {
+      e.preventDefault();
+      const file = e.dataTransfer?.files[0];
+      if (file && /\.(ifc|sebmod)$/i.test(file.name)) {
+        await openFile({ name: file.name, path: null, data: new Uint8Array(await file.arrayBuffer()) });
+      }
+    };
+    window.addEventListener("dragover", over);
+    window.addEventListener("drop", drop);
+    return () => {
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("drop", drop);
+    };
+  }, [openFile]);
+
+  const selectAndFrame = useCallback((ids: number[]) => {
+    setSelection(ids);
+    viewerRef.current?.fitTo(ids);
+  }, []);
+
+  const pointsRef = useRef(store.points);
+  pointsRef.current = store.points;
+  const selectPoints = useCallback((ids: number[], frame = false) => {
+    setSelection(ids);
+    if (frame) viewerRef.current?.fitTo(ids, viewDirectionFor(pointsRef.current.filter((p) => ids.includes(p.id))));
+  }, []);
+
+  const focusClash = useCallback((ids: number[]) => {
+    viewerRef.current?.setHighlight(ids, true);
+    viewerRef.current?.fitTo(ids);
+  }, []);
+  const clearHighlight = useCallback(() => viewerRef.current?.setHighlight([]), []);
+
+  const isolateDiscipline = useCallback(
+    (d: Discipline) => {
+      const all = new Set(allElements.map((e) => e.discipline));
+      all.delete(d);
+      setFilters((f) => ({ ...f, hiddenDisciplines: all }));
+    },
+    [allElements],
+  );
+
+  // Cortes aplicados à vista 3D.
+  useEffect(() => {
+    if (model) viewerRef.current?.setSection(sectionToPlanes(section, model.coordinates));
+  }, [section, model]);
+
+  /** Pavimento escolhido no navegador: planta e prancha passam a ele e o 3D o isola (null = modelo completo em 3D). */
+  const chooseStorey = useCallback(
+    (name: string | null) => {
+      if (!model) return;
+      setStoreyView(name);
+      setFilters((f) => ({
+        ...f,
+        hiddenStoreys: name ? new Set([...model.storeys, NO_STOREY].filter((s) => s !== name)) : new Set(),
+      }));
+      if (name) {
+        setStorey(name);
+        setPlanKey((k) => (k.startsWith("view:") ? "trab" : k));
+      } else setView("3d");
+      setTimeout(() => viewerRef.current?.fitTo(), 60);
+    },
+    [model],
+  );
+
+  const storeyZ = useMemo(() => {
+    if (!model) return null;
+    const lvl = model.storeyLevels.find((s) => s.name === (storeyView ?? storey));
+    return lvl ? model.coordinates.worldToIfc([0, lvl.level, 0])[2] : null;
+  }, [model, storeyView, storey]);
+
+  const showCircuit = useCallback(
+    (c: Circuit) => {
+      chooseTool({ kind: "circuitos" }, "eletrica");
+      setTop("eletrica");
+      selectPoints(
+        pointsRef.current.filter((p) => p.circuit === c.uid).map((p) => p.id),
+        view === "3d",
+      );
+    },
+    [chooseTool, selectPoints, view],
+  );
+
+  // ---- Ações da faixa de ferramentas ------------------------------------------
+  const sectionActive = section.horizontal.on || section.x.on || section.y.on;
+  const onAction = useCallback(
+    (a: ActionId) => {
+      switch (a) {
+        case "abrirIfc":
+          return void handleOpen();
+        case "exemplo":
+          return void handleSample();
+        case "exemploApartamento":
+          return void handleSample("exemplo-apartamento.ifc");
+        case "fluxogramas":
+          return openFlowsRef.current("eletrica");
+        case "novoFluxograma":
+          return newFlowRef.current("eletrica");
+        case "fluxogramasAgua":
+          return openFlowsRef.current("agua-fria");
+        case "novoFluxogramaAgua":
+          return newFlowRef.current("agua-fria");
+        case "novoElemento":
+          return setDesigning(newDesign(undefined, newDesignUid()));
+        case "exportarBiblioteca":
+          return void (async () => {
+            const { text, count } = await exportLibrary();
+            if (!count) return files.setMessage("A biblioteca deste computador está vazia.");
+            const saved = await saveFile({ defaultName: "biblioteca-smarteasybim.seblib", content: text, filters: [{ name: "Biblioteca SmartEasyBIM", extensions: ["seblib"] }] });
+            if (saved) files.setMessage(`Biblioteca exportada (${count} elementos): ${saved}`);
+          })();
+        case "importarBiblioteca":
+          return void (async () => {
+            const f = await openTextFile([{ name: "Biblioteca SmartEasyBIM", extensions: ["seblib", "json"] }]);
+            if (!f) return;
+            try {
+              const n = await importLibrary(f.content);
+              files.setMessage(`Biblioteca ${f.name} importada: ${n} elemento(s) novo(s); os que já existiam foram atualizados.`);
+            } catch (e) {
+              files.setMessage(`Não foi possível importar: ${e instanceof Error ? e.message : e}`);
+            }
+          })();
+        case "vincularIfc":
+          chooseTool({ kind: "vinculos" });
+          return void addLinks();
+        case "abrirProjeto":
+          return void files.open();
+        case "salvarProjeto":
+          return void files.save();
+        case "salvarProjetoComo":
+          return void files.saveAs();
+        case "exportarIfc":
+          return void files.exportIfc(false);
+        case "limparCache":
+          return void (async () => {
+            const list = await cacheList();
+            if (!list.length) return window.alert("O cache de modelos está vazio.");
+            const mb = list.reduce((t, e) => t + e.bytes, 0) / 1024 ** 2;
+            const names = list.map((e) => `• ${e.name}`).join("\n");
+            if (!window.confirm(`Cache de modelos: ${list.length} IFC(s), cerca de ${mb.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} MB.\n\n${names}\n\nOs IFCs voltam a ser processados na próxima abertura. Limpar?`)) return;
+            await cacheClear();
+            window.alert("Cache de modelos limpo.");
+          })();
+        case "desfazer":
+          return store.undo();
+        case "refazer":
+          return store.redo();
+        case "temaClaro":
+          return setTheme("claro");
+        case "temaEscuro":
+          return setTheme("escuro");
+        case "cores":
+          return setColorMode((m) => (m === "disciplina" ? "ifc" : "disciplina"));
+        case "vistaPlanta":
+          return setView("planta");
+        case "vista3d":
+          return setView("3d");
+        case "enquadrar":
+          if (view === "3d") viewerRef.current?.fitTo();
+          else setFitSignal((n) => n + 1);
+          return;
+        case "corte":
+          setView("3d");
+          setSectionOpen((o) => !(o && view === "3d"));
+          return;
+        case "exportarIfcDisciplinas":
+          return void files.exportIfc(true);
+        case "novaFolha":
+          sheetActionRef.current?.("nova");
+          return;
+        case "folhasPlantas":
+          sheetActionRef.current?.("plantas");
+          return;
+        case "removerCortes":
+          viewerRef.current?.setExtraClip(null);
+          setExtraClip(false);
+          return;
+        case "propriedades":
+          // Mostra/oculta a paleta de propriedades (abre a coluna esquerda se estiver fechada).
+          if (!leftOpen) {
+            setLeftOpen(true);
+            setPropsOpen(true);
+          } else setPropsOpen((o) => !o);
+          return;
+      }
+    },
+    [handleOpen, handleSample, files, view, leftOpen, addLinks, chooseTool],
+  );
+
+  const pressed: Partial<Record<ActionId, boolean>> = {
+    temaClaro: theme === "claro",
+    temaEscuro: theme === "escuro",
+    cores: colorMode === "disciplina",
+    vistaPlanta: view === "planta",
+    vista3d: view === "3d",
+    corte: view === "3d" && (sectionOpen || sectionActive),
+    propriedades: leftOpen && propsOpen,
+    removerCortes: false,
+  };
+
+  // Mensagens dos arquivos de projeto somem sozinhas.
+  useEffect(() => {
+    if (!files.message) return;
+    const t = setTimeout(() => files.setMessage(null), 6000);
+    return () => clearTimeout(t);
+  }, [files.message, files.setMessage]);
+
+  // ---- Menus Criar / Modificar / Geral -------------------------------------------------
+  const [extraClip, setExtraClip] = useState(false);
+  const storeyLevel = model?.storeyLevels.find((s) => s.name === storey)?.level ?? 0;
+  const storeyHeight = useMemo(() => {
+    const above = (model?.storeyLevels ?? []).map((s) => s.level).filter((l) => l > storeyLevel + 0.5).sort((a, b) => a - b)[0];
+    return above != null ? above - storeyLevel : 3;
+  }, [model, storeyLevel]);
+  // ---- Abrir vistas ----------------------------------------------------------------------
+  // Planta do pavimento aberta: seção (trabalho/documentação) e tipo (piso/teto) pela chave.
+  const floorPlan = parsePlanKey(planKey);
+  const planTypeOpen: PlanType = floorPlan?.type ?? "piso";
+  const subLevel = subByStorey[storey] ?? 0;
+  const floorEntry = floorEntries.find((f) => f.storey === storey && f.sub === subLevel) ?? null;
+  const activeViewDefRaw: ViewDef | null = floorPlan
+    ? floorPlanOf(store.views, floorPlan.section, floorPlan.type, storey, floorEntry?.sub ?? 0, floorEntry?.levelLabel ?? undefined)
+    : resolveView(planKey.slice(5));
+  // A planta de pavimento ainda não gravada é montada de novo a cada renderização: sem esta
+  // âncora (mesmo objeto enquanto o conteúdo não muda), qualquer clique refazia o corte e a
+  // projeção do pavimento inteiro.
+  const viewAnchor = useRef<{ key: string; v: ViewDef | null }>({ key: "", v: null });
+  const viewKey = activeViewDefRaw ? JSON.stringify(activeViewDefRaw) : "";
+  if (viewKey !== viewAnchor.current.key) viewAnchor.current = { key: viewKey, v: activeViewDefRaw };
+  const activeViewDef = viewAnchor.current.v;
+  /** Faixa de visualização da planta de pavimento aberta (nível base, abaixo e acima). */
+  const planRange = useMemo(
+    () => (planModel && activeViewDef && floorPlan ? planRangeOf(activeViewDef, planModel.elements, planModel.storeyLevels) : undefined),
+    [planModel, activeViewDef, floorPlan?.section, floorPlan?.type],
+  );
+  // ---- Filtros -------------------------------------------------------------
+  const visibleElements = useMemo<ElementInfo[]>(() => {
+    if (!model) return [];
+    const q = filters.search.trim().toLowerCase();
+    // Vista 3D de documentação: só as disciplinas do projeto, as de referência e o fundo.
+    const doc3d = view === "3d" && view3dDef?.section === "documentacao" ? viewFilter(view3dDef, store.disciplines) : null;
+    const hidden = hiddenFor(view === "3d" ? view3dDef : view === "planta" ? activeViewDef : null);
+    return allElements.filter((e) => {
+      if (hidden.has(e.expressID)) return false;
+      if (doc3d && !doc3d.show.has(e.discipline)) return false;
+      if (filters.hiddenDisciplines.has(e.discipline)) return false;
+      if (filters.hiddenStoreys.has(e.storey ?? NO_STOREY)) return false;
+      if (filters.systems.size && !e.systems.some((s) => filters.systems.has(s))) return false;
+      if (q) {
+        const hay = `${e.name} ${e.objectType ?? ""} ${getTypeLabel(e.ifcType)} ${e.ifcType} ${e.size ?? ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [model, allElements, filters, view, view3dDef, store.disciplines, hiddenFor, activeViewDef]);
+
+  useEffect(() => {
+    if (!model) return;
+    const all = visibleElements.length === allElements.length;
+    viewerRef.current?.setVisible(all ? null : new Set(visibleElements.map((e) => e.expressID)));
+  }, [model, allElements, visibleElements]);
+
+  /** Nome completo da aba (dica ao passar o mouse; as abas encolhem quando falta espaço). */
+  const viewTabTitle = (v: string) =>
+    v === "planta"
+      ? activeViewDef && planKey.startsWith("view:")
+        ? activeViewDef.name
+        : `${planTypeOpen === "teto" ? "Planta de teto" : "Planta de piso"} · ${storey}${floorEntry?.levelLabel ? ` (${floorEntry.levelLabel})` : ""}`
+      : v === "3d"
+        ? "Vista 3D"
+        : v === "prancha"
+          ? "Prancha"
+          : "Fluxograma";
+  /** Ids ocultos na planta aberta (visibilidade da vista e geral). */
+  const planHidden = useMemo(() => hiddenFor(activeViewDef), [hiddenFor, activeViewDef]);
+  /** Grava a vista (as plantas de documentação passam a existir no projeto na primeira alteração). */
+  const updateView = useCallback(
+    (def: ViewDef) => store.setViews((l) => (l.some((x) => x.id === def.id) ? l.map((x) => (x.id === def.id ? def : x)) : [...l, def]), def.id),
+    [store],
+  );
+  const open3D = useCallback(
+    (v: ViewDef) => {
+      setView("3d");
+      setView3dId(v.id);
+      setTimeout(() => {
+        const vw = viewerRef.current;
+        if (!vw) return;
+        vw.setExtraClip(v.clip?.length ? v.clip : null);
+        setExtraClip(!!v.clip?.length);
+        if (v.eye && v.target) vw.setView(v.eye, v.target);
+        else if (v.frame) vw.fitBounds(v.frame.min, v.frame.max);
+      }, 60);
+    },
+    [],
+  );
+  const openViewDef = useCallback(
+    (v: ViewDef) => {
+      if (v.kind === "3d") return open3D(v);
+      if (v.kind === "fluxograma") return openFlowRef.current(v);
+      if (v.storey && model?.storeys.includes(v.storey)) setStorey(v.storey);
+      const fp = parseFloorPlanId(v.id);
+      if (fp) {
+        setSubByStorey((m) => ({ ...m, [fp.storey]: fp.sub }));
+        setPlanKey(PLAN_PREFIX[fp.section][fp.type]);
+      } else setPlanKey(`view:${v.id}`);
+      setView("planta");
+    },
+    [open3D, model],
+  );
+  const newSheet = useCallback(
+    (viewIds: string[] = [], format: SheetFormat = "A1"): SheetDef => {
+      const n = store.sheets.length + 1;
+      const s: SheetDef = {
+        id: newSheetId(),
+        name: `Folha ${String(n).padStart(2, "0")}`,
+        format,
+        titleBlockId: titleBlockById(defaultTitleBlockId())?.id ?? null,
+        info: { projeto: (fileName ?? "").replace(/\.(ifc|sebmod)$/i, ""), conteudo: "", responsavel: "", data: new Date().toLocaleDateString("pt-BR"), revisao: "R00", folha: String(n).padStart(2, "0") },
+        viewports: viewIds.map((viewId) => ({ viewId })),
+      };
+      store.setSheets((l) => [...l, s]);
+      return s;
+    },
+    [store, fileName],
+  );
+  const openSheet = useCallback(
+    (id: string) => {
+      setSheetId(id);
+      chooseTool({ kind: "pranchas" });
+    },
+    [chooseTool],
+  );
+  const openKey = useCallback(
+    (key: string) => {
+      // Pavimento: abre a planta de piso de Trabalho (piso/teto e seção pelos botões da barra).
+      const fk = parseFloorKey(key);
+      if (fk) {
+        setStorey(fk.storey);
+        setSubByStorey((m) => ({ ...m, [fk.storey]: fk.sub }));
+        setPlanKey("trab");
+        setView("planta");
+        return;
+      }
+      if (key.startsWith("sheet:")) return openSheet(key.slice(6));
+      const v = resolveView(key.slice(5));
+      if (v) openViewDef(v);
+    },
+    [resolveView, openViewDef, openSheet],
+  );
+  const addToSheet = useCallback(
+    (viewId: string, target: string | null) => {
+      if (target == null) {
+        const s = newSheet([viewId]);
+        return openSheet(s.id);
+      }
+      store.setSheets((l) => l.map((x) => (x.id === target && !x.viewports.some((vp) => vp.viewId === viewId) ? { ...x, viewports: [...x.viewports, { viewId }] } : x)));
+      openSheet(target);
+    },
+    [store, newSheet, openSheet],
+  );
+  // Folha aberta sem folha escolhida: a primeira, ou uma nova com a planta de documentação do pavimento.
+  useEffect(() => {
+    if (view !== "prancha" || !model || activeSheet) return;
+    if (store.sheets.length) setSheetId(store.sheets[0].id);
+    else if (storey) setSheetId(newSheet([docPlanOf(store.views, storey).id]).id);
+  }, [view, model, activeSheet, store.sheets, storey, store.views, newSheet]);
+  // Imagens das vistas 3D colocadas na folha.
+  useEffect(() => {
+    if (view !== "prancha" || !activeSheet || !viewerRef.current) return;
+    const missing = activeSheet.viewports.map((vp) => resolveView(vp.viewId)).filter((v): v is ViewDef => !!v && v.kind === "3d" && !snapshots.has(v.id));
+    if (!missing.length) return;
+    const t = setTimeout(() => {
+      const next = new Map(snapshots);
+      for (const v of missing) {
+        const f = viewFilter(v, store.disciplines);
+        const visible = v.section === "documentacao" ? new Set(allElements.filter((e) => f.show.has(e.discipline)).map((e) => e.expressID)) : null;
+        next.set(v.id, viewerRef.current!.snapshotView({ ...v, visible }));
+      }
+      setSnapshots(next);
+    }, 80);
+    return () => clearTimeout(t);
+  }, [view, activeSheet, resolveView, snapshots, store.disciplines, allElements]);
+  // Arrastar uma vista na folha.
+  const moveViewport = useCallback(
+    (viewId: string, center: [number, number]) => {
+      if (!activeSheet) return;
+      store.setSheets((l) => l.map((x) => (x.id === activeSheet.id ? { ...x, viewports: x.viewports.map((vp) => (vp.viewId === viewId ? { ...vp, pos: center } : vp)) } : x)));
+    },
+    [store, activeSheet],
+  );
+  const showCutIn3D = useCallback(
+    (v: ViewDef) => {
+      if (!v.cut || !model) return;
+      const f = sectionFrame(model.coordinates, v.cut);
+      viewerRef.current?.setExtraClip([{ normal: f.W, point: f.o }]);
+      setExtraClip(true);
+      setView3dId(null);
+      setView("3d");
+    },
+    [model],
+  );
+
+  sheetActionRef.current = (a) => {
+    if (!model) return;
+    if (a === "nova") return openSheet(newSheet().id);
+    // Uma folha por pavimento com a planta de documentação (pula as que já estão em alguma folha).
+    const used = new Set(store.sheets.flatMap((sh) => sh.viewports.map((vp) => vp.viewId)));
+    const todo = model.storeys.filter((st) => !used.has(docPlanOf(store.views, st).id));
+    if (!todo.length) return files.setMessage("Todas as plantas de documentação já estão em folhas.");
+    const created: SheetDef[] = todo.map((st, i) => {
+      const n = store.sheets.length + i + 1;
+      return {
+        id: newSheetId(),
+        name: `Planta ${st}`,
+        format: "A1",
+        titleBlockId: titleBlockById(defaultTitleBlockId())?.id ?? null,
+        info: { projeto: (fileName ?? "").replace(/\.(ifc|sebmod)$/i, ""), conteudo: `Planta — ${st}`, responsavel: "", data: new Date().toLocaleDateString("pt-BR"), revisao: "R00", folha: String(n).padStart(2, "0") },
+        viewports: [{ viewId: docPlanOf(store.views, st).id }],
+      };
+    });
+    store.setSheets((l) => [...l, ...created]);
+    openSheet(created[0].id);
+    files.setMessage(`${created.length} folha(s) criada(s), uma por pavimento.`);
+  };
+
+  /** Fecha uma aba: o conteúdo dela volta ao padrão (planta de trabalho, modelo completo sem recortes, sem folha). */
+  const closeTab = (t: TabView) => {
+    if (t === "planta") setPlanKey("trab");
+    if (t === "3d") {
+      setView3dId(null);
+      viewerRef.current?.setExtraClip(null);
+      setExtraClip(false);
+    }
+    if (t === "prancha" && tool.kind === "pranchas") chooseTool({ kind: "propriedades" });
+    if (t === "fluxograma") setFlowId(null);
+    const left = TABS.filter((x) => x !== t && !closedTabs.includes(x) && (x !== "fluxograma" || !!flowDef));
+    setClosedTabs((c) => [...new Set([...c, t])]);
+    if (view === t) setView(left[0] ?? "vazio");
+  };
+  const openTab = (t: TabView) => {
+    if (t === "prancha") chooseTool({ kind: "pranchas" });
+    else if (t === "fluxograma") openFlows();
+    else setView(t);
+    if (t === "3d") setTimeout(() => viewerRef.current?.fitTo(), 60);
+  };
+
+  const draftView = activeViewDef && view === "planta" && !(activeViewDef.kind === "planta" && activeViewDef.section === "trabalho") ? activeViewDef.id : null;
+  const draft = useDraftTool({
+    cmd: tool.kind === "desenho" ? tool.cmd : "linha",
+    n: tool.n,
+    store,
+    storey,
+    level: storeyLevel,
+    storeyHeight,
+    cs: (model ?? hostModel)?.coordinates ?? IDENTITY_CS,
+    georef,
+    selection,
+    setSelection,
+    boundsOf: (ids) => viewerRef.current?.getBounds(ids) ?? null,
+    ceilingAt: (p) => viewerRef.current?.castRay(p, [0, 1, 0], 20, (n, id) => n[1] < -0.7 && ["IFCSLAB", "IFCROOF", "IFCCOVERING"].includes(elementById.get(id)?.ifcType ?? ""), true)?.point[1] ?? null,
+    onCreateView: openViewDef,
+    draftView,
+    cutHeight: activeViewDef?.cutHeight ?? editorCut,
+    onDone: () => chooseTool({ kind: "propriedades" }),
+    onNotice: (msg) => files.setMessage(msg),
+    isSection: activeViewDef?.kind === "corte",
+  });
+  // Arquitetura e estrutura: desenho na planta do pavimento aberto.
+  const [archParams, setArchParamsState] = useState<ArchParams>(readArchParams);
+  const setArchParams = useCallback((p: ArchParams) => {
+    setArchParamsState(p);
+    saveArchParams(p);
+  }, []);
+  const archStorey = activeViewDef?.storey ?? storey;
+  const archLevels = useMemo(() => {
+    if (!model) return { baseZ: 0, nextZ: 3 };
+    const { z, next } = archStoreyZ(model.storeyLevels, archStorey, model.coordinates);
+    const base = planRange?.type === "piso" ? model.coordinates.worldToIfc([0, planRange.base, 0])[2] : z;
+    return { baseZ: base, nextZ: Math.max(next, base + 0.5) };
+  }, [model, archStorey, planRange]);
+  const archTool = useArchTool({
+    kind: tool.kind === "arq" ? tool.elem : "parede",
+    structural: tool.kind === "arq" && !!tool.structural,
+    params: archParams,
+    store,
+    storey: archStorey,
+    baseZ: archLevels.baseZ,
+    nextZ: archLevels.nextZ,
+    onNotice: (msg) => files.setMessage(msg),
+  });
+  const planTool = tool.kind === "desenho" ? draft.tool : tool.kind === "arq" ? archTool : null;
+
+  // Medição no 3D: cliques no modelo (com encaixe), Enter ou duplo clique encerra.
+  const measuring3d = tool.kind === "desenho" && isMeasureCmd(tool.cmd) && view === "3d";
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  useEffect(() => {
+    const vw = viewerRef.current;
+    if (!vw) return;
+    vw.setMeasureMode(measuring3d ? { onClick: (p) => draftRef.current.click3d(p), onFinish: () => draftRef.current.finish3d() } : null);
+    if (!measuring3d) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key === "Enter" && !(t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT"))) draftRef.current.finish3d();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [measuring3d]);
+  useEffect(() => {
+    viewerRef.current?.setMeasures(tool.kind === "desenho" && isMeasureCmd(tool.cmd) && view === "3d" ? draft.measures3d : [], measuring3d ? draft.pending3d : null);
+  }, [draft.measures3d, draft.pending3d, measuring3d, tool, view]);
+
+  // Esc: encerra o comando em andamento (locar, traçar, desenhar, modificar) e volta a Selecionar;
+  // já em Selecionar, limpa a seleção. Em campos de texto, o Esc é do campo.
+  const escRef = useRef<() => void>(() => {});
+  escRef.current = () => {
+    if (tool.kind === "desenho") {
+      if (isCreateCmd(tool.cmd)) draft.tool.finish(); // poligonal em andamento é gravada
+      return chooseTool({ kind: "propriedades" });
+    }
+    if (tool.kind === "locacao" || tool.kind === "tracado") return chooseTool({ kind: "propriedades" });
+    if (tool.kind === "arq") {
+      archTool.finish();
+      return chooseTool({ kind: "propriedades" });
+    }
+    setSelection([]);
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      // Deixa os painéis tratarem o Esc antes (ex.: o traçado grava o trecho em andamento).
+      setTimeout(() => escRef.current(), 0);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  // ---- Mover a seleção junto com o que está ligado a ela (setas do teclado e botão direito) ----------
+  const moveKeyBlocked = useRef(true);
+  moveKeyBlocked.current = tool.kind !== "propriedades" || !(view === "planta" || view === "3d") || selection.length === 0;
+  const moveRef = useRef<(d: Vec3, label: string) => void>(() => {});
+  moveRef.current = (d, label) => {
+    // Arquitetura e estrutura: deslocamento em planta (e na vertical, no 3D com Alt).
+    const archSel = new Set(selection.map(archIdOf).filter((x): x is number => x != null));
+    if (archSel.size && model) {
+      const [dx, dy, dz] = model.coordinates.worldDirToIfc(d);
+      store.setArch((l) => l.map((e) => (archSel.has(e.id) ? raiseArch(moveArch(e, [dx, dy], l), dz) : e)));
+      if (selection.every((id) => archIdOf(id) != null)) {
+        files.setMessage(`Movido ${label}.`);
+        return;
+      }
+    }
+    const pointIds = new Set(store.points.map((p) => p.id));
+    const sel: MoveSelection = { points: [], segments: [] };
+    const seen = new Set<string>();
+    for (const id of selection) {
+      if (pointIds.has(id)) sel.points.push(id);
+      const runId = runIdOfElement(id);
+      const index = segmentIndexOf(id);
+      if (runId != null && index != null && !seen.has(`${runId}:${index}`)) {
+        seen.add(`${runId}:${index}`);
+        sel.segments.push({ runId, index });
+      }
+    }
+    if (!sel.points.length && !sel.segments.length) {
+      files.setMessage("Selecione pontos locados ou trechos para mover (os elementos dos IFCs de referência não podem ser movidos).");
+      return;
+    }
+    const res = moveNetwork(store.runs, store.points, sel, d);
+    if (!res.ok) {
+      files.setMessage(res.reason);
+      return;
+    }
+    store.mutate((cur) => ({
+      ...cur,
+      points: cur.points.map((p) => {
+        const np = res.points.get(p.id);
+        if (!np) return p;
+        // Altura do ponto acompanha o movimento vertical (teto: afastamento abaixo do teto).
+        const dyMm = Math.round(d[1] * 1000);
+        const teto = COMPONENT_BY_ID[p.componentId]?.mounting === "teto";
+        return { ...p, position: np, ...(dyMm ? { height: p.height + (teto ? -dyMm : dyMm) } : {}) };
+      }),
+      runs: cur.runs.map((r) => (res.runs.has(r.id) ? { ...r, vertices: res.runs.get(r.id)! } : r)),
+    }));
+    files.setMessage(`Movido ${label}: ${res.movedPoints} ponto(s) e ${res.movedRuns} trecho(s), com o que está ligado a eles.`);
+  };
+  /** Deslocamento em planta (coordenadas do projeto) convertido para a cena. */
+  const planDeltaToScene = useCallback(
+    (dx: number, dy: number): Vec3 => {
+      const cs = model?.coordinates;
+      if (!cs) return [dx, 0, -dy];
+      const o = cs.ifcToWorld([0, 0, 0]);
+      const b = cs.ifcToWorld([dx, dy, 0]);
+      return [b[0] - o[0], 0, b[2] - o[2]];
+    },
+    [model],
+  );
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      const keys: Record<string, [number, number, number]> = { ArrowRight: [1, 0, 0], ArrowLeft: [-1, 0, 0], ArrowUp: [0, 1, 0], ArrowDown: [0, -1, 0], PageUp: [0, 0, 1], PageDown: [0, 0, -1] };
+      const k = keys[e.key];
+      if (!k || moveKeyBlocked.current) return;
+      e.preventDefault();
+      // Passo: 50 mm; Shift = 10 mm (fino); Ctrl = 500 mm.
+      const step = e.shiftKey ? 0.01 : e.ctrlKey || e.metaKey ? 0.5 : 0.05;
+      const d = planDeltaToScene(k[0] * step, k[1] * step);
+      d[1] = k[2] * step;
+      const dir = k[2] ? (k[2] > 0 ? "para cima" : "para baixo") : e.key === "ArrowRight" ? "para +X" : e.key === "ArrowLeft" ? "para −X" : e.key === "ArrowUp" ? "para +Y" : "para −Y";
+      moveRef.current(d, `${Math.round(step * 1000)} mm ${dir}`);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [planDeltaToScene]);
+  // Ortogonal (botão ORTO / F8) e encaixes (F3): valem para a planta, o 3D e o editor de elementos.
+  useDrawAidsKeys();
+  const drawAids = useDrawAids();
+
+  // Teclado em todo o app: Ctrl+Z desfaz, Ctrl+Y (ou Ctrl+Shift+Z) refaz e Delete apaga a
+  // seleção direto (só os elementos criados no app; os dos IFCs não são apagados).
+  const keysRef = useRef({ store, selection, view, designing, files });
+  keysRef.current = { store, selection, view, designing, files };
+  useEffect(() => {
+    const typing = (t: EventTarget | null) => t instanceof HTMLElement && (/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName) || t.isContentEditable);
+    const onKey = (e: KeyboardEvent) => {
+      const k = keysRef.current;
+      if (e.defaultPrevented || typing(e.target) || k.designing) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      if (mod && key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        k.store.undo();
+      } else if (mod && (key === "y" || (key === "z" && e.shiftKey))) {
+        e.preventDefault();
+        k.store.redo();
+      } else if (e.key === "Delete" && !mod && k.view !== "fluxograma" && k.selection.length) {
+        e.preventDefault();
+        const n = deleteSelection(k.store, k.selection);
+        if (n) {
+          setSelection([]);
+          k.files.setMessage(deletedText(n));
+        } else k.files.setMessage("Elementos dos modelos IFC não podem ser apagados (são de terceiros, só leitura).");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  useEffect(() => {
+    if (viewerRef.current) viewerRef.current.ortho = drawAids.ortho;
+  }, [drawAids.ortho]);
+  // 3D: arrastar com o botão direito sobre um ponto ou trecho (em Selecionar) move a seleção.
+  const move3dAllowed = useRef(false);
+  move3dAllowed.current = tool.kind === "propriedades" && view === "3d";
+  useEffect(() => {
+    const v = viewerRef.current;
+    if (!v) return;
+    v.canMove = (id) => move3dAllowed.current && (segmentIndexOf(id) != null || (id < 0 && id > -800000) || archIdOf(id) != null);
+    v.onMoveBy = (d) => {
+      const fmt = (x: number) => x.toFixed(2).replace(".", ",");
+      moveRef.current(d, d[1] ? `${fmt(Math.abs(d[1]))} m ${d[1] > 0 ? "para cima" : "para baixo"}` : `${fmt(Math.hypot(d[0], d[2]))} m`);
+    };
+  }, []);
+  const pickMany = useCallback((ids: number[], additive: boolean) => setSelection((cur) => (additive ? [...new Set([...cur, ...ids])] : ids)), []);
+
+  const disc = toolDisc ? DISCIPLINE_TABS[toolDisc] : null;
+  const selectedOne = selection.length === 1 ? (elementById.get(selection[0]) ?? null) : null;
+  const viewer = viewerRef.current;
+  // Sem ferramenta ativa (seleção), o painel da direita some: as propriedades ficam na coluna esquerda.
+  const rightWidth = view === "fluxograma" && tool.kind === "propriedades" ? 380 : tool.kind === "propriedades" ? 0 : tool.kind === "pranchas" ? 400 : tool.kind === "programa" ? 620 : tool.kind === "perfil" ? 640 : 460;
+  const resolveCeiling = useMemo(() => (viewer && model ? makeCeilingResolver(viewer, elementById, model.storeyLevels) : null), [viewer, model, elementById]);
+  const slabAt = useMemo(() => (viewer && model ? makeSlabProbe(viewer, elementById, model.storeyLevels) : null), [viewer, model, elementById]);
+  const projectName = (fileName ?? "").replace(/\.(ifc|sebmod)$/i, "");
+
+  // ---- Fluxogramas -------------------------------------------------------------------------
+  const flowDef = flowId ? (store.views.find((v) => v.id === flowId && v.kind === "fluxograma" && v.flow) ?? null) : null;
+  const activeSystem: FlowSystem = flowDef?.flow ? flowSystem(flowDef.flow) : "eletrica";
+  const flowViewsOf = (sys: FlowSystem) => store.views.filter((v) => v.kind === "fluxograma" && v.flow && flowSystem(v.flow) === sys);
+  const flowViews = flowViewsOf(activeSystem);
+  const updateFlowOf = useCallback(
+    (id: string, fn: (f: FlowData) => FlowData, key: string | null = null) =>
+      store.setViews((l) => l.map((v) => (v.id === id && v.flow ? { ...v, flow: fn(v.flow) } : v)), key && `fluxo:${id}:${key}`),
+    [store],
+  );
+  const openFlowRef = useRef<(v: ViewDef) => void>(() => {});
+  openFlowRef.current = (v) => {
+    setFlowId(v.id);
+    setFlowSel(null);
+    setFlowMode({ kind: "sel" });
+    setClosedTabs((c) => c.filter((x) => x !== "fluxograma"));
+    setView("fluxograma");
+    setRightOpen(true);
+  };
+  const newFlowView = (sys: FlowSystem = activeSystem) => {
+    if (!model) return;
+    const n = flowViewsOf(sys).length;
+    const water = sys === "agua-fria";
+    const v: ViewDef = {
+      id: newFlowId("fluxo-"),
+      name: n ? `${water ? "Água fria" : "Fluxograma"} ${n + 1}` : water ? "Água fria · distribuição" : "Distribuição geral",
+      kind: "fluxograma",
+      section: "trabalho",
+      scale: 50,
+      flow: newFlow(water ? "hidraulica" : "eletrica", model.storeys, store.profile, sys),
+    };
+    store.setViews((l) => [...l, v]);
+    openFlowRef.current(v);
+  };
+  /** Exemplo: 2 torres com medição nos andares (substitui o perfil do empreendimento, se confirmado). */
+  const addFlowExample = () => {
+    if (store.profile?.floors.length && !window.confirm("O exemplo substitui o perfil do empreendimento atual. Continuar?")) return;
+    const water = activeSystem === "agua-fria";
+    const ex = water ? exampleTwoTowersWater() : exampleTwoTowersBusway();
+    store.setProfile(() => ex.profile, null);
+    const v: ViewDef = {
+      id: newFlowId("fluxo-"),
+      name: water ? "Exemplo · 2 torres, água fria" : "Exemplo · 2 torres, medição nos andares",
+      kind: "fluxograma",
+      section: "trabalho",
+      scale: 50,
+      flow: ex.flow,
+    };
+    store.setViews((l) => [...l, v]);
+    openFlowRef.current(v);
+  };
+  const openFlows = (sys?: FlowSystem) => {
+    if (!sys) return flowDef ? openFlowRef.current(flowDef) : flowViews.length ? openFlowRef.current(flowViews[0]) : newFlowView();
+    if (flowDef && activeSystem === sys) return openFlowRef.current(flowDef);
+    const list = flowViewsOf(sys);
+    return list.length ? openFlowRef.current(list[0]) : newFlowView(sys);
+  };
+  openFlowsRef.current = openFlows;
+  newFlowRef.current = newFlowView;
+  /** Quadros locados no modelo, com a carga instalada dos circuitos de cada um. */
+  const flowCtx = useMemo((): FlowContext => {
+    const boards = store.points
+      .filter((p) => COMPONENT_BY_ID[p.componentId]?.ifcType === "IFCELECTRICDISTRIBUTIONBOARD")
+      .map((p) => {
+        let loadVA = 0;
+        for (const c of store.circuits) if (c.panel === p.guid) for (const q of store.points) if (q.circuit === c.uid) loadVA += pointPowerVA(q, c.powerFactor);
+        return { guid: p.guid, tag: p.tag, storey: p.storey, loadVA };
+      });
+    return { boards };
+  }, [store.points, store.circuits]);
+  const flowIssues = useMemo(() => (flowDef?.flow ? checkFlow(flowDef.flow, flowCtx) : []), [flowDef, flowCtx]);
+  /** "Locar no modelo": abre a locação do quadro; o próximo quadro locado fica vinculado ao bloco. */
+  const pendingLocate = useRef<{ viewId: string; blockId: string; known: Set<number> } | null>(null);
+  const locateBlock = (blockId: string) => {
+    if (!flowDef) return;
+    pendingLocate.current = { viewId: flowDef.id, blockId, known: new Set(store.points.map((p) => p.id)) };
+    const b = flowDef.flow?.blocks.find((x) => x.id === blockId);
+    const st = b && flowDef.flow?.layout === "pavimentos" ? flowDef.flow.storeys.find((s) => s === (b ? blockStoreyOf(flowDef.flow!, b) : null)) : null;
+    if (st && model?.storeys.includes(st)) setStorey(st);
+    setClosedTabs((c) => c.filter((x) => x !== "planta"));
+    setView("planta");
+    chooseTool({ kind: "locacao", componentId: "quadro-distribuicao" }, "eletrica");
+    files.setMessage(`Clique na planta para locar o quadro ${b?.tag ?? ""}: ele fica vinculado ao fluxograma.`);
+  };
+  useEffect(() => {
+    const pend = pendingLocate.current;
+    if (!pend) return;
+    const fresh = store.points.find((p) => !pend.known.has(p.id) && COMPONENT_BY_ID[p.componentId]?.ifcType === "IFCELECTRICDISTRIBUTIONBOARD");
+    if (!fresh) return;
+    pendingLocate.current = null;
+    const v = store.views.find((x) => x.id === pend.viewId);
+    const b = v?.flow?.blocks.find((x) => x.id === pend.blockId);
+    if (!b) return;
+    updateFlowOf(pend.viewId, (f) => ({ ...f, blocks: f.blocks.map((x) => (x.id === b.id ? { ...x, pointGuid: fresh.guid } : x)) }));
+    if (b.tag) store.update([fresh.id], () => ({ tag: b.tag }));
+    files.setMessage(`Quadro ${b.tag} locado no ${fresh.storey ?? "modelo"} e vinculado ao fluxograma.`);
+  }, [store.points, store.views, updateFlowOf, store, files]);
+  const showBoard = (guid: string) => {
+    const p = store.points.find((x) => x.guid === guid);
+    if (!p) return;
+    if (p.storey && model?.storeys.includes(p.storey)) setStorey(p.storey);
+    setClosedTabs((c) => c.filter((x) => x !== "planta"));
+    setView("planta");
+    setSelection([p.id]);
+  };
+  const placeFlowOnSheet = () => {
+    if (!flowDef) return;
+    if (flowDef.section !== "documentacao") {
+      updateView({ ...flowDef, section: "documentacao" });
+      files.setMessage(`"${flowDef.name}" passou para Documentação (só as vistas de documentação vão para as folhas).`);
+    }
+    // Escala que cabe na folha (área útil aproximada de cada formato, em mm); folha nova vai para A0 se precisar.
+    const AREA: Record<SheetFormat, [number, number]> = { A0: [915, 745], A1: [585, 510], A2: [350, 350], A3: [350, 185], A4: [235, 105] };
+    const bb = boundsOf(flowPrims(flowDef.flow!, { legend: true }));
+    const w = bb ? bb.max[0] - bb.min[0] : 0;
+    const h = bb ? bb.max[1] - bb.min[1] : 0;
+    const SCALES = [25, 50, 75, 100, 125, 150, 200, 250];
+    const fit = (fmt: SheetFormat) => SCALES.find((k) => (w * 1000) / k <= AREA[fmt][0] && (h * 1000) / k <= AREA[fmt][1]) ?? 250;
+    const target = sheetId ?? store.sheets[0]?.id ?? null;
+    const fmt: SheetFormat = target ? (store.sheets.find((x) => x.id === target)?.format ?? "A1") : "A1";
+    let scale = Math.max(flowDef.scale, fit(fmt));
+    if (!target && scale > 100 && fit("A0") <= 100) {
+      scale = Math.max(flowDef.scale, fit("A0"));
+      updateView({ ...flowDef, section: "documentacao", scale });
+      const sh = newSheet([flowDef.id], "A0");
+      files.setMessage(`"${flowDef.name}" foi para uma folha A0 em 1:${scale}, para caber inteiro.`);
+      return openSheet(sh.id);
+    }
+    if (scale !== flowDef.scale) {
+      updateView({ ...flowDef, section: "documentacao", scale });
+      files.setMessage(`"${flowDef.name}" em 1:${scale} para caber na folha ${fmt}.`);
+    }
+    addToSheet(flowDef.id, target);
+  };
+
+  const rightPanel = () => {
+    if (tool.kind === "visibilidade")
+      return (
+        <div className="panel-body">
+          <VisibilityEditor
+            title="Visibilidade geral"
+            hint="Desmarque para ocultar em todas as vistas (plantas, cortes, 3D) e nas folhas. Para ocultar só numa vista, use as Propriedades da vista (sem nada selecionado)."
+            rules={store.visibility}
+            onChange={(r) => store.setVisibility(() => r)}
+            catalog={visibilityCatalog}
+          />
+        </div>
+      );
+    if (tool.kind === "perfil")
+      return (
+        <PerfilPanel
+          profile={store.profile}
+          onChange={store.setProfile}
+          modelStoreys={
+            model
+              ? model.storeyLevels.map((s) => ({ name: s.name, elevation: Math.round(model.coordinates.worldToIfc([0, s.level, 0])[2] * 1000) / 1000 }))
+              : []
+          }
+          flowCount={store.views.filter((v) => v.kind === "fluxograma").length}
+          onApplyToFlows={() => {
+            const p = store.profile;
+            if (!p) return;
+            store.setViews((l) => l.map((v) => (v.kind === "fluxograma" && v.flow ? { ...v, flow: applyProfile(v.flow, p) } : v)));
+            files.setMessage("Perfil do empreendimento aplicado aos fluxogramas.");
+          }}
+        />
+      );
+    if (view === "fluxograma" && flowDef?.flow && tool.kind === "propriedades")
+      return (
+        <FlowPanel
+          view={flowDef}
+          flow={flowDef.flow}
+          update={(fn, key) => updateFlowOf(flowDef.id, fn, key ?? null)}
+          onRename={(name) => updateView({ ...flowDef, name })}
+          onSection={(section) => updateView({ ...flowDef, section })}
+          onScale={(scale) => updateView({ ...flowDef, scale })}
+          hasProfile={!!store.profile?.floors.length}
+          onApplyProfile={() => store.profile && updateFlowOf(flowDef.id, (f) => applyProfile(f, store.profile!))}
+          onEditProfile={() => chooseTool({ kind: "perfil" })}
+          sel={flowSel}
+          setSel={setFlowSel}
+          issues={flowIssues}
+          ctx={flowCtx}
+          modelStoreys={model?.storeys ?? []}
+          onLocate={locateBlock}
+          onShowBoard={showBoard}
+        />
+      );
+    if (tool.kind === "calc") return <CalcPanel selected={selectedOne} which={tool.which} />;
+    if (tool.kind === "biblioteca")
+      return (
+        <BibliotecaPanel
+          points={store.points}
+          choices={store.choices}
+          onChoices={store.setChoices}
+          onEditDesign={(d) => setDesigning(d ?? newDesign(undefined, newDesignUid()))}
+          onPlace={(componentId) => {
+            if (!model) {
+              window.alert("Abra um modelo IFC para locar a família.");
+              return;
+            }
+            chooseTool({ kind: "locacao", componentId }, null);
+          }}
+        />
+      );
+    if (tool.kind === "programa" && tool.section === "tipos" && !(model && viewer && resolveCeiling))
+      return <ProgramaTiposOnly onSection={(section) => chooseTool({ kind: "programa", section })} />;
+    if (!model || !viewer) return <div className="empty-side">Abra um modelo IFC em Arquivo › Abrir IFC.</div>;
+    switch (tool.kind) {
+      case "propriedades":
+        return null;
+      case "gestao":
+        return (
+          <GestaoPanel
+            store={store}
+            modelDisciplines={modelDisciplines}
+            sheetDefaults={sheetDefaults}
+            onOpenSheet={openSheet}
+            makeFile={makeCdeFile}
+            onLinkFromCde={linkFromCde}
+            links={store.links}
+            linkStatus={linkStatus}
+          />
+        );
+      case "arq":
+        return (
+          <ArqPanel
+            kind={tool.elem}
+            structural={!!tool.structural}
+            params={archParams}
+            onChange={setArchParams}
+            storey={archStorey}
+            storeyHeight={archLevels.nextZ - archLevels.baseZ}
+            count={store.arch.filter((e) => e.kind === tool.elem).length}
+          />
+        );
+      case "locacao":
+        return (
+          <LocacaoPanel
+            model={model}
+            fileName={fileName}
+            store={store}
+            viewer={viewer}
+            elementById={elementById}
+            selection={selection}
+            onSelect={selectPoints}
+            systems={allSystems}
+            groups={disc?.groups}
+            preset={{ componentId: tool.componentId, n: tool.n }}
+          />
+        );
+      case "tracado":
+        return (
+          <TracadoPanel
+            model={model}
+            fileName={fileName}
+            store={store}
+            viewer={viewer}
+            selection={selection}
+            onSelect={selectPoints}
+            systems={allSystems}
+            typeIds={disc?.runs}
+            elementById={elementById}
+            preset={{ typeId: tool.typeId, n: tool.n }}
+            storey={storey}
+            onConfigureInstalls={() => chooseTool({ kind: "instalacoes" }, toolDisc)}
+          />
+        );
+      case "instalacoes": {
+        const counts: Partial<Record<InstallMode, number>> = {};
+        for (const r of store.runs) if (isConduitRun(r) || r.install) counts[(r.install ?? DEFAULT_INSTALL).mode] = (counts[(r.install ?? DEFAULT_INSTALL).mode] ?? 0) + 1;
+        return (
+          <InstalacoesPanel
+            settings={store.installSettings}
+            onChange={store.setInstallSettings}
+            counts={counts}
+            onApply={() => {
+              if (!slabAt) return;
+              // Todas as redes com forma de instalação (as de altura livre ficam onde estão).
+              const conduits = store.runs.filter((r) => (isConduitRun(r) || r.install) && r.install?.mode !== "livre");
+              const changes = new Map(
+                conduits.map((r) => {
+                  const name = storeyAt(runFloorProbeY(r), model.storeyLevels);
+                  const floorY = model.storeyLevels.find((l) => l.name === name)?.level ?? 0;
+                  const mid = r.vertices[Math.floor(r.vertices.length / 2)];
+                  return [r.id, applyInstall(r, r.install ?? DEFAULT_INSTALL, { floorY, slabUnderside: slabAt(mid[0], mid[2], floorY), settings: store.installSettings, points: store.points })];
+                }),
+              );
+              store.updateRuns([...changes.keys()], (r) => changes.get(r.id)!);
+              files.setMessage(`${changes.size} trecho(s) levados às cotas das medidas atuais.`);
+            }}
+          />
+        );
+      }
+      case "circuitos":
+        return <CircuitosPanel model={model} fileName={fileName} store={store} selection={selection} onSelect={selectPoints} />;
+      case "quantitativos":
+        return (
+          <QuantitiesPanel
+            elements={visibleElements}
+            assemblies={(() => {
+              const visible = new Set(visibleElements.map((e) => e.expressID));
+              return store.points.filter((p) => p.assembly && visible.has(p.id)).map((p) => p.assembly!);
+            })()}
+            fileName={fileName}
+            onSelect={selectAndFrame}
+          />
+        );
+      case "interferencias":
+        return (
+          <ClashPanel
+            elements={visibleElements}
+            elementById={elementById}
+            fileName={fileName}
+            meshes={meshById}
+            ignorePair={connected}
+            onFocus={focusClash}
+            onClear={clearHighlight}
+          />
+        );
+      case "desenho":
+        return (
+          <DesenhoPanel
+            cmd={tool.cmd}
+            ctl={draft}
+            store={store}
+            selection={selection}
+            setSelection={setSelection}
+            hasClip={extraClip}
+            onClearClip={() => onAction("removerCortes")}
+            elementLabel={(id) => {
+              const e = elementById.get(id);
+              return e ? `${e.name || e.ifcType}` : `Elemento ${id}`;
+            }}
+          />
+        );
+      case "coordenadas":
+        return <CoordenadasPanel fromIfc={hostModel!.georef} settings={store.georef} effective={georef} onChange={store.setGeoref} />;
+      case "vinculos":
+        return (
+          <VinculosPanel
+            hostName={fileName}
+            host={hostModel!}
+            links={store.links}
+            data={linkData}
+            status={linkStatus}
+            onAdd={() => void addLinks()}
+            onChange={(id, patch) => store.setLinks((l) => l.map((x) => (x.id === id ? { ...x, ...patch } : x)))}
+            onRemove={removeLink}
+            onRelocate={(id) => void relocateLink(id)}
+          />
+        );
+      case "programa":
+        if (!resolveCeiling) return null;
+        return (
+          <ProgramaPanel
+            section={tool.section}
+            model={model}
+            store={store}
+            viewer={viewer}
+            elementById={elementById}
+            resolveCeiling={resolveCeiling}
+            onSelect={selectPoints}
+            onSection={(section) => chooseTool({ kind: "programa", section })}
+          />
+        );
+      case "pranchas":
+        if (!activeSheet || !sheetRender) return <div className="empty-side">Abra a vista Prancha para montar a folha.</div>;
+        return (
+          <FolhaPanel
+            docName={(() => {
+              if (!hasCoding(store.cde.coding)) return null;
+              const d = sheetDefaults(activeSheet);
+              const m = sheetDocMeta(activeSheet, store.sheets.indexOf(activeSheet), d.nivel, d.disciplina);
+              return `${docCode(store.cde.coding, m)}_${m.revisao}`;
+            })()}
+            sheet={activeSheet}
+            onChange={(sh) => store.setSheets((l) => l.map((x) => (x.id === sh.id ? sh : x)), sh.id)}
+            docViews={docViews}
+            rendered={sheetRender.result}
+            drawings={sheetRender.drawings}
+            fileName={fileName}
+            georef={georef}
+            moveMode={moveMode}
+            onMoveMode={setMoveMode}
+            onOpenView={(id) => {
+              const v = resolveView(id);
+              if (v) openViewDef(v);
+            }}
+            onRefreshImage={(id) =>
+              setSnapshots((m) => {
+                const n = new Map(m);
+                n.delete(id);
+                return n;
+              })
+            }
+          />
+        );
+    }
+  };
+
+  return (
+    <div className="app">
+      <header className="app-header">
+        <div className="brand">
+          <LogoMark size={28} />
+          <span className="wordmark">
+            Smart<span>Easy</span>BIM
+          </span>
+        </div>
+        <nav className="top-nav" aria-label="Disciplinas">
+          {TOP_TABS.map((t) => (
+            <button key={t.id} className={`top-tab ${top === t.id ? "active" : ""}`} onClick={() => chooseTop(t.id)}>
+              {t.label}
+            </button>
+          ))}
+        </nav>
+        <div className="spacer" />
+        <div className="project-title" title={fileName ?? ""}>
+          {model ? (
+            <>
+              {projectName}
+              {storey && <span className="muted-on-dark"> · {storeyView ?? storey}</span>}
+            </>
+          ) : (
+            <span className="muted-on-dark">Nenhum modelo aberto</span>
+          )}
+        </div>
+        <button
+          className="icon-btn on-dark"
+          onClick={() => setTheme(theme === "claro" ? "escuro" : "claro")}
+          title={theme === "claro" ? "Fundo preto" : "Fundo branco"}
+          aria-label="Alternar cor de fundo"
+        >
+          <Icon name={theme === "claro" ? "lua" : "sol"} size={18} />
+        </button>
+        <button className="btn save" onClick={files.save} disabled={!model}>
+          Salvar{store.dirty && !store.isEmpty ? " •" : ""}
+        </button>
+      </header>
+
+      <Ribbon
+        tab={top}
+        tool={tool}
+        hasModel={!!model}
+        pressed={pressed}
+        disabledActions={{ desfazer: !store.canUndo, refazer: !store.canRedo }}
+        hints={{ desfazer: "Desfazer (Ctrl+Z)", refazer: "Refazer (Ctrl+Y)" }}
+        onTool={(t) => chooseTool(t, top in DISCIPLINE_TABS ? (top as DisciplineTab) : null)} onAction={onAction} />
+
+      <main className="workspace" style={{ gridTemplateColumns: `${leftOpen ? 300 : 0}px minmax(0, 1fr) ${rightOpen ? rightWidth : 0}px` }}>
+        <aside className={`sidebar docks ${leftOpen ? "" : "collapsed"}`} aria-hidden={!leftOpen}>
+          {model && view === "fluxograma" && (
+            <section className="dock open flow-dock">
+              <div className="dock-body">
+                <FlowSidebar system={activeSystem} flows={flowViews} activeId={flowId} onOpen={(v) => openFlowRef.current(v)} onNew={() => newFlowView()} onExample={addFlowExample} mode={flowMode} setMode={setFlowMode} />
+              </div>
+            </section>
+          )}
+          {model && resolveCeiling && slabAt && view !== "fluxograma" && (
+            <section className={`dock ${propsOpen ? "open" : ""}`}>
+              <button className="dock-head" onClick={() => setPropsOpen(!propsOpen)} aria-expanded={propsOpen}>
+                <span className={`caret ${propsOpen ? "open" : ""}`}>▸</span> Propriedades
+              </button>
+              {propsOpen && selection.length === 0 && (view === "planta" || (view === "3d" && view3dDef)) && (
+                <div className="dock-body">
+                  <VistaPanel
+                    view={view === "3d" ? view3dDef : activeViewDef}
+                    workDisplay={{ ...workDisplay, planType: planTypeOpen }}
+                    onWorkDisplay={setWorkDisplay}
+                    storey={storey}
+                    projectDisciplines={store.disciplines}
+                    available={planAvailable}
+                    sheets={store.sheets}
+                    onChange={(v) => {
+                      updateView(v);
+                      if (v.kind === "3d") setSnapshots((m) => (m.has(v.id) ? new Map([...m].filter(([k]) => k !== v.id)) : m));
+                    }}
+                    onAddToSheet={(target) => {
+                      const v = view === "3d" ? view3dDef : activeViewDef;
+                      if (v) addToSheet(v.id, target);
+                    }}
+                    onShow3D={() => activeViewDef && showCutIn3D(activeViewDef)}
+                    onSaveCamera={() => {
+                      if (!view3dDef || !viewerRef.current) return;
+                      const c = viewerRef.current.getCamera();
+                      updateView({ ...view3dDef, eye: c.eye, target: c.target, frame: undefined });
+                      setSnapshots((m) => new Map([...m].filter(([k]) => k !== view3dDef.id)));
+                    }}
+                  />
+                  {(view === "3d" ? view3dDef : activeViewDef) && (
+                    <VisibilityEditor
+                      title="Visibilidade nesta vista"
+                      hint="Desmarque para ocultar só nesta vista. O que estiver oculto na Visibilidade geral (Modelo › Visibilidade geral) some em todas."
+                      rules={(view === "3d" ? view3dDef : activeViewDef)!.hidden}
+                      onChange={(r) => {
+                        const v = (view === "3d" ? view3dDef : activeViewDef)!;
+                        updateView({ ...v, hidden: r });
+                      }}
+                      catalog={visibilityCatalog}
+                    />
+                  )}
+                </div>
+              )}
+              {propsOpen && !(selection.length === 0 && (view === "planta" || (view === "3d" && view3dDef))) && (
+                <div className="dock-body">
+                  {selection.length > 0 && (
+                    <HideSelectionBar
+                      count={selection.length}
+                      hasView={!!(view === "3d" ? view3dDef : view === "planta" ? activeViewDef : null)}
+                      onHide={(what, where) => {
+                        const els = selection.map((id) => elementById.get(id)).filter((e): e is ElementInfo => !!e);
+                        const values =
+                          what === "elements" ? [...new Set(selection.map(elementKey))] : what === "types" ? [...new Set(els.map((e) => e.ifcType))] : [...new Set(els.flatMap((e) => e.systems))];
+                        if (!values.length) return files.setMessage("Os elementos selecionados não têm sistema.");
+                        const target = view === "3d" ? view3dDef : view === "planta" ? activeViewDef : null;
+                        if (where === "view" && target) updateView({ ...target, hidden: addToRule(target.hidden, what, values) });
+                        else store.setVisibility((v: HideRules) => addToRule(v, what, values));
+                        setSelection([]);
+                        files.setMessage(`${what === "elements" ? "Elemento(s)" : what === "types" ? "Tipo(s)" : "Sistema(s)"} oculto(s) ${where === "view" && target ? "nesta vista" : "em todas as vistas"}. Para mostrar de novo: ${where === "view" && target ? "Propriedades da vista (sem seleção)" : "Modelo › Visibilidade geral"}.`);
+                      }}
+                    />
+                  )}
+                  <ParamsPanel
+                    selection={selection}
+                    elementById={elementById}
+                    store={store}
+                    model={model}
+                    getProperties={getProperties}
+                    resolveCeiling={resolveCeiling}
+                    slabAt={slabAt}
+                    systems={allSystems}
+                    onFrame={selectAndFrame}
+                    georef={georef}
+                  />
+                </div>
+              )}
+            </section>
+          )}
+          {model && (
+            <section className={`dock ${browserOpen ? "open" : ""}`}>
+              <button className="dock-head" onClick={() => setBrowserOpen(!browserOpen)} aria-expanded={browserOpen}>
+                <span className={`caret ${browserOpen ? "open" : ""}`}>▸</span> Navegador
+              </button>
+              {browserOpen && (
+                <div className="dock-body">
+                  <VistasBrowser
+                    floors={floorEntries}
+                    views={store.views}
+                    sheets={store.sheets}
+                    active={
+                      view === "planta"
+                        ? floorPlan
+                          ? floorKey(storey, subLevel)
+                          : planKey
+                        : view === "3d"
+                          ? view3dId
+                            ? `view:${view3dId}`
+                            : storeyView
+                              ? `3d:pav:${storeyView}`
+                              : "3d:geral"
+                          : view === "prancha" && sheetId
+                            ? `sheet:${sheetId}`
+                            : null
+                    }
+                    disciplines={store.disciplines}
+                    available={planAvailable}
+                    onDisciplines={store.setDisciplines}
+                    onOpen={openKey}
+                    onRename={(id, name) => {
+                      const v = resolveView(id);
+                      if (v) updateView({ ...v, name });
+                    }}
+                    onDelete={(key) => {
+                      if (key.startsWith("sheet:")) {
+                        const id = key.slice(6);
+                        store.setSheets((l) => l.filter((x) => x.id !== id));
+                        if (sheetId === id) setSheetId(null);
+                        return;
+                      }
+                      const id = key.slice(5);
+                      store.mutate((cur) => ({
+                        ...cur,
+                        views: cur.views.filter((v) => v.id !== id),
+                        drafts: cur.drafts.filter((d) => d.view !== id),
+                        sheets: cur.sheets.map((sh) => ({ ...sh, viewports: sh.viewports.filter((vp) => vp.viewId !== id) })),
+                      }));
+                      if (planKey === key) setPlanKey("trab");
+                      if (view3dId === id) setView3dId(null);
+                    }}
+                    onNewSheet={() => openSheet(newSheet().id)}
+                    storeys={model.storeys}
+                    storey3d={storeyView}
+                    onOpen3d={(st) => {
+                      setView3dId(null);
+                      chooseStorey(st);
+                      setView("3d");
+                    }}
+                  />
+                  {view !== "fluxograma" && (
+                    <Navigator
+                      elements={allElements}
+                      systems={allSystems}
+                      filters={filters}
+                      onChange={setFilters}
+                      visibleCount={visibleElements.length}
+                      onIsolate={isolateDiscipline}
+                      points={store.points}
+                      circuits={store.circuits}
+                      onCircuit={showCircuit}
+                    />
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+          {!model && <div className="empty-side">Abra um modelo IFC para navegar por vistas, pavimentos, disciplinas, sistemas e circuitos.</div>}
+        </aside>
+
+        <section className="center">
+          <div className="view-tabs">
+            <button className="icon-btn" onClick={() => setLeftOpen(!leftOpen)} title={leftOpen ? "Ocultar painel esquerdo" : "Mostrar painel esquerdo"} aria-pressed={leftOpen}>
+              <Icon name="painelEsq" size={18} />
+            </button>
+            {model && (
+              <>
+                {!closedTabs.includes("planta") && (
+                  <span className={`view-tab-wrap ${view === "planta" ? "active" : ""}`}>
+                    <button className={`view-tab ${view === "planta" ? "active" : ""}`} title={viewTabTitle("planta")} onClick={() => setView("planta")}>
+                      {activeViewDef && planKey.startsWith("view:")
+                        ? activeViewDef.name
+                        : `${planTypeOpen === "teto" ? "Planta de teto" : "Planta de piso"} · ${storey}${floorEntry?.levelLabel ? ` (${floorEntry.levelLabel})` : ""}`}
+                    </button>
+                    <button className="tab-close" title="Fechar esta aba" aria-label="Fechar planta" onClick={() => closeTab("planta")}>
+                      ×
+                    </button>
+                  </span>
+                )}
+                {!closedTabs.includes("3d") && (
+                  <span className={`view-tab-wrap ${view === "3d" ? "active" : ""}`}>
+                    <button className={`view-tab ${view === "3d" ? "active" : ""}`} title={viewTabTitle("3d")} onClick={() => setView("3d")}>
+                      3D · {view3dDef ? view3dDef.name : (storeyView ?? "Modelo completo")}
+                    </button>
+                    <button className="tab-close" title="Fechar esta aba" aria-label="Fechar vista 3D" onClick={() => closeTab("3d")}>
+                      ×
+                    </button>
+                  </span>
+                )}
+                {!closedTabs.includes("prancha") && (
+                  <span className={`view-tab-wrap ${view === "prancha" ? "active" : ""}`}>
+                    <button className={`view-tab ${view === "prancha" ? "active" : ""}`} title={viewTabTitle("prancha")} onClick={() => chooseTool({ kind: "pranchas" })}>
+                      Prancha{activeSheet && view === "prancha" ? ` · ${activeSheet.name}` : ""}
+                    </button>
+                    <button className="tab-close" title="Fechar esta aba" aria-label="Fechar prancha" onClick={() => closeTab("prancha")}>
+                      ×
+                    </button>
+                  </span>
+                )}
+                {flowDef && !closedTabs.includes("fluxograma") && (
+                  <span className={`view-tab-wrap ${view === "fluxograma" ? "active" : ""}`}>
+                    <button className={`view-tab ${view === "fluxograma" ? "active" : ""}`} title={viewTabTitle("fluxograma")} onClick={() => setView("fluxograma")}>
+                      Fluxograma · {flowDef.name}
+                    </button>
+                    <button className="tab-close" title="Fechar esta aba" aria-label="Fechar fluxograma" onClick={() => closeTab("fluxograma")}>
+                      ×
+                    </button>
+                  </span>
+                )}
+                {closedTabs.length > 0 && (
+                  <select className="tab-reopen" value="" title="Abrir uma aba fechada" onChange={(e) => e.target.value && openTab(e.target.value as TabView)}>
+                    <option value="">+</option>
+                    {closedTabs.map((t) => (
+                      <option key={t} value={t}>
+                        {TAB_LABEL[t]}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </>
+            )}
+            <div className="spacer" />
+            {/* Controles da vista: rolam na horizontal se faltar espaço; o botão do painel fica sempre visível. */}
+            <div className="view-tools">
+            {model && view === "planta" && floorPlan && (
+              <>
+                <div className="segmented small" role="group" aria-label="Planta de piso ou de teto">
+                  {(["piso", "teto"] as const).map((t) => (
+                    <button
+                      key={t}
+                      className={floorPlan.type === t ? "on" : ""}
+                      onClick={() => setPlanKey(PLAN_PREFIX[floorPlan.section][t])}
+                      title={t === "teto" ? "Vigas do pavimento de cima" : "Vigas da laje de baixo"}
+                    >
+                      {t === "piso" ? "Piso" : "Teto"}
+                    </button>
+                  ))}
+                </div>
+                <div className="segmented small" role="group" aria-label="Seção da planta">
+                  <button className={floorPlan.section === "trabalho" ? "on" : ""} onClick={() => setPlanKey(PLAN_PREFIX.trabalho[floorPlan.type])} title="Tudo visível">
+                    Trabalho
+                  </button>
+                  <button
+                    className={floorPlan.section === "documentacao" ? "on" : ""}
+                    onClick={() => setPlanKey(PLAN_PREFIX.documentacao[floorPlan.type])}
+                    title="Só as disciplinas do projeto (vai para as folhas)"
+                  >
+                    Documentação
+                  </button>
+                </div>
+              </>
+            )}
+            {model && view === "planta" && floorPlan && activeViewDef && planRange && (
+              <div className="range-inputs" title="Faixa de visualização em relação ao nível base">
+                <span className="muted small" title={floorPlan.type === "teto" ? "Face inferior da laje de teto" : "Nível do piso da arquitetura"}>
+                  base {fmtLevel(model.coordinates.worldToIfc([0, planRange.base, 0])[2])}
+                </span>
+                {(["below", "above"] as const).map((k) => (
+                  <label
+                    key={k}
+                    className="cut-input"
+                    title={
+                      k === "below"
+                        ? floorPlan.type === "piso"
+                          ? "Corte inferior: instalações abaixo do piso até esta altura"
+                          : "Corte inferior: todos os elementos abaixo da laje até esta altura"
+                        : floorPlan.type === "piso"
+                          ? "Corte superior: todos os elementos acima do piso até esta altura"
+                          : "Corte superior: instalações acima da face inferior da laje até esta altura"
+                    }
+                  >
+                    {k === "below" ? "inferior" : "superior"}
+                    <input
+                      type="number"
+                      step={0.05}
+                      min={0}
+                      value={rangeOf(activeViewDef, floorPlan.type)[k]}
+                      onChange={(e) => {
+                        const v = Math.max(0, Number(e.target.value) || 0);
+                        updateView({ ...activeViewDef, range: { ...rangeOf(activeViewDef, floorPlan.type), [k]: v } });
+                      }}
+                    />
+                    m
+                  </label>
+                ))}
+              </div>
+            )}
+            {model && view === "planta" && !floorPlan && activeViewDef?.kind !== "corte" && (
+              <label className="cut-input" title="Altura do plano de corte acima do piso">
+                corte
+                <input
+                  type="number"
+                  step={0.1}
+                  min={0.2}
+                  value={activeViewDef?.cutHeight ?? editorCut}
+                  onChange={(e) => {
+                    const h = Math.max(0.2, Number(e.target.value));
+                    if (activeViewDef) updateView({ ...activeViewDef, cutHeight: h });
+                    else setEditorCut(h);
+                  }}
+                />
+                m
+              </label>
+            )}
+            </div>
+            <button className="icon-btn" onClick={() => setRightOpen(!rightOpen)} title={rightOpen ? "Ocultar painel direito" : "Mostrar painel direito"} aria-pressed={rightOpen}>
+              <Icon name="painelDir" size={18} />
+            </button>
+          </div>
+
+          <div className="viewport">
+            <div ref={viewerHost} className="viewer-host" />
+            {view === "vazio" && model && (
+              <div className="empty-view">
+                <p>Nenhuma aba aberta.</p>
+                <div className="btn-row">
+                  {TABS.map((t) => (
+                    <button key={t} className="btn" onClick={() => openTab(t)}>
+                      Abrir {TAB_LABEL[t].toLowerCase()}
+                    </button>
+                  ))}
+                </div>
+                <p className="muted small">Ou escolha uma vista ou folha no navegador “Vistas e folhas”, à esquerda.</p>
+              </div>
+            )}
+            {view === "fluxograma" && model && flowDef?.flow && (
+              <FlowCanvas
+                view={flowDef}
+                flow={flowDef.flow}
+                update={(fn, key) => updateFlowOf(flowDef.id, fn, key ?? null)}
+                sel={flowSel}
+                setSel={setFlowSel}
+                mode={flowMode}
+                setMode={setFlowMode}
+                issues={flowIssues}
+                onPlaceOnSheet={placeFlowOnSheet}
+              />
+            )}
+            {view === "planta" && model && viewer && storey && (
+              <PlanEditor
+                viewer={viewer}
+                model={planModel ?? model}
+                store={store}
+                storey={activeViewDef?.storey ?? storey}
+                cutHeight={activeViewDef?.cutHeight ?? editorCut}
+                selection={selection}
+                elementById={elementById}
+                onPick={pick}
+                onPickMany={pickMany}
+                dark={theme === "escuro"}
+                fitSignal={fitSignal}
+                planTool={planTool}
+                viewDef={activeViewDef}
+                projectDisciplines={store.disciplines}
+                beams={beamOptions(activeViewDef ?? { ...workDisplay, planType: planTypeOpen })}
+                range={planRange}
+                hidden={planHidden}
+                doors={store.doors}
+                onMoveBy={(d) => moveRef.current(planDeltaToScene(d[0], d[1]), `${Math.hypot(d[0], d[1]).toFixed(2).replace(".", ",")} m`)}
+              />
+            )}
+            {view === "3d" && model && viewer && <ViewCube viewer={viewer} />}
+            {view === "3d" && model && (
+              <SectionTools
+                section={section}
+                onChange={setSection}
+                bounds={viewer?.getModelBounds() ?? null}
+                cs={model.coordinates}
+                storeyZ={storeyZ}
+                open={sectionOpen}
+                onOpen={setSectionOpen}
+              />
+            )}
+            {view === "prancha" && sheetRender && (
+              <PlanView
+                sheet={sheetRender.result}
+                selection={selection}
+                onSelect={(ids, additive) => setSelection((cur) => (additive ? [...new Set([...cur, ...ids])] : ids))}
+                fitSignal={fitSignal}
+                moveMode={moveMode}
+                viewports={sheetRender.result.viewports}
+                onMoveViewport={moveViewport}
+                textOf={(id) => {
+                  const d = store.drafts.find((x) => x.id === id);
+                  return d?.kind === "texto" ? d.text : null;
+                }}
+                onEditText={(id, text) => store.setDrafts((l) => l.map((x) => (x.id === id && x.kind === "texto" ? { ...x, text } : x)))}
+                onOpenViewport={(id) => {
+                  const v = resolveView(id);
+                  if (v) openViewDef(v);
+                }}
+              />
+            )}
+            {!model && !progress && (
+              <div className="welcome">
+                <LogoMark size={72} light={theme === "escuro"} />
+                <h1>
+                  Smart<span>Easy</span>BIM
+                </h1>
+                <p>
+                  Projetos de instalações MEP sobre modelos IFC. Comece um <b>novo projeto</b> escolhendo o modelo IFC de referência (Revit, Archicad etc.) ou
+                  abra um projeto salvo (.seb). Os IFCs de terceiros só são lidos, nunca alterados.
+                </p>
+                <div className="welcome-actions">
+                  <button className="btn primary" onClick={handleOpen}>
+                    Novo projeto…
+                  </button>
+                  <button className="btn" onClick={() => void files.open()}>
+                    Abrir projeto…
+                  </button>
+                  <button className="btn" onClick={() => handleSample()}>
+                    Abrir modelo de exemplo
+                  </button>
+                  <button className="btn" onClick={() => handleSample("exemplo-apartamento.ifc")}>
+                    Exemplo de apartamento
+                  </button>
+                </div>
+              </div>
+            )}
+            {progress && (
+              <div className="overlay">
+                <div className="spinner" />
+                <div className="progress-text">
+                  {progress}
+                  <button className="btn small" onClick={cancelIfcLoad} title="Interromper a leitura do IFC">
+                    Cancelar
+                  </button>
+                  {progressFrac != null && progressFrac > 0 && progressFrac < 1 && (
+                    <div className="progress-bar">
+                      <div style={{ width: `${Math.round(progressFrac * 100)}%` }} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {error && (
+              <div className="error" onClick={() => setError(null)}>
+                Erro ao abrir o modelo: {error}
+              </div>
+            )}
+            {files.message && (
+              <div className="toast" onClick={() => files.setMessage(null)}>
+                {files.message}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <aside className={`panel ${rightOpen ? "" : "collapsed"}`} aria-hidden={!rightOpen}>
+          {rightPanel()}
+        </aside>
+      </main>
+
+      <footer className="status-bar">
+        <span className={`dot ${progress ? "busy" : model ? "ok" : ""}`} />
+        <span title={loadNote ?? undefined}>{progress ?? (model ? `Pronto${loadNote ? ` · ${loadNote}` : ""}` : "Sem modelo")}</span>
+        {model && (
+          <>
+            <span className="sep" />
+            <span>
+              {fileName} · {model.schema} · {model.elements.length} elementos
+            </span>
+            <span className="sep" />
+            <span>{tool.kind === "desenho" ? `${CMD_LABEL[tool.cmd]} · ${TOOL_HINT.desenho}` : TOOL_HINT[tool.kind]}</span>
+          </>
+        )}
+        {model && <CursorReadout georef={georef} />}
+        {model && (
+          <>
+            <span className="sep" />
+            <DrawAidsBar />
+          </>
+        )}
+        <div className="spacer" />
+        {model && (
+          <span className="num">
+            {store.points.length} pontos · {store.runs.length} trechos · {store.circuits.length} circuitos
+            {selection.length > 0 && ` · ${selection.length} selecionado${selection.length > 1 ? "s" : ""}`}
+          </span>
+        )}
+        <span className="sep" />
+        <span>Fundo {theme === "claro" ? "branco" : "preto"}</span>
+      </footer>
+      {designing && (
+        <ElementEditor
+          key={designing.uid}
+          initial={designing}
+          onCancel={() => setDesigning(null)}
+          onSave={(d, place) => {
+            void saveDesign(d);
+            setDesigning(null);
+            const id = designComponentId(d.uid);
+            if (place && model) {
+              chooseTool({ kind: "locacao", componentId: id }, null);
+              files.setMessage(`Elemento "${d.label}" salvo na biblioteca: clique no modelo para locar.`);
+            } else files.setMessage(`Elemento "${d.label}" salvo na biblioteca${place ? " (abra um modelo para locar)" : ""}.`);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Coordenadas do cursor na planta: do projeto e, se houver survey point, do mapa (UTM). */
+function CursorReadout({ georef }: { georef: Georef }) {
+  const c = useCursor();
+  if (!c) return null;
+  const m = georef.map ? toMap(georef.map, c) : null;
+  return (
+    <>
+      <span className="sep" />
+      <span className="num" title="Coordenadas do projeto (IFC)">
+        X {fmtCoord(c[0], 2)} · Y {fmtCoord(c[1], 2)}
+      </span>
+      {m && (
+        <span className="num" title={georef.crs?.name ? `Coordenadas do mapa (${georef.crs.name})` : "Coordenadas do mapa"}>
+          · E {fmtCoord(m[0], 2)} · N {fmtCoord(m[1], 2)}
+        </span>
+      )}
+    </>
+  );
+}

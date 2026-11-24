@@ -1,0 +1,73 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Plugin do SmartEasyBIM para o Revit: exporta famílias (geometria, tipos, parâmetros e
+    conectores) para a biblioteca do aplicativo.
+    Compile uma versão por vez:  dotnet build -c Release -p:RevitVersion=2024
+  -->
+  <PropertyGroup>
+    <RevitVersion Condition="'$(RevitVersion)' == ''">2024</RevitVersion>
+    <AssemblyName>SmartEasyBIM.Revit</AssemblyName>
+    <RootNamespace>SmartEasyBIM.Revit</RootNamespace>
+    <Version>0.1.0</Version>
+    <Company>SmartEasyBIM</Company>
+    <Product>SmartEasyBIM para Revit</Product>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <OutputPath>bin\$(Configuration)\$(RevitVersion)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <DefineConstants>$(DefineConstants);REVIT$(RevitVersion)</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Revit 2022–2024: .NET Framework 4.8; 2025–2026: .NET 8; 2027: .NET 10. -->
+  <Choose>
+    <When Condition="$(RevitVersion) &lt; 2025">
+      <PropertyGroup>
+        <TargetFramework>net48</TargetFramework>
+      </PropertyGroup>
+    </When>
+    <When Condition="$(RevitVersion) &lt; 2027">
+      <PropertyGroup>
+        <TargetFramework>net8.0-windows</TargetFramework>
+      </PropertyGroup>
+    </When>
+    <Otherwise>
+      <PropertyGroup>
+        <TargetFramework>net10.0-windows</TargetFramework>
+      </PropertyGroup>
+    </Otherwise>
+  </Choose>
+
+  <PropertyGroup>
+    <RevitApiVersion Condition="'$(RevitVersion)' == '2022'">2022.1.80</RevitApiVersion>
+    <RevitApiVersion Condition="'$(RevitVersion)' == '2023'">2023.1.90</RevitApiVersion>
+    <RevitApiVersion Condition="'$(RevitVersion)' == '2024'">2024.3.60</RevitApiVersion>
+    <RevitApiVersion Condition="'$(RevitVersion)' == '2025'">2025.4.60</RevitApiVersion>
+    <RevitApiVersion Condition="'$(RevitVersion)' == '2026'">2026.4.10</RevitApiVersion>
+    <RevitApiVersion Condition="'$(RevitVersion)' == '2027'">2027.3.0</RevitApiVersion>
+    <DefineConstants Condition="$(RevitVersion) &gt;= 2024">$(DefineConstants);REVIT2024_OR_GREATER</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="$(RevitApiVersion)" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="$(RevitApiVersion)" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- WPF (ícone) e Windows Forms (diálogo): referência direta ao framework de desktop. -->
+  <ItemGroup Condition="'$(TargetFramework)' != 'net48'">
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+</Project>

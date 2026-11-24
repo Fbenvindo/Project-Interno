@@ -32,3 +32,5 @@ dist-ssr
 .claude/
 
 .env
+# Arquivos do CDE em disco (modo local, sem S3)
+server/storage/

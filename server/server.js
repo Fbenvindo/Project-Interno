@@ -12,6 +12,7 @@ const path = require('path');
 const { runMigrations } = require('./db/init');
 const { pool } = require('./db/pool');
 const { createSessionToken, hashPassword, normalizeProfile, toPublicUser, verifyPassword, verifySessionToken } = require('./auth');
+const { registerCde } = require('./routes/cde');
 
 // Models
 const usersModel = require('./models/users');
@@ -222,7 +223,7 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', origin);
     res.header('Vary', 'Origin');
   }
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
@@ -241,6 +242,22 @@ function getBearerToken(req) {
 
   return req.headers['x-session-token'] || null;
 }
+
+// CDE (Ambiente Comum de Dados, ISO 19650): todas as rotas exigem login.
+registerCde(app, {
+  pool,
+  resolveUser: async (req) => {
+    const payload = verifySessionToken(getBearerToken(req));
+    if (!payload?.sub) return null;
+    const fixedAdmin = getFixedAdminConfig();
+    if (String(payload.sub) === 'fixed-admin' && String(payload.email || '').toLowerCase() === fixedAdmin.email) {
+      return { id: 'fixed-admin', name: fixedAdmin.user.name, email: fixedAdmin.email, perfil: normalizeProfile(fixedAdmin.user.perfil) };
+    }
+    const user = await usersModel.getUserById(payload.sub);
+    if (!user || String(user.status || '').toLowerCase() === 'inativo') return null;
+    return { id: user.id, name: user.name, email: user.email, perfil: normalizeProfile(user.role || user.perfil) };
+  },
+});
 
 app.get('/health', async (req, res) => {
   try {

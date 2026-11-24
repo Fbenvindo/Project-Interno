@@ -1,0 +1,404 @@
+// Exporta os pontos locados como um modelo IFC4 próprio da disciplina, para
+// federar com o modelo original (Revit, Navisworks, Solibri, BIMcollab…).
+// As coordenadas são as do IFC de origem, então os modelos se sobrepõem.
+import { COMPONENT_BY_ID } from "./library";
+import type { CoordinateSystem } from "./math";
+import { newGuid, pointSize, storeyAt, type PlacedPoint, type StoreyLevel } from "./points";
+import type { Circuit } from "./circuits";
+import { derivedGuid, runFittings, runSegments, RUN_TYPE_BY_ID, segmentBasis, storeyProbeY, type Run } from "./runs";
+import { boxSizeLabel, INSTALL_LABEL, pullBoxes } from "./conduits";
+import { boxLabel, modulesText } from "./devices";
+import { degreesToCompound, type Georef } from "./georef";
+import type { Discipline, Vec3 } from "./types";
+import { archProperties, buildArch, type ArchElement } from "./arch";
+
+class StepWriter {
+  private lines: string[] = [];
+  private next = 1;
+
+  add(entity: string): number {
+    const id = this.next++;
+    this.lines.push(`#${id}=${entity};`);
+    return id;
+  }
+
+  toString(fileName: string, description: string): string {
+    const header = [
+      "ISO-10303-21;",
+      "HEADER;",
+      `FILE_DESCRIPTION((${str(description)}),'2;1');`,
+      `FILE_NAME(${str(fileName)},'${new Date().toISOString().slice(0, 19)}',(''),(''),'SmartEasyBIM','SmartEasyBIM','');`,
+      "FILE_SCHEMA(('IFC4'));",
+      "ENDSEC;",
+      "DATA;",
+    ];
+    return [...header, ...this.lines, "ENDSEC;", "END-ISO-10303-21;", ""].join("\n");
+  }
+}
+
+/** Número real no formato STEP (sempre com ponto decimal). */
+export function num(v: number): string {
+  const r = Math.round(v * 1e4) / 1e4;
+  const s = String(Object.is(r, -0) ? 0 : r);
+  if (s.includes("e")) return r.toExponential().replace("e", "E").replace(/^(-?\d+)E/, "$1.E");
+  return s.includes(".") ? s : `${s}.`;
+}
+
+/** Número real STEP com precisão total (direções e coordenadas do mapa). */
+function numP(v: number): string {
+  const s = String(Object.is(v, -0) ? 0 : v);
+  if (s.includes("e")) return v.toExponential().replace("e", "E").replace(/^(-?\d+)E/, "$1.E");
+  return s.includes(".") ? s : `${s}.`;
+}
+
+/** String STEP: aspas duplicadas e caracteres fora do ASCII como \X2\hhhh\X0\. */
+export function str(s: string | null | undefined): string {
+  if (s == null) return "$";
+  const body = s
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "''")
+    .replace(/[^\x20-\x7E]/g, (c) => `\\X2\\${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}\\X0\\`);
+  return `'${body}'`;
+}
+
+const ref = (id: number | null) => (id == null ? "$" : `#${id}`);
+const list = (ids: number[]) => `(${ids.map(ref).join(",")})`;
+
+export interface ExportOptions {
+  modelName: string | null;
+  storeys: StoreyLevel[];
+  cs: CoordinateSystem;
+  /** Trechos de tubulação, eletroduto e eletrocalha a exportar junto. */
+  runs?: Run[];
+  /** Circuitos: exportados como IfcDistributionCircuit com seus pontos e trechos. */
+  circuits?: Circuit[];
+  /** Georreferenciamento do projeto: gravado igual ao do modelo de origem (survey point, sistema, norte, lat/long). */
+  georef?: Georef;
+  /** Disciplina(s) do arquivo, no nome do projeto IFC (ex.: "Elétrica"). */
+  title?: string;
+  /** Paredes, portas, janelas, lajes, pilares e vigas modelados no app. */
+  arch?: ArchElement[];
+  /** Só estes elementos de arquitetura/estrutura vão para o arquivo (os demais servem de hospedeiros). */
+  archOnly?: (e: ArchElement) => boolean;
+}
+
+/** Só o que pertence às disciplinas pedidas (um IFC por disciplina). Circuitos seguem os pontos e trechos. */
+export function filterByDisciplines(points: PlacedPoint[], runs: Run[], circuits: Circuit[], disciplines: Set<Discipline>) {
+  const p = points.filter((x) => {
+    const d = COMPONENT_BY_ID[x.componentId]?.discipline;
+    return !!d && disciplines.has(d);
+  });
+  const r = runs.filter((x) => {
+    const d = RUN_TYPE_BY_ID[x.typeId]?.discipline;
+    return !!d && disciplines.has(d);
+  });
+  const used = new Set([...p.map((x) => x.circuit), ...r.map((x) => x.circuit)].filter(Boolean));
+  return { points: p, runs: r, circuits: circuits.filter((c) => used.has(c.uid)) };
+}
+
+/** Disciplinas com algo locado/traçado. */
+export function disciplinesInUse(points: PlacedPoint[], runs: Run[]): Discipline[] {
+  const set = new Set<Discipline>();
+  for (const x of points) {
+    const d = COMPONENT_BY_ID[x.componentId]?.discipline;
+    if (d) set.add(d);
+  }
+  for (const x of runs) {
+    const d = RUN_TYPE_BY_ID[x.typeId]?.discipline;
+    if (d) set.add(d);
+  }
+  return [...set];
+}
+
+export function exportPointsIfc(points: PlacedPoint[], { modelName, storeys, cs, runs = [], circuits = [], georef, title, arch = [], archOnly }: ExportOptions): string {
+  const w = new StepWriter();
+  const MM = 1000;
+  const pt = ([x, y, z]: Vec3) => w.add(`IFCCARTESIANPOINT((${num(x)},${num(y)},${num(z)}))`);
+  const dir = ([x, y, z]: Vec3) => w.add(`IFCDIRECTION((${num(x)},${num(y)},${num(z)}))`);
+  const placement = (loc: Vec3, axis: number | null = null, refDir: number | null = null, relTo: number | null = null) => {
+    const a = w.add(`IFCAXIS2PLACEMENT3D(${ref(pt(loc))},${ref(axis)},${ref(refDir)})`);
+    return w.add(`IFCLOCALPLACEMENT(${ref(relTo)},${ref(a)})`);
+  };
+
+  const units = w.add(`IFCUNITASSIGNMENT(${list([w.add("IFCSIUNIT(*,.LENGTHUNIT.,.MILLI.,.METRE.)"), w.add("IFCSIUNIT(*,.PLANEANGLEUNIT.,$,.RADIAN.)")])})`);
+  // Norte verdadeiro (ângulo a partir de +Y, anti-horário) na direção do contexto.
+  const tn = georef?.trueNorthDeg;
+  const trueNorth = tn != null && tn !== 0 ? w.add(`IFCDIRECTION((${numP(-Math.sin((tn * Math.PI) / 180))},${numP(Math.cos((tn * Math.PI) / 180))}))`) : null;
+  const context = w.add(`IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,${ref(w.add(`IFCAXIS2PLACEMENT3D(${ref(pt([0, 0, 0]))},$,$)`))},${ref(trueNorth)})`);
+  // Survey point / coordenadas compartilhadas (IFC4): mesmo do modelo de origem, em metros.
+  if (georef?.map) {
+    const m = georef.map;
+    const meter = w.add("IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)");
+    const c = georef.crs;
+    const crs = w.add(
+      `IFCPROJECTEDCRS(${str(c?.name || "Sistema do projeto")},${str(c?.description ?? null)},${str(c?.geodeticDatum ?? null)},$,${str(c?.mapProjection ?? null)},${str(c?.mapZone ?? null)},${ref(meter)})`,
+    );
+    w.add(`IFCMAPCONVERSION(${ref(context)},${ref(crs)},${numP(m.eastings)},${numP(m.northings)},${numP(m.orthogonalHeight)},${numP(m.xAxisAbscissa)},${numP(m.xAxisOrdinate)},${numP(m.scale)})`);
+  }
+  const projectName = `${title ? `Projeto ${title}` : "Locação MEP"}${modelName ? ` - ${modelName.replace(/\.ifc$/i, "")}` : ""}`;
+  const project = w.add(`IFCPROJECT('${newGuid()}',$,${str(projectName)},$,$,$,$,${list([context])},${ref(units)})`);
+  const sitePlacement = placement([0, 0, 0]);
+  const ll = (deg: number | null | undefined) => (deg == null ? "$" : `(${degreesToCompound(deg).join(",")})`);
+  const elev = georef?.site?.elevation;
+  const site = w.add(
+    `IFCSITE('${newGuid()}',$,'Terreno',$,$,${ref(sitePlacement)},$,$,.ELEMENT.,${ll(georef?.site?.latitude)},${ll(georef?.site?.longitude)},${elev == null ? "$" : num(elev * MM)},$,$)`,
+  );
+  const buildingPlacement = placement([0, 0, 0], null, null, sitePlacement);
+  const building = w.add(`IFCBUILDING('${newGuid()}',$,'Edifício',$,$,${ref(buildingPlacement)},$,$,.ELEMENT.,$,$,$)`);
+  w.add(`IFCRELAGGREGATES('${newGuid()}',$,$,$,${ref(project)},${list([site])})`);
+  w.add(`IFCRELAGGREGATES('${newGuid()}',$,$,$,${ref(site)},${list([building])})`);
+
+  // Pavimentos com os mesmos nomes e cotas do modelo de origem.
+  const storeyIds = new Map<string, { id: number; elements: number[] }>();
+  for (const s of storeys) {
+    const elev = cs.worldToIfc([0, s.level, 0])[2] * MM;
+    const id = w.add(
+      `IFCBUILDINGSTOREY('${newGuid()}',$,${str(s.name)},$,$,${ref(placement([0, 0, elev], null, null, buildingPlacement))},$,$,.ELEMENT.,${num(elev)})`,
+    );
+    storeyIds.set(s.name, { id, elements: [] });
+  }
+  if (storeyIds.size) w.add(`IFCRELAGGREGATES('${newGuid()}',$,$,$,${ref(building)},${list([...storeyIds.values()].map((s) => s.id))})`);
+  const looseElements: number[] = [];
+
+  const zAxis = dir([0, 0, 1]);
+  const origin2d = w.add(`IFCAXIS2PLACEMENT2D(${ref(w.add("IFCCARTESIANPOINT((0.,0.))"))},$)`);
+  const solidPosition = w.add(`IFCAXIS2PLACEMENT3D(${ref(pt([0, 0, 0]))},$,$)`);
+  const systems = new Map<string, { type: string; members: number[] }>();
+  const circuitMembers = new Map<string, number[]>();
+
+  for (const p of points) {
+    const def = COMPONENT_BY_ID[p.componentId];
+    const [sw, sd, sh] = pointSize(p, def);
+    const profile =
+      def.shape === "cilindro"
+        ? w.add(`IFCCIRCLEPROFILEDEF(.AREA.,$,${ref(origin2d)},${num(sw / 2)})`)
+        : w.add(`IFCRECTANGLEPROFILEDEF(.AREA.,$,${ref(origin2d)},${num(sw)},${num(sd)})`);
+    let rep: number;
+    if (def.mesh && def.mesh.indices.length) {
+      // Família importada: malha triangulada. Eixos locais do IFC a partir do app (X, Y acima, Z para fora):
+      // X = X, Y = −Z, Z = Y + metade da altura (origem na base).
+      const pos = def.mesh.positions;
+      const coords: string[] = [];
+      for (let i = 0; i < pos.length; i += 3) coords.push(`(${num(pos[i])},${num(-pos[i + 2])},${num(pos[i + 1] + sh / 2)})`);
+      const tris: string[] = [];
+      const idx = def.mesh.indices;
+      for (let i = 0; i < idx.length; i += 3) tris.push(`(${idx[i] + 1},${idx[i + 1] + 1},${idx[i + 2] + 1})`);
+      const pl = w.add(`IFCCARTESIANPOINTLIST3D((${coords.join(",")}))`);
+      const fs = w.add(`IFCTRIANGULATEDFACESET(${ref(pl)},$,$,(${tris.join(",")}),$)`);
+      rep = w.add(`IFCSHAPEREPRESENTATION(${ref(context)},'Body','Tessellation',${list([fs])})`);
+    } else {
+      const solid = w.add(`IFCEXTRUDEDAREASOLID(${ref(profile)},${ref(solidPosition)},${ref(zAxis)},${num(sh)})`);
+      rep = w.add(`IFCSHAPEREPRESENTATION(${ref(context)},'Body','SweptSolid',${list([solid])})`);
+    }
+    const shape = w.add(`IFCPRODUCTDEFINITIONSHAPE($,$,${list([rep])})`);
+
+    // Origem local na base do componente; eixo X local ao longo da largura.
+    const center = cs.worldToIfc(p.position);
+    const base: Vec3 = [center[0] * MM, center[1] * MM, center[2] * MM - sh / 2];
+    const xDir = cs.worldDirToIfc([Math.cos(p.rotation), 0, -Math.sin(p.rotation)]);
+    const objPlacement = placement(base, zAxis, dir([xDir[0], xDir[1], 0]));
+
+    const el = w.add(
+      `IFC${def.ifcType.replace(/^IFC/, "")}('${p.guid}',$,${str(`${p.tag} - ${def.label}`)},$,${str(def.label)},${ref(objPlacement)},${ref(shape)},${str(p.tag)},.${def.predefinedType}.)`,
+    );
+    if (p.circuit) circuitMembers.set(p.circuit, [...(circuitMembers.get(p.circuit) ?? []), el]);
+
+    const props: number[] = [
+      w.add(`IFCPROPERTYSINGLEVALUE('Etiqueta',$,IFCLABEL(${str(p.tag)}),$)`),
+      w.add(`IFCPROPERTYSINGLEVALUE('Componente',$,IFCLABEL(${str(def.label)}),$)`),
+      ...(p.assembly
+        ? [
+            w.add(`IFCPROPERTYSINGLEVALUE('Instalacao',$,IFCLABEL(${str(p.assembly.install === "embutida" ? "Embutida" : "Aparente")}),$)`),
+            w.add(`IFCPROPERTYSINGLEVALUE('Caixa',$,IFCLABEL(${str(boxLabel(p.assembly))}),$)`),
+            w.add(`IFCPROPERTYSINGLEVALUE('Modulos',$,IFCLABEL(${str(modulesText(p.assembly.modules))}),$)`),
+          ]
+        : []),
+      ...(def.source ? [w.add(`IFCPROPERTYSINGLEVALUE('Familia Revit',$,IFCLABEL(${str(`${def.source.family} : ${def.source.type}`)}),$)`)] : []),
+      w.add(`IFCPROPERTYSINGLEVALUE(${str("Fixação")},$,IFCLABEL(${str(def.mounting)}),$)`),
+      w.add(`IFCPROPERTYSINGLEVALUE('Altura de montagem',$,IFCLENGTHMEASURE(${num(p.height)}),$)`),
+      w.add(`IFCPROPERTYSINGLEVALUE('Sistema',$,IFCLABEL(${str(p.system)}),$)`),
+    ];
+    for (const param of def.params) {
+      const v = p.params[param.name];
+      if (v === undefined || v === "") continue;
+      const name = param.unit ? `${param.name} (${param.unit})` : param.name;
+      const value = typeof v === "number" ? `IFCREAL(${num(v)})` : `IFCLABEL(${str(String(v))})`;
+      props.push(w.add(`IFCPROPERTYSINGLEVALUE(${str(name)},$,${value},$)`));
+    }
+    const pset = w.add(`IFCPROPERTYSET('${newGuid()}',$,'Pset_MEP_Locacao',$,${list(props)})`);
+    w.add(`IFCRELDEFINESBYPROPERTIES('${newGuid()}',$,$,$,${list([el])},${ref(pset)})`);
+
+    const storey = p.storey ? storeyIds.get(p.storey) : undefined;
+    (storey ? storey.elements : looseElements).push(el);
+    if (p.system) {
+      const sys = systems.get(p.system) ?? { type: def.systemType, members: [] };
+      sys.members.push(el);
+      systems.set(p.system, sys);
+    }
+  }
+
+  // ---- Trechos: segmentos e conexões ------------------------------------------
+  const addToStoreyAndSystem = (el: number, y: number, system: string, systemType: string) => {
+    const name = storeyAt(y, storeys);
+    const storey = name ? storeyIds.get(name) : undefined;
+    (storey ? storey.elements : looseElements).push(el);
+    if (system) {
+      const sys = systems.get(system) ?? { type: systemType, members: [] };
+      sys.members.push(el);
+      systems.set(system, sys);
+    }
+  };
+  const sectionProfile = (profile: "circular" | "retangular", width: number, height: number) =>
+    profile === "circular"
+      ? `IFCCIRCLEPROFILEDEF(.AREA.,$,${ref(origin2d)},${num(width / 2)})`
+      : `IFCRECTANGLEPROFILEDEF(.AREA.,$,${ref(origin2d)},${num(width)},${num(height)})`;
+  const body = (profileEntity: string, depth: number) => {
+    const solid = w.add(`IFCEXTRUDEDAREASOLID(${ref(w.add(profileEntity))},${ref(solidPosition)},${ref(zAxis)},${num(depth)})`);
+    const rep = w.add(`IFCSHAPEREPRESENTATION(${ref(context)},'Body','SweptSolid',${list([solid])})`);
+    return w.add(`IFCPRODUCTDEFINITIONSHAPE($,$,${list([rep])})`);
+  };
+  const toMm = (v: Vec3): Vec3 => cs.worldToIfc(v).map((c) => c * MM) as Vec3;
+
+  for (const r of runs) {
+    const t = RUN_TYPE_BY_ID[r.typeId];
+    for (const seg of runSegments(r)) {
+      if (seg.length < 0.0005) continue;
+      const dirWorld = seg.end.map((v, i) => (v - seg.start[i]) / seg.length) as Vec3;
+      const { x } = segmentBasis(dirWorld);
+      const axis = cs.worldDirToIfc(dirWorld);
+      const ref2 = cs.worldDirToIfc(x);
+      const pl = placement(toMm(seg.start), dir(axis), dir(ref2));
+      const shape = body(sectionProfile(t.profile, r.size.width, r.size.height), seg.length * MM);
+      const el = w.add(
+        `IFC${t.segmentType.replace(/^IFC/, "")}('${derivedGuid(r.guid, seg.index)}',$,${str(`${r.tag} - ${t.label} ${r.size.label}`)},$,${str(t.label)},${ref(pl)},${ref(shape)},${str(r.tag)},.${t.segmentPredefined}.)`,
+      );
+      if (r.circuit) circuitMembers.set(r.circuit, [...(circuitMembers.get(r.circuit) ?? []), el]);
+      const props = [
+        w.add(`IFCPROPERTYSINGLEVALUE('Etiqueta',$,IFCLABEL(${str(r.tag)}),$)`),
+        w.add(`IFCPROPERTYSINGLEVALUE('Bitola',$,IFCLABEL(${str(r.size.label)}),$)`),
+        w.add(`IFCPROPERTYSINGLEVALUE('Material',$,IFCLABEL(${str(t.material)}),$)`),
+        w.add(`IFCPROPERTYSINGLEVALUE('Sistema',$,IFCLABEL(${str(r.system)}),$)`),
+        ...(t.profile === "circular"
+          ? [w.add(`IFCPROPERTYSINGLEVALUE('NominalDiameter',$,IFCPOSITIVELENGTHMEASURE(${num(r.size.width)}),$)`)]
+          : [
+              w.add(`IFCPROPERTYSINGLEVALUE('Width',$,IFCPOSITIVELENGTHMEASURE(${num(r.size.width)}),$)`),
+              w.add(`IFCPROPERTYSINGLEVALUE('Height',$,IFCPOSITIVELENGTHMEASURE(${num(r.size.height)}),$)`),
+            ]),
+        ...(r.slope ? [w.add(`IFCPROPERTYSINGLEVALUE('Declividade (%)',$,IFCREAL(${num(r.slope)}),$)`)] : []),
+        ...Object.entries(r.params)
+          .filter(([, v]) => v !== "")
+          .map(([k, v]) => w.add(`IFCPROPERTYSINGLEVALUE(${str(k)},$,${typeof v === "number" ? `IFCREAL(${num(v)})` : `IFCLABEL(${str(String(v))})`},$)`)),
+      ];
+      const pset = w.add(`IFCPROPERTYSET('${newGuid()}',$,'Pset_MEP_Tracado',$,${list(props)})`);
+      w.add(`IFCRELDEFINESBYPROPERTIES('${newGuid()}',$,$,$,${list([el])},${ref(pset)})`);
+      const qtoName = t.segmentType === "IFCPIPESEGMENT" ? "Qto_PipeSegmentBaseQuantities" : "Qto_CableCarrierSegmentBaseQuantities";
+      const q = w.add(`IFCQUANTITYLENGTH('Length',$,$,${num(seg.length * MM)},$)`);
+      const qto = w.add(`IFCELEMENTQUANTITY('${newGuid()}',$,'${qtoName}',$,$,${list([q])})`);
+      w.add(`IFCRELDEFINESBYPROPERTIES('${newGuid()}',$,$,$,${list([el])},${ref(qto)})`);
+      addToStoreyAndSystem(el, storeyProbeY(r, Math.min(seg.start[1], seg.end[1])), r.system, t.systemType);
+    }
+  }
+
+  for (const f of runFittings(runs)) {
+    const t = RUN_TYPE_BY_ID[f.typeId];
+    if (f.kind === "te" && t.segmentPredefined === "CONDUITSEGMENT") continue; // derivação em caixa de passagem
+    const r = runs.find((x) => x.id === f.runId)!;
+    const d = Math.max(f.size.width, f.size.height) * 1.2;
+    const center = toMm(f.position);
+    const pl = placement([center[0], center[1], center[2] - d / 2]);
+    const shape = body(
+      t.profile === "circular"
+        ? `IFCCIRCLEPROFILEDEF(.AREA.,$,${ref(origin2d)},${num(d / 2)})`
+        : `IFCRECTANGLEPROFILEDEF(.AREA.,$,${ref(origin2d)},${num(f.size.width * 1.2)},${num(f.size.height * 1.2)})`,
+      t.profile === "circular" ? d : f.size.height * 1.2,
+    );
+    const el = w.add(
+      `IFC${t.fittingType.replace(/^IFC/, "")}('${derivedGuid(r.guid, 500 + f.index)}',$,${str(`${r.tag} - ${f.label} ${f.size.label}`)},$,${str(f.label)},${ref(pl)},${ref(shape)},${str(r.tag)},.${f.kind === "curva" ? t.bendPredefined : t.teePredefined}.)`,
+    );
+    addToStoreyAndSystem(el, storeyProbeY(r, f.position[1]), f.system, t.systemType);
+  }
+
+  // ---- Caixas de passagem dos eletrodutos (IfcJunctionBox) ----------------------
+  for (const b of pullBoxes(runs, points)) {
+    const r = runs.find((x) => x.id === b.runIds[0])!;
+    const [bw, bh, bd] = b.spec.dims;
+    const center = toMm(b.position);
+    const xDir = cs.worldDirToIfc(Math.hypot(b.dir[0], b.dir[2]) > 0.3 ? [b.dir[0], 0, b.dir[2]] : [1, 0, 0]);
+    const xl = Math.hypot(xDir[0], xDir[1]) || 1;
+    const pl = placement([center[0], center[1], center[2] - bd / 2], dir([0, 0, 1]), dir([xDir[0] / xl, xDir[1] / xl, 0]));
+    const shape = body(`IFCRECTANGLEPROFILEDEF(.AREA.,$,${ref(origin2d)},${num(bw)},${num(bh)})`, bd);
+    const el = w.add(
+      `IFCJUNCTIONBOX('${derivedGuid(r.guid, 100_000 + b.index)}',$,${str(`${b.tag} - ${b.spec.label}`)},$,${str(b.spec.label)},${ref(pl)},${ref(shape)},${str(b.tag)},.PULL.)`,
+    );
+    const props = [
+      w.add(`IFCPROPERTYSINGLEVALUE('Etiqueta',$,IFCLABEL(${str(b.tag)}),$)`),
+      w.add(`IFCPROPERTYSINGLEVALUE('Tipo',$,IFCLABEL(${str(b.spec.label)}),$)`),
+      w.add(`IFCPROPERTYSINGLEVALUE('Dimensoes',$,IFCLABEL(${str(boxSizeLabel(b))}),$)`),
+      w.add(`IFCPROPERTYSINGLEVALUE('Quantidade',$,IFCINTEGER(${b.spec.count}),$)`),
+      w.add(`IFCPROPERTYSINGLEVALUE('Instalacao',$,IFCLABEL(${str(INSTALL_LABEL[b.install.mode])}),$)`),
+      w.add(`IFCPROPERTYSINGLEVALUE('Eletrodutos',$,IFCLABEL(${str(runs.filter((x) => b.runIds.includes(x.id)).map((x) => x.tag).join(", "))}),$)`),
+    ];
+    const pset = w.add(`IFCPROPERTYSET('${newGuid()}',$,'Pset_MEP_CaixaPassagem',$,${list(props)})`);
+    w.add(`IFCRELDEFINESBYPROPERTIES('${newGuid()}',$,$,$,${list([el])},${ref(pset)})`);
+    addToStoreyAndSystem(el, storeyProbeY(b, b.position[1]), r.system, "ELECTRICAL");
+  }
+
+  // ---- Arquitetura e estrutura modeladas no app (malha triangulada, coordenadas do IFC) -----
+  for (const piece of buildArch(arch, cs)) {
+    const { el: a, mesh } = piece;
+    if (!mesh.indices.length || (archOnly && !archOnly(a))) continue;
+    const coords: string[] = [];
+    for (let i = 0; i < mesh.positions.length; i += 3) coords.push(`(${num(mesh.positions[i] * MM)},${num(mesh.positions[i + 1] * MM)},${num(mesh.positions[i + 2] * MM)})`);
+    const tris: string[] = [];
+    for (let i = 0; i < mesh.indices.length; i += 3) tris.push(`(${mesh.indices[i] + 1},${mesh.indices[i + 1] + 1},${mesh.indices[i + 2] + 1})`);
+    const fs = w.add(`IFCTRIANGULATEDFACESET(${ref(w.add(`IFCCARTESIANPOINTLIST3D((${coords.join(",")}))`))},$,.T.,(${tris.join(",")}),$)`);
+    const rep = w.add(`IFCSHAPEREPRESENTATION(${ref(context)},'Body','Tessellation',${list([fs])})`);
+    const shape = w.add(`IFCPRODUCTDEFINITIONSHAPE($,$,${list([rep])})`);
+    const pl = placement([0, 0, 0]);
+    const head = `'${a.guid}',$,${str(piece.info.name)},$,${str(a.name)},${ref(pl)},${ref(shape)},$`;
+    const el =
+      a.kind === "parede"
+        ? w.add(`IFCWALL(${head},.${a.structural ? "SHEAR" : "STANDARD"}.)`)
+        : a.kind === "porta"
+          ? w.add(`IFCDOOR(${head},${num(a.height * MM)},${num(a.width * MM)},.DOOR.,.${piece.info.operation ?? "SINGLE_SWING_LEFT"}.,$)`)
+          : a.kind === "janela"
+            ? w.add(`IFCWINDOW(${head},${num(a.height * MM)},${num(a.width * MM)},.WINDOW.,.SINGLE_PANEL.,$)`)
+            : a.kind === "laje"
+              ? w.add(`IFCSLAB(${head},.FLOOR.)`)
+              : a.kind === "pilar"
+                ? w.add(`IFCCOLUMN(${head},.COLUMN.)`)
+                : w.add(`IFCBEAM(${head},.BEAM.)`);
+    const props = archProperties(a, arch).flatMap((g) =>
+      g.values.map((v) => w.add(`IFCPROPERTYSINGLEVALUE(${str(v.name)},$,${typeof v.value === "number" ? `IFCREAL(${num(v.value)})` : `IFCLABEL(${str(String(v.value))})`},$)`)),
+    );
+    if (props.length) {
+      const pset = w.add(`IFCPROPERTYSET('${newGuid()}',$,'Pset_SmartEasyBIM',$,${list(props)})`);
+      w.add(`IFCRELDEFINESBYPROPERTIES('${newGuid()}',$,$,$,${list([el])},${ref(pset)})`);
+    }
+    const st = storeyIds.get(a.storey);
+    (st ? st.elements : looseElements).push(el);
+  }
+
+  for (const s of storeyIds.values()) {
+    if (s.elements.length) w.add(`IFCRELCONTAINEDINSPATIALSTRUCTURE('${newGuid()}',$,$,$,${list(s.elements)},${ref(s.id)})`);
+  }
+  if (looseElements.length) w.add(`IFCRELCONTAINEDINSPATIALSTRUCTURE('${newGuid()}',$,$,$,${list(looseElements)},${ref(building)})`);
+  for (const [name, s] of systems) {
+    const sys = w.add(`IFCDISTRIBUTIONSYSTEM('${newGuid()}',$,${str(name)},$,$,$,.${s.type}.)`);
+    w.add(`IFCRELASSIGNSTOGROUP('${newGuid()}',$,$,$,${list(s.members)},$,${ref(sys)})`);
+  }
+
+  const panelTag = new Map(points.map((p) => [p.guid, p.tag]));
+  for (const c of circuits) {
+    const members = circuitMembers.get(c.uid);
+    if (!members?.length) continue;
+    const name = `${panelTag.get(c.panel) ?? "QD"}-${c.name}`;
+    const circ = w.add(
+      `IFCDISTRIBUTIONCIRCUIT('${/^[0-3][0-9A-Za-z_$]{21}$/.test(c.uid) ? c.uid : newGuid()}',$,${str(name)},${str(c.description || null)},$,${str(c.description || null)},.${c.type === "iluminacao" ? "LIGHTING" : "ELECTRICAL"}.)`,
+    );
+    w.add(`IFCRELASSIGNSTOGROUP('${newGuid()}',$,$,$,${list(members)},$,${ref(circ)})`);
+  }
+
+  const fileName = `${(modelName ?? "modelo").replace(/\.ifc$/i, "")}-locacao-mep.ifc`;
+  return w.toString(fileName, "ViewDefinition [ReferenceView]");
+}
