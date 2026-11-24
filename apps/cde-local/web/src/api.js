@@ -97,6 +97,7 @@ export const clashApi = {
   rerun: (id) => call('POST', `/api/clash/analises/${id}/reexecutar`),
   remove: (id) => call('DELETE', `/api/clash/analises/${id}`),
   update: (id, body) => call('PATCH', `/api/clash/analises/${id}/interferencias`, body),
+  bcfImport: (id, topicos) => call('POST', `/api/clash/analises/${id}/bcf`, { topicos }),
   /** Geometria (cache binário) de um modelo da análise. */
   async geometry(id, idx) {
     const token = loadSession()?.token;

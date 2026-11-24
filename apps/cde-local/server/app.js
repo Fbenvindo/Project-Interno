@@ -317,6 +317,7 @@ async function createApp({ dataDir, webDir = path.join(__dirname, '..', 'web-dis
       return loadDoc(d.id);
     });
     res.json(withCode(config(doc.empreendimento_id), doc));
+    setImmediate(() => clash.onDocumentChanged(doc.id));
   }));
 
   /** Link de download: do arquivo atual ou de um evento do histórico (?evento=ID). */
@@ -342,6 +343,7 @@ async function createApp({ dataDir, webDir = path.join(__dirname, '..', 'web-dis
   app.post('/api/cde/documentos/:id/estado', login, wrap((req, res) => {
     const doc = db.tx(() => applyState(loadDoc(req.params.id), req.body || {}, req.cdeUser));
     res.json(withCode(config(doc.empreendimento_id), doc));
+    setImmediate(() => clash.onDocumentChanged(doc.id));
   }));
 
   app.post('/api/cde/:empId/emissoes', login, wrap((req, res) => {
@@ -368,6 +370,7 @@ async function createApp({ dataDir, webDir = path.join(__dirname, '..', 'web-dis
       return { ...e, itens };
     });
     res.status(201).json(emissao);
+    setImmediate(() => ids.forEach((id) => clash.onDocumentChanged(id)));
   }));
 
   // ---- Interferências (clash) -------------------------------------------------------------------

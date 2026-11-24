@@ -25,6 +25,7 @@ import type { SheetDef } from "../../../core/viewDrawing";
 import type { PointsStore } from "../locacao/usePointsStore";
 import { saveFile, savePdf } from "../platform";
 import type { LinkMeta } from "../../../ifc/federate";
+import { ClashPendencias } from "./ClashPendencias";
 import { cde as cdeServer, DEFAULT_CDE_URL, isModelFile, loadSession, saveSession, type CdeSession, type Overview, type ServerDoc } from "./cdeClient";
 
 interface Props {
@@ -40,6 +41,8 @@ interface Props {
   onLinkFromCde: (doc: ServerDoc) => Promise<void>;
   links: LinkMeta[];
   linkStatus: Record<string, string>;
+  /** Seleciona e enquadra no 3D os elementos com esses GlobalIds; devolve quantos achou. */
+  onGoToElements?: (globalIds: string[]) => number;
 }
 
 interface Doc {
@@ -53,7 +56,7 @@ const today = () => new Date().toLocaleDateString("pt-BR");
 const cde_link = (x: CdeData) => x.servidor ?? null;
 const STATES: CdeState[] = ["andamento", "compartilhado", "publicado", "arquivado"];
 
-export function GestaoPanel({ store, modelDisciplines, sheetDefaults, onOpenSheet, makeFile, onLinkFromCde, links, linkStatus }: Props) {
+export function GestaoPanel({ store, modelDisciplines, sheetDefaults, onOpenSheet, makeFile, onLinkFromCde, links, linkStatus, onGoToElements }: Props) {
   const cde = store.cde;
   const c = cde.coding;
   const docs = useMemo<Doc[]>(
@@ -546,6 +549,15 @@ export function GestaoPanel({ store, modelDisciplines, sheetDefaults, onOpenShee
             })}
           </ul>
         </section>
+      )}
+
+      {linked && onGoToElements && (
+        <ClashPendencias
+          session={session!}
+          empreendimentoId={link!.empreendimentoId}
+          docIds={docs.map((d) => d.meta.cdeId).filter((x): x is number => x != null)}
+          onGoTo={onGoToElements}
+        />
       )}
 
       <section className="card">

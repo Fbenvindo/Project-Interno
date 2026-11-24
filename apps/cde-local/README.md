@@ -46,6 +46,29 @@ Na página do empreendimento, a aba **Interferências** cruza os modelos IFC do 
 4. **Relatório PDF:** as interferências filtradas, com imagem de cada uma (até 300).
 5. **Reexecutar:** roda de novo com as mesmas regras e a versão mais recente dos modelos.
 
+### Acompanhamento entre revisões, BCF e SmartEasyBIM
+
+- **Comparação:** cada análise é comparada com a anterior de mesmas regras.
+  - **Novas:** interferências que não estavam na análise anterior.
+  - **Continuam:** mantêm estado, responsável e comentários.
+  - **Reabertas:** estavam marcadas como resolvidas, mas a interferência ainda aparece.
+  - **Resolvidas pela revisão:** sumiram. A pendência antiga fica registrada como resolvida.
+- **Reexecução automática** (opção marcada por padrão): quando um modelo usado na análise recebe
+  revisão nova, a análise roda de novo sozinha e já sai comparada. Revisão nova quer dizer
+  emitida, ou só enviada se a análise usa a versão atual.
+- **Comentários:** cada interferência guarda um histórico. Mudanças de estado também ficam
+  registradas.
+- **BCF 2.1:**
+  - **Exportar BCF:** gera um tópico por interferência filtrada, com ponto de vista, os dois
+    elementos pelo GlobalId (em vermelho e azul) e a imagem. Abre no Revit (BCF Manager),
+    Navisworks, Solibri e BIMcollab.
+  - **Importar BCF:** traz de volta o status (Resolved/Closed → resolvida; In Progress → ativa) e
+    os comentários feitos nesses softwares, sem duplicar.
+- **SmartEasyBIM:** em *Gestão da informação*, o projeto ligado ao CDE mostra as interferências
+  em aberto dos seus modelos.
+  - **Ver:** seleciona os elementos no 3D pelo GlobalId.
+  - **Tratar:** comentar ou marcar como resolvida.
+
 ## Dados e backup
 
 Por padrão os dados ficam em `Documentos\SmartEasyBIM CDE`; dá para trocar a pasta no painel. A

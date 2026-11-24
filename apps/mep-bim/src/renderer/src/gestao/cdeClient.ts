@@ -114,5 +114,50 @@ export const cde = {
   },
 };
 
+/** Elemento de uma interferência (análise de clash do CDE). */
+export interface ClashElement {
+  id: number;
+  globalId: string;
+  tipo: string;
+  nome: string;
+  pavimento: string | null;
+  documento_id: number;
+  codigo: string;
+}
+export interface ClashComment {
+  id: number;
+  autor: string | null;
+  texto: string;
+  origem: string;
+  created_at: string;
+}
+export interface ClashItem {
+  id: number;
+  numero: number;
+  tipo: "colisao" | "folga";
+  distancia: number;
+  /** Ponto em coordenadas de cena do web-ifc (metros, Y para cima), absolutas. */
+  ponto: [number, number, number];
+  a: ClashElement;
+  b: ClashElement;
+  pavimento: string | null;
+  estado: "nova" | "ativa" | "resolvida" | "aprovada";
+  situacao?: "nova" | "mantida" | "reaberta";
+  responsavel_nome: string | null;
+  grupo_nome: string | null;
+  comentarios?: ClashComment[];
+}
+export interface ClashPending {
+  analises: { analise: { id: number; nome: string; concluida_at: string; modelos: { documento_id: number; codigo: string; revisao: string }[] }; interferencias: ClashItem[] }[];
+  estados: Record<string, string>;
+}
+
+export const clash = {
+  /** Interferências em aberto das análises mais recentes que envolvem estes documentos do CDE. */
+  pending: (s: CdeSession, empId: number, docIds: number[]) => json<ClashPending>(s, "GET", `/api/clash/${empId}/pendencias${docIds.length ? `?documentos=${docIds.join(",")}` : ""}`),
+  update: (s: CdeSession, analiseId: number, body: { ids: number[]; estado?: string; comentario?: string; origem?: string }) =>
+    json<ClashItem[]>(s, "PATCH", `/api/clash/analises/${analiseId}/interferencias`, body),
+};
+
 /** Arquivos que entram como vínculo (modelos de outras disciplinas). */
 export const isModelFile = (name: string | null) => !!name && /\.(ifc|sebmod)$/i.test(name);

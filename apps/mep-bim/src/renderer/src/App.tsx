@@ -911,6 +911,21 @@ export function App() {
     viewerRef.current?.fitTo(ids);
   }, []);
 
+  /** Interferência do CDE: seleciona no 3D os elementos (do projeto e dos vínculos) pelos GlobalIds. */
+  const goToGlobalIds = useCallback(
+    (globalIds: string[]) => {
+      const wanted = new Set(globalIds);
+      const ids = allElements.filter((e) => e.globalId && wanted.has(e.globalId)).map((e) => e.expressID);
+      if (!ids.length) return 0;
+      setView("3d");
+      setView3dId(null);
+      // Espera a vista 3D aparecer para enquadrar.
+      setTimeout(() => selectAndFrame(ids), 60);
+      return ids.length;
+    },
+    [allElements, selectAndFrame],
+  );
+
   const pointsRef = useRef(store.points);
   pointsRef.current = store.points;
   const selectPoints = useCallback((ids: number[], frame = false) => {
@@ -1789,6 +1804,7 @@ export function App() {
             onLinkFromCde={linkFromCde}
             links={store.links}
             linkStatus={linkStatus}
+            onGoToElements={goToGlobalIds}
           />
         );
       case "arq":
