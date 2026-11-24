@@ -112,7 +112,7 @@ export function GestaoPanel({ store, modelDisciplines, sheetDefaults, onOpenShee
 
   const ready = hasCoding(c);
 
-  // ---- CDE do servidor (sistema de gestão) ------------------------------------------------------
+  // ---- CDE do servidor (SmartEasyBIM CDE na rede do escritório) ------------------------------------------------------
   const [session, setSession] = useState<CdeSession | null>(loadSession);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [emps, setEmps] = useState<{ id: number; nome: string }[] | null>(null);
@@ -209,11 +209,11 @@ export function GestaoPanel({ store, modelDisciplines, sheetDefaults, onOpenShee
         <h4>CDE do servidor</h4>
         {!session && (
           <>
-            <p className="muted small">Entre com o usuário do sistema de gestão para publicar folhas e modelos no CDE do empreendimento e vincular os modelos das outras disciplinas.</p>
+            <p className="muted small">Entre com seu usuário do SmartEasyBIM CDE (o servidor do escritório) para publicar folhas e modelos no CDE do empreendimento e vincular os modelos das outras disciplinas. O endereço aparece no painel do servidor do CDE (ex.: http://servidor:4000).</p>
             <div className="form-grid">
               <label style={{ gridColumn: "1 / -1" }}>
                 Endereço
-                <input value={loginForm.url} onChange={(e) => setLoginForm({ ...loginForm, url: e.target.value })} />
+                <input value={loginForm.url} placeholder="http://servidor:4000" onChange={(e) => setLoginForm({ ...loginForm, url: e.target.value })} />
               </label>
               <label>
                 E-mail
@@ -296,7 +296,7 @@ export function GestaoPanel({ store, modelDisciplines, sheetDefaults, onOpenShee
 
       <section className="card">
         <h4>Codificação do projeto</h4>
-        {linked && <p className="muted small">Codificação do empreendimento no CDE (alterada pela coordenação no sistema de gestão).</p>}
+        {linked && <p className="muted small">Codificação do empreendimento no CDE (alterada pela coordenação no CDE).</p>}
         <div className="form-grid">
           <label title="Código curto do projeto/empreendimento (ex.: HTL)">
             Projeto
@@ -501,7 +501,7 @@ export function GestaoPanel({ store, modelDisciplines, sheetDefaults, onOpenShee
                   const r = await cdeServer.emit(session!, link!.empreendimentoId, { documento_ids: [...sent.values()], estado: emit.estado, finalidade: emit.finalidade, destinatario: emit.destinatario, observacoes: emit.observacoes });
                   await refresh();
                   setPicked(new Set());
-                  return `${r.numero} emitida no CDE com ${r.itens.length} documento(s). A GRD fica no sistema de gestão (aba CDE do empreendimento).`;
+                  return `${r.numero} emitida no CDE com ${r.itens.length} documento(s). A GRD fica no CDE (página do empreendimento).`;
                 })
               }
             >
