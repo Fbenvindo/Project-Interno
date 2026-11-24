@@ -25,6 +25,7 @@ import GestaoTab from "../components/empreendimento/GestaoTab";
 import PRETab from "../components/empreendimento/PRETab";
 import CadastroTab from "../components/empreendimento/CadastroTab";
 import ControleOSTab from "../components/empreendimento/ControleOSTab";
+import CdeTab from "../components/empreendimento/CdeTab";
 import ChecklistCadastroTab from "@/pages/ChecklistCadastro";
 import { ActivityTimerContext } from "@/components/contexts/ActivityTimerContext";
 
@@ -104,10 +105,10 @@ export default function EmpreendimentoPage() {
 
   const visibleTabsForUser = useMemo(() => {
     if (canEdit) {
-      return ['documentos', 'cadastro', 'pavimentos', 'atividades_projeto', 'pre', 'controle_os', 'gestao'];
+      return ['documentos', 'cadastro', 'pavimentos', 'atividades_projeto', 'pre', 'controle_os', 'cde', 'gestao'];
     }
-    // Padrão/Apoio: visualização de Documentos, Cadastro, Pavimentos e PRE
-    return ['documentos', 'cadastro', 'pavimentos', 'pre'];
+    // Padrão/Apoio: visualização de Documentos, Cadastro, Pavimentos, PRE e CDE (as permissões do CDE são do servidor)
+    return ['documentos', 'cadastro', 'pavimentos', 'pre', 'cde'];
   }, [canEdit]);
 
   const loadEmpreendimento = useCallback(async () => {
@@ -356,8 +357,8 @@ export default function EmpreendimentoPage() {
   const isGestaoLoading = sharedData.loading || tabData.documentos.loading || tabData.pavimentos.loading;
   const isGestaoLoaded = sharedData.loaded && tabData.documentos.loaded && tabData.pavimentos.loaded;
   const tabsGridClass = canEdit
-    ? (hasAccessToGestao ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-8' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-7')
-    : 'grid-cols-4';
+    ? (hasAccessToGestao ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-9' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-8')
+    : 'grid-cols-5';
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
@@ -373,6 +374,7 @@ export default function EmpreendimentoPage() {
             {visibleTabsForUser.includes('atividades_projeto') && <TabsTrigger value="atividades_projeto">Atividades do Projeto</TabsTrigger>}
             {visibleTabsForUser.includes('pre') && <TabsTrigger value="pre">PRE</TabsTrigger>}
             {visibleTabsForUser.includes('controle_os') && <TabsTrigger value="controle_os">Controle OS</TabsTrigger>}
+            {visibleTabsForUser.includes('cde') && <TabsTrigger value="cde">CDE</TabsTrigger>}
             {hasAccessToGestao && visibleTabsForUser.includes('gestao') && (
               <TabsTrigger value="gestao">Gestão</TabsTrigger>
             )}
@@ -486,6 +488,8 @@ export default function EmpreendimentoPage() {
               />
             ) : null)}
           </TabsContent>
+
+          <TabsContent value="cde">{mountedTabs.has('cde') && <CdeTab empreendimento={empreendimento} />}</TabsContent>
 
           {hasAccessToGestao && (
             <TabsContent value="gestao">

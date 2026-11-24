@@ -585,3 +585,74 @@ CREATE TABLE IF NOT EXISTS atividades_genericas (
 
 ALTER TABLE atividades_genericas ADD COLUMN IF NOT EXISTS id SERIAL;
 ALTER TABLE atividades_genericas ADD COLUMN IF NOT EXISTS usuario_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+
+-- ============================================================================
+-- CDE (Ambiente Comum de Dados, ISO 19650): documentos de qualquer software por
+-- empreendimento, com código, revisões, estados, arquivos (S3) e emissões (GRD).
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS cde_config (
+  empreendimento_id INTEGER PRIMARY KEY REFERENCES empreendimentos(id) ON DELETE CASCADE,
+  projeto VARCHAR(20) NOT NULL DEFAULT '',
+  originador VARCHAR(20) NOT NULL DEFAULT '',
+  volume VARCHAR(10) NOT NULL DEFAULT 'ZZ',
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS cde_documentos (
+  id SERIAL PRIMARY KEY,
+  empreendimento_id INTEGER NOT NULL REFERENCES empreendimentos(id) ON DELETE CASCADE,
+  volume VARCHAR(10) NOT NULL DEFAULT '',
+  nivel VARCHAR(10) NOT NULL DEFAULT 'ZZ',
+  tipo VARCHAR(10) NOT NULL DEFAULT 'DR',
+  disciplina VARCHAR(10) NOT NULL DEFAULT 'ZZ',
+  numero VARCHAR(10) NOT NULL,
+  titulo TEXT NOT NULL,
+  revisao VARCHAR(10) NOT NULL DEFAULT 'P01',
+  estado VARCHAR(20) NOT NULL DEFAULT 'andamento',
+  finalidade VARCHAR(5) NOT NULL DEFAULT 'S0',
+  arquivo_key TEXT,
+  arquivo_nome TEXT,
+  tamanho BIGINT,
+  content_type TEXT,
+  origem VARCHAR(30) NOT NULL DEFAULT 'web',
+  criado_por TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (empreendimento_id, volume, nivel, tipo, disciplina, numero)
+);
+CREATE INDEX IF NOT EXISTS idx_cde_documentos_emp ON cde_documentos (empreendimento_id);
+
+-- Histórico: cada arquivo enviado e cada mudança de estado.
+CREATE TABLE IF NOT EXISTS cde_eventos (
+  id SERIAL PRIMARY KEY,
+  documento_id INTEGER NOT NULL REFERENCES cde_documentos(id) ON DELETE CASCADE,
+  tipo VARCHAR(10) NOT NULL,
+  revisao VARCHAR(10) NOT NULL,
+  estado VARCHAR(20) NOT NULL,
+  finalidade VARCHAR(5) NOT NULL,
+  descricao TEXT,
+  arquivo_key TEXT,
+  arquivo_nome TEXT,
+  tamanho BIGINT,
+  content_type TEXT,
+  sha256 VARCHAR(64),
+  autor_id TEXT,
+  autor_nome TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_cde_eventos_doc ON cde_eventos (documento_id, id);
+
+CREATE TABLE IF NOT EXISTS cde_emissoes (
+  id SERIAL PRIMARY KEY,
+  empreendimento_id INTEGER NOT NULL REFERENCES empreendimentos(id) ON DELETE CASCADE,
+  numero VARCHAR(20) NOT NULL,
+  data DATE NOT NULL DEFAULT CURRENT_DATE,
+  destinatario TEXT,
+  finalidade VARCHAR(5) NOT NULL,
+  observacoes TEXT,
+  autor_nome TEXT,
+  itens JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (empreendimento_id, numero)
+);

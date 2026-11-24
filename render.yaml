@@ -16,6 +16,17 @@ services:
         sync: false
       - key: CORS_ALLOWED_ORIGINS
         sync: false
+      # CDE: armazenamento dos arquivos (S3, R2 ou B2). Ver server/README.md.
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
 
   - type: static
     name: project-oficial-web
