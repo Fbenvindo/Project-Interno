@@ -9,6 +9,7 @@ const rules = require('./rules');
 const auth = require('./auth');
 const { openDb } = require('./db');
 const { createStorage } = require('./storage');
+const { createClash } = require('./clash');
 
 const DOC_FIELDS = ['volume', 'nivel', 'tipo', 'disciplina', 'numero'];
 const VERSION = require('../package.json').version;
@@ -17,7 +18,7 @@ const isLoopback = (req) => /^(::1|127\.\d+\.\d+\.\d+|::ffff:127\.\d+\.\d+\.\d+)
 
 /**
  * Cria o servidor. `dataDir`: pasta do banco e dos arquivos. `webDir`: interface web compilada.
- * Devolve { app, db, storage }.
+ * Devolve { app, db, storage, clash }.
  */
 async function createApp({ dataDir, webDir = path.join(__dirname, '..', 'web-dist') }) {
   const db = await openDb(dataDir);
@@ -369,6 +370,9 @@ async function createApp({ dataDir, webDir = path.join(__dirname, '..', 'web-dis
     res.status(201).json(emissao);
   }));
 
+  // ---- Interferências (clash) -------------------------------------------------------------------
+  const clash = createClash({ app, db, storage, dataDir, rules, login, wrap, fail, isApprover, config, empOf });
+
   app.use('/api', (req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
 
   // ---- Interface web ----------------------------------------------------------------------------------
@@ -377,7 +381,7 @@ async function createApp({ dataDir, webDir = path.join(__dirname, '..', 'web-dis
     app.get('*', (req, res) => res.sendFile(path.join(webDir, 'index.html')));
   }
 
-  return { app, db, storage };
+  return { app, db, storage, clash };
 }
 
 module.exports = { createApp, VERSION };

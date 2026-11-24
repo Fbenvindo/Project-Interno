@@ -1,10 +1,13 @@
 // Interface do CDE local: primeira configuração, login, empreendimentos, CDE de cada empreendimento
 // e usuários (administrador). Navegação pelo endereço (#/emp/ID, #/usuarios, #/senha).
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Building2, KeyRound, LogOut, Plus, RefreshCw, Users } from 'lucide-react';
+import { ArrowLeft, Boxes, Building2, FileText, KeyRound, LogOut, Plus, RefreshCw, Users } from 'lucide-react';
 import { api, loadSession, saveSession, setOnExpired } from './api';
 import { Button, Card, CardContent, CardHeader, CardTitle, Field, Input } from './ui';
 import CdeView from './CdeView';
+import ClashPanel from './clash/ClashPanel';
+// O visualizador 3D (three.js) só é baixado ao abrir uma análise.
+const ClashView = React.lazy(() => import('./clash/ClashView'));
 
 const PERFIL = { admin: 'Administrador', coordenador: 'Coordenação', colaborador: 'Colaborador' };
 
@@ -340,7 +343,7 @@ function PasswordForm() {
   );
 }
 
-function ProjectPage({ id }) {
+function ProjectPage({ id, sub, user }) {
   const [emp, setEmp] = useState(null);
   useEffect(() => {
     api
@@ -349,16 +352,34 @@ function ProjectPage({ id }) {
       .catch(() => setEmp({ id: Number(id), nome: `Empreendimento ${id}` }));
   }, [id]);
   if (!emp) return null;
+  const canApprove = user.perfil === 'admin' || user.perfil === 'coordenador';
+  const clashId = /^interferencias\/(\d+)/.exec(sub || '')?.[1];
+  const tab = (sub || '').startsWith('interferencias') ? 'interferencias' : 'documentos';
+  const tabCls = (t) => `px-3 py-1.5 text-sm rounded-md ${tab === t ? 'bg-white shadow-sm font-medium' : 'text-gray-600 hover:text-gray-900'}`;
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button variant="ghost" size="sm" onClick={() => go('#/')}>
           <ArrowLeft className="w-4 h-4 mr-1" /> Empreendimentos
         </Button>
         <h1 className="text-xl font-semibold">{emp.nome}</h1>
         {emp.cliente && <span className="text-sm text-gray-500">· {emp.cliente}</span>}
+        <div className="ml-auto flex gap-1 bg-gray-100 p-1 rounded-lg">
+          <button className={tabCls('documentos')} onClick={() => go(`#/emp/${id}`)}>
+            <FileText className="w-4 h-4 inline mr-1" /> Documentos
+          </button>
+          <button className={tabCls('interferencias')} onClick={() => go(`#/emp/${id}/interferencias`)}>
+            <Boxes className="w-4 h-4 inline mr-1" /> Interferências
+          </button>
+        </div>
       </div>
-      <CdeView empreendimento={emp} />
+      {tab === 'documentos' && <CdeView empreendimento={emp} />}
+      {tab === 'interferencias' && !clashId && <ClashPanel empreendimento={emp} canApprove={canApprove} onOpen={(aid) => go(`#/emp/${id}/interferencias/${aid}`)} />}
+      {tab === 'interferencias' && clashId && (
+        <React.Suspense fallback={<p className="text-sm text-gray-500">Carregando o visualizador…</p>}>
+          <ClashView key={clashId} empreendimento={emp} analiseId={Number(clashId)} canApprove={canApprove} onBack={() => go(`#/emp/${id}/interferencias`)} />
+        </React.Suspense>
+      )}
     </div>
   );
 }
@@ -391,8 +412,8 @@ export default function App() {
   if (!session) return <Login status={status} onDone={setSession} />;
 
   const user = session.user;
-  const emp = /^#\/emp\/(\d+)/.exec(hash)?.[1];
-  const page = emp ? <ProjectPage id={emp} /> : hash.startsWith('#/usuarios') && user.perfil === 'admin' ? <UsersAdmin me={user} /> : hash.startsWith('#/senha') ? <PasswordForm /> : <Projects user={user} />;
+  const empMatch = /^#\/emp\/(\d+)\/?(.*)$/.exec(hash);
+  const page = empMatch ? <ProjectPage id={empMatch[1]} sub={empMatch[2]} user={user} /> : hash.startsWith('#/usuarios') && user.perfil === 'admin' ? <UsersAdmin me={user} /> : hash.startsWith('#/senha') ? <PasswordForm /> : <Projects user={user} />;
 
   return (
     <div className="min-h-screen">

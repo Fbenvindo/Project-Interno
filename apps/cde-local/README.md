@@ -24,6 +24,28 @@ CDE (Ambiente Comum de Dados, ISO 19650) que roda num computador do escritório 
 5. Marque **Iniciar o CDE junto com o Windows**. O computador precisa ficar ligado para a equipe
    usar o CDE.
 
+## Interferências (clash)
+
+Na página do empreendimento, a aba **Interferências** cruza os modelos IFC do CDE.
+
+1. **Nova análise:** marque os modelos do lado A e do lado B e escolha as regras.
+   - **Versão dos modelos:** a última emitida (compartilhada ou publicada) ou a atual.
+   - **Colisão física:** elementos que se atravessam ou um embutido no outro. Sobreposições
+     até a **tolerância** são ignoradas.
+   - **Folga mínima:** elementos que não colidem, mas ficam mais próximos que a distância.
+   - **Ignorar tipos IFC:** lista de tipos que ficam fora da análise.
+2. **Processamento:** roda no servidor, uma análise de cada vez e numa thread separada; a lista
+   mostra o andamento. A geometria de cada arquivo IFC é processada uma vez e guardada em
+   `cache\geometria`.
+3. **Resultado:**
+   - Interferências agrupadas: o mesmo elemento em várias interferências vira um grupo.
+   - Filtros por estado, tipo, pavimento e responsável.
+   - Visualizador 3D: elemento A em vermelho, B em azul, demais modelos transparentes.
+   - Para cada interferência: estado (nova, ativa, resolvida, aprovada), responsável e
+     comentário. Também dá para editar várias de uma vez. Só a coordenação aprova.
+4. **Relatório PDF:** as interferências filtradas, com imagem de cada uma (até 300).
+5. **Reexecutar:** roda de novo com as mesmas regras e a versão mais recente dos modelos.
+
 ## Dados e backup
 
 Por padrão os dados ficam em `Documentos\SmartEasyBIM CDE`; dá para trocar a pasta no painel. A
@@ -31,7 +53,8 @@ pasta contém:
 
 - `cde.sqlite`: o banco;
 - `arquivos\`: os arquivos enviados;
-- `backups\`: uma cópia do banco por dia, mantendo as 14 mais recentes.
+- `backups\`: uma cópia do banco por dia, mantendo as 14 mais recentes;
+- `cache\`: a geometria processada dos IFCs. Pode ser apagada: é refeita quando necessário.
 
 Para backup, copie a pasta inteira. Para mudar de servidor, copie a pasta para o novo computador
 e escolha-a em **Usar outra pasta…**.
