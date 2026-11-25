@@ -1,48 +1,166 @@
-SmartEasyBIM para Revit
-=======================
+SmartEasyBIM para Revit — manual de instrução
+=============================================
 
-Exporta famílias do Revit (geometria 3D, tipos, parâmetros e conectores) para a
-biblioteca do aplicativo SmartEasyBIM, e o modelo do projeto (elementos, famílias,
-categorias e parâmetros, com níveis, ambientes, eixos e coordenadas) para ser aberto
-ou vinculado no SmartEasyBIM. Publica o modelo em IFC no SmartEasyBIM CDE e mostra
-no Revit as interferências encontradas pelo CDE.
+O plugin acrescenta a aba "SmartEasyBIM" ao Revit, com três painéis:
 
-Instalação
-----------
+  Biblioteca   Exportar famílias     famílias do Revit para a biblioteca do SmartEasyBIM
+  Modelo       Exportar modelo       o modelo do projeto para abrir ou vincular no SmartEasyBIM
+  CDE          Publicar no CDE       o modelo em IFC como nova revisão no SmartEasyBIM CDE
+               Interferências        as interferências do CDE, mostradas no próprio modelo
+
+Funciona no Revit 2022, 2023, 2024, 2025, 2026 e 2027.
+
+
+1. Instalação
+-------------
 1. Feche o Revit.
-2. Clique duas vezes em Instalar.bat. O plugin é instalado em todas as versões do
-   Revit encontradas (2022 a 2027), só para o seu usuário (não precisa de administrador).
-3. Abra o Revit. Na primeira vez, o Revit pergunta se deve carregar o plugin
+2. Extraia o arquivo .zip baixado para uma pasta (não rode de dentro do .zip).
+3. Clique duas vezes em Instalar.bat. O plugin é instalado em todas as versões do Revit
+   encontradas no computador, só para o seu usuário (não precisa de administrador).
+   A janela mostra em quais versões instalou; pressione Enter para fechar.
+4. Abra o Revit. Na primeira vez, o Revit pergunta se deve carregar o plugin
    "SmartEasyBIM": escolha "Sempre carregar".
 
-Uso
----
-- Aba SmartEasyBIM > Exportar famílias.
-- Num projeto: marque as famílias carregadas que quer levar (as de instalações já vêm
-  marcadas) e salve o arquivo .sebfam.
-- No editor de famílias: a família aberta é exportada.
-- No SmartEasyBIM: Arquivo > Importar elementos em IFC > Importar famílias (.sebfam).
+Atualização: feche o Revit e rode o Instalar.bat da versão nova (substitui a anterior).
+Desinstalação: feche o Revit e clique duas vezes em Desinstalar.bat.
 
-- Aba SmartEasyBIM > Exportar modelo: marque as categorias (arquitetura e estrutura já
-  vêm marcadas) e salve o arquivo .sebmod. No SmartEasyBIM: Arquivo > Novo projeto
-  (modelo base) ou Vincular IFC (referência). Plantas, vistas e folhas não são
-  exportadas: o SmartEasyBIM monta as suas.
 
-- Aba SmartEasyBIM > Publicar no CDE: na primeira vez, informe o endereço do servidor
-  do CDE do escritório (ex.: http://SERVIDOR:4000), o e-mail e a senha, e escolha o
-  empreendimento e o documento (ou crie um novo modelo 3D). O plugin exporta o IFC
-  (coordenadas compartilhadas, GUIDs fixos; o modelo inteiro ou só o visível na vista 3D
-  atual) e envia como nova revisão; marcado "Compartilhar", as análises de interferências
-  que usam este modelo rodam de novo no CDE. Nas próximas vezes as escolhas já vêm prontas.
-- Aba SmartEasyBIM > Interferências: lista as interferências em aberto deste modelo no CDE.
-  "Ver no modelo" (ou duplo clique) seleciona os elementos, deste modelo e dos vínculos, e
-  abre a vista 3D "SmartEasyBIM — Interferências" com caixa de corte em volta. Dá para
-  comentar e marcar como em tratamento ou resolvida (vai direto para o CDE).
+2. Exportar famílias (painel Biblioteca)
+----------------------------------------
+Leva famílias do Revit (geometria 3D, tipos, parâmetros e conectores) para a biblioteca
+do SmartEasyBIM.
 
-Exportar famílias e modelo só leem o projeto. Publicar no CDE exporta o IFC numa transação
-que é desfeita (nada fica alterado); Interferências cria/ajusta só a vista 3D
-"SmartEasyBIM — Interferências".
+1. Num projeto: clique em "Exportar famílias", marque as famílias carregadas que quer
+   levar (as de instalações já vêm marcadas) e salve o arquivo .sebfam.
+   No editor de famílias: a família aberta é exportada.
+2. No SmartEasyBIM: Arquivo > Importar elementos em IFC > "Famílias do Revit (.sebfam)…"
+   e escolha o arquivo.
 
-Desinstalação
--------------
-Clique duas vezes em Desinstalar.bat.
+
+3. Exportar modelo (painel Modelo)
+----------------------------------
+Leva o modelo do projeto (elementos, famílias, tipos, categorias e parâmetros, com níveis,
+ambientes, eixos e coordenadas) para o SmartEasyBIM.
+
+1. Clique em "Exportar modelo", marque as categorias (arquitetura e estrutura já vêm
+   marcadas) e salve o arquivo .sebmod.
+2. No SmartEasyBIM: Arquivo > "Novo projeto" (para usar como modelo base) ou
+   Arquivo > "Vincular IFC" (como referência) e escolha o .sebmod.
+
+Plantas, vistas e folhas não são exportadas: o SmartEasyBIM monta as suas.
+
+
+4. Publicar no CDE (painel CDE)
+-------------------------------
+Exporta o modelo em IFC e envia como nova revisão de um documento no SmartEasyBIM CDE
+(o servidor do CDE do escritório). Com o modelo compartilhado, as análises de
+interferências que usam este modelo rodam de novo sozinhas no CDE.
+
+Antes da primeira vez, tenha em mãos:
+  - o endereço do servidor do CDE (aparece no painel do servidor, ex.: http://SERVIDOR:4000);
+  - o seu e-mail e senha do CDE (cadastrados pelo administrador do CDE).
+
+Passo a passo:
+1. Abra o projeto e clique em "Publicar no CDE".
+2. Servidor do CDE: informe o endereço, o e-mail e a senha e clique em "Entrar".
+   A sessão fica guardada; nas próximas vezes já aparece "Conectado como …".
+3. Destino: escolha o empreendimento e o documento que recebe o modelo.
+   - Se o modelo ainda não existe no CDE, escolha "(novo documento — modelo 3D)" e
+     informe o título, a disciplina e o nível (ZZ = vários níveis).
+   - O IFC vai com o nome do código do documento (ex.: HTL-SEB-ZZ-ZZ-M3-ES-0001.ifc).
+4. Exportação IFC:
+   - Versão: IFC 2x3 (Coordination View) atende a maioria dos casos; IFC4 (Reference
+     View) se o escritório tiver padronizado o IFC4.
+   - "Só os elementos visíveis na vista 3D atual": para publicar só uma parte do modelo
+     (ex.: só a hidráulica de um modelo de instalações). Fica disponível quando a vista
+     ativa é uma vista 3D; o resultado depende do que está visível nela.
+   O IFC sai sempre nas coordenadas compartilhadas e com os mesmos GUIDs dos elementos a
+   cada publicação (é o que permite ao CDE comparar as revisões).
+5. Depois de enviar:
+   - "Compartilhar depois de enviar" (recomendado), com a finalidade S1 (para
+     coordenação), S2 (informação), S3 (revisão e comentários) ou S4 (aprovação).
+     Sem marcar, a revisão fica "em andamento" no CDE e as análises que usam a versão
+     emitida não rodam.
+   - Descrição: o que mudou nesta revisão (vai para o histórico do documento).
+6. Clique em "Publicar". Ao final aparece o código, a revisão (ex.: P02) e o estado.
+
+Nas próximas publicações deste projeto, empreendimento, documento e opções já vêm
+escolhidos: é só conferir e clicar em "Publicar".
+
+Para o CDE comparar bem as disciplinas, todas devem exportar com as mesmas coordenadas
+compartilhadas (combine o ponto de levantamento entre os projetistas).
+
+
+5. Interferências (painel CDE)
+------------------------------
+Mostra as interferências em aberto deste modelo encontradas pelas análises do CDE
+(colisões e folgas insuficientes com as outras disciplinas).
+
+O modelo precisa ter sido publicado pelo "Publicar no CDE" ao menos uma vez (é o que
+liga o arquivo ao documento do CDE) e você precisa estar conectado ao CDE.
+
+1. Clique em "Interferências". A janela fica aberta ao lado do Revit enquanto você
+   trabalha.
+2. Cada linha traz: número, tipo (colisão ou folga), o elemento deste modelo, o
+   elemento com que interfere e de qual modelo, pavimento, medida e estado.
+   "(nova)" = apareceu nesta análise; "(reaberta)" = estava resolvida e continua.
+3. "Ver no modelo" (ou duplo clique na linha): o plugin acha os dois elementos (neste
+   modelo e nos vínculos do Revit), seleciona-os e abre a vista 3D
+   "SmartEasyBIM — Interferências" com uma caixa de corte em volta da interferência.
+4. Registre o tratamento (fica no CDE, com o seu nome):
+   - escreva um comentário (ex.: "desviado por baixo da viga, sobe 30 cm");
+   - "Em tratamento": está sendo resolvida;
+   - "Resolvida": já corrigiu no modelo;
+   - "Só comentar": registra o comentário sem mudar o estado.
+5. Depois de corrigir, publique de novo pelo "Publicar no CDE". A análise roda outra
+   vez no CDE e confirma o que foi resolvido (o que não sumir volta como reaberta).
+6. "Atualizar" busca de novo a lista no CDE.
+
+Seleção de elementos de vínculos: no Revit 2024 ou mais novo. Nas versões anteriores, só
+os elementos do próprio modelo ficam selecionados (a vista com a caixa de corte mostra
+os dois).
+
+
+6. O que o plugin altera no projeto
+-----------------------------------
+- Exportar famílias e Exportar modelo: nada (só leem o projeto).
+- Publicar no CDE: nada. A exportação do IFC é feita numa transação que é desfeita no fim.
+- Interferências: só cria (ou ajusta a caixa de corte de) a vista 3D
+  "SmartEasyBIM — Interferências". Pode apagá-la quando quiser; é recriada se preciso.
+
+A sessão do CDE e as escolhas de cada projeto ficam em
+%APPDATA%\SmartEasyBIM\revit-cde.json (do seu usuário do Windows).
+
+
+7. Problemas comuns
+-------------------
+A aba SmartEasyBIM não aparece
+  - Confira se o Instalar.bat mostrou a sua versão do Revit e reabra o Revit.
+  - Se o Revit perguntou sobre o plugin e você escolheu "Não carregar", rode o
+    Instalar.bat de novo e escolha "Sempre carregar".
+
+"Não foi possível falar com o CDE"
+  - Confira o endereço (com http:// e a porta, ex.: http://SERVIDOR:4000) abrindo-o no
+    navegador: deve aparecer a página de login do CDE.
+  - O computador do servidor precisa estar ligado e com o SmartEasyBIM CDE aberto (ícone
+    na bandeja). Na primeira vez, o Firewall do Windows do servidor precisa permitir o
+    acesso à rede.
+  - Fora do escritório, o CDE só é acessível por VPN ou túnel.
+
+"Sessão do CDE expirada" ou "E-mail ou senha incorretos"
+  - Entre de novo pelo "Publicar no CDE". Esqueceu a senha: peça ao administrador do CDE
+    para trocá-la (CDE > Usuários).
+
+"Este modelo ainda não está ligado a um documento do CDE"
+  - Use "Publicar no CDE" uma vez neste projeto.
+
+Interferências: "elementos não encontrados" ao clicar em "Ver no modelo"
+  - O modelo aberto não é o mesmo que foi publicado (ex.: outro arquivo) ou os
+    elementos foram apagados/recriados (o GUID mudou).
+  - O outro elemento é de outra disciplina: para vê-lo selecionado, vincule o modelo
+    dela no Revit. Mesmo sem ele, a vista com a caixa de corte mostra a região.
+
+A exportação IFC falha
+  - Teste exportar pelo próprio Revit (Arquivo > Exportar > IFC). Se lá também falhar,
+    o problema está no modelo ou no exportador IFC do Revit (atualize-o pelo site da
+    Autodesk).
