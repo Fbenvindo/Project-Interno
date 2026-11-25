@@ -1,14 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!--
     Plugin do SmartEasyBIM para o Revit: exporta famílias (geometria, tipos, parâmetros e
-    conectores) para a biblioteca do aplicativo.
+    conectores) e o modelo para o aplicativo, publica o IFC no SmartEasyBIM CDE e mostra as
+    interferências do CDE no modelo.
     Compile uma versão por vez:  dotnet build -c Release -p:RevitVersion=2024
   -->
   <PropertyGroup>
     <RevitVersion Condition="'$(RevitVersion)' == ''">2024</RevitVersion>
     <AssemblyName>SmartEasyBIM.Revit</AssemblyName>
     <RootNamespace>SmartEasyBIM.Revit</RootNamespace>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Company>SmartEasyBIM</Company>
     <Product>SmartEasyBIM para Revit</Product>
     <LangVersion>latest</LangVersion>
@@ -69,5 +70,6 @@
     <Reference Include="System.Xaml" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.Net.Http" />
   </ItemGroup>
 </Project>

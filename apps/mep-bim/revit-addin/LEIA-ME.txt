@@ -4,7 +4,8 @@ SmartEasyBIM para Revit
 Exporta famílias do Revit (geometria 3D, tipos, parâmetros e conectores) para a
 biblioteca do aplicativo SmartEasyBIM, e o modelo do projeto (elementos, famílias,
 categorias e parâmetros, com níveis, ambientes, eixos e coordenadas) para ser aberto
-ou vinculado no SmartEasyBIM.
+ou vinculado no SmartEasyBIM. Publica o modelo em IFC no SmartEasyBIM CDE e mostra
+no Revit as interferências encontradas pelo CDE.
 
 Instalação
 ----------
@@ -27,7 +28,20 @@ Uso
   (modelo base) ou Vincular IFC (referência). Plantas, vistas e folhas não são
   exportadas: o SmartEasyBIM monta as suas.
 
-O plugin só lê as famílias: nada é alterado no projeto nem nos arquivos .rfa.
+- Aba SmartEasyBIM > Publicar no CDE: na primeira vez, informe o endereço do servidor
+  do CDE do escritório (ex.: http://SERVIDOR:4000), o e-mail e a senha, e escolha o
+  empreendimento e o documento (ou crie um novo modelo 3D). O plugin exporta o IFC
+  (coordenadas compartilhadas, GUIDs fixos; o modelo inteiro ou só o visível na vista 3D
+  atual) e envia como nova revisão; marcado "Compartilhar", as análises de interferências
+  que usam este modelo rodam de novo no CDE. Nas próximas vezes as escolhas já vêm prontas.
+- Aba SmartEasyBIM > Interferências: lista as interferências em aberto deste modelo no CDE.
+  "Ver no modelo" (ou duplo clique) seleciona os elementos, deste modelo e dos vínculos, e
+  abre a vista 3D "SmartEasyBIM — Interferências" com caixa de corte em volta. Dá para
+  comentar e marcar como em tratamento ou resolvida (vai direto para o CDE).
+
+Exportar famílias e modelo só leem o projeto. Publicar no CDE exporta o IFC numa transação
+que é desfeita (nada fica alterado); Interferências cria/ajusta só a vista 3D
+"SmartEasyBIM — Interferências".
 
 Desinstalação
 -------------

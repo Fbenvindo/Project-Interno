@@ -69,6 +69,20 @@ Na página do empreendimento, a aba **Interferências** cruza os modelos IFC do 
   - **Ver:** seleciona os elementos no 3D pelo GlobalId.
   - **Tratar:** comentar ou marcar como resolvida.
 
+### Revit
+
+O plugin SmartEasyBIM para Revit (`apps/mep-bim/revit-addin`) tem o painel **CDE**:
+
+- **Publicar no CDE:** exporta o IFC do modelo com o exportador do Revit, com coordenadas
+  compartilhadas e GUIDs fixos. Envia como nova revisão do documento e, se marcado, compartilha.
+  A análise de interferências roda de novo sozinha.
+- **Interferências:** lista as pendências em aberto do modelo.
+  - **Ver no modelo:** seleciona os elementos, inclusive os dos vínculos, e abre uma vista 3D
+    com caixa de corte em volta.
+  - Dá para comentar e marcar como em tratamento ou resolvida.
+
+Para quem não usa Revit, continua valendo exportar o IFC e enviar pela página do CDE.
+
 ## Dados e backup
 
 Por padrão os dados ficam em `Documentos\SmartEasyBIM CDE`; dá para trocar a pasta no painel. A

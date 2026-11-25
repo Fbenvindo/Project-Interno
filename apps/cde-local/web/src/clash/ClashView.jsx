@@ -468,10 +468,10 @@ export default function ClashView({ empreendimento, analiseId, canApprove, onBac
                 </div>
                 <div className="max-h-28 overflow-auto space-y-1 text-xs">
                   {(current.comentarios || []).map((k) => (
-                    <div key={k.id} className={`rounded px-2 py-1 ${k.origem === 'sistema' ? 'bg-gray-50 text-gray-500' : k.origem === 'bcf' ? 'bg-indigo-50' : k.origem === 'smarteasybim' ? 'bg-sky-50' : 'bg-amber-50'}`}>
+                    <div key={k.id} className={`rounded px-2 py-1 ${k.origem === 'sistema' ? 'bg-gray-50 text-gray-500' : k.origem === 'bcf' ? 'bg-indigo-50' : k.origem === 'smarteasybim' || k.origem === 'revit' ? 'bg-sky-50' : 'bg-amber-50'}`}>
                       <span className="text-gray-500">
                         {k.autor} · {fmtDate(k.created_at)}
-                        {k.origem === 'bcf' ? ' · BCF' : k.origem === 'smarteasybim' ? ' · SmartEasyBIM' : ''}
+                        {k.origem === 'bcf' ? ' · BCF' : k.origem === 'smarteasybim' ? ' · SmartEasyBIM' : k.origem === 'revit' ? ' · Revit' : ''}
                       </span>
                       <div>{k.texto}</div>
                     </div>
