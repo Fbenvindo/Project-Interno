@@ -37,6 +37,26 @@ namespace SmartEasyBIM.Revit
                 Image = Icons.Logo(16),
             };
             modelPanel.AddItem(model);
+
+            var cdePanel = application.CreateRibbonPanel(TabName, "CDE");
+            cdePanel.AddItem(new PushButtonData("SmartEasyBIM.PublicarCde", "Publicar\nno CDE", assembly, typeof(PublishCommand).FullName)
+            {
+                ToolTip = "Exporta o IFC deste modelo e envia como nova revisão do documento no SmartEasyBIM CDE.",
+                LongDescription =
+                    "Na primeira vez, entre no CDE (endereço do servidor do escritório, e-mail e senha) e escolha o empreendimento e o documento (ou crie um). " +
+                    "O IFC sai com as coordenadas compartilhadas e os GUIDs fixos; compartilhado, ele faz as análises de interferências rodarem de novo no CDE.",
+                LargeImage = Icons.Logo(32),
+                Image = Icons.Logo(16),
+            });
+            cdePanel.AddItem(new PushButtonData("SmartEasyBIM.Interferencias", "Interfe-\nrências", assembly, typeof(ClashesCommand).FullName)
+            {
+                ToolTip = "Interferências em aberto deste modelo nas análises do CDE: ver no modelo, comentar e marcar como resolvida.",
+                LongDescription =
+                    "\"Ver no modelo\" seleciona os elementos (deste modelo e dos vínculos) e abre a vista 3D \"SmartEasyBIM — Interferências\" com caixa de corte em volta. " +
+                    "O modelo precisa ter sido publicado pelo \"Publicar no CDE\" (que liga o arquivo ao documento).",
+                LargeImage = Icons.Logo(32),
+                Image = Icons.Logo(16),
+            });
             return Result.Succeeded;
         }
 
