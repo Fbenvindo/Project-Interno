@@ -60,6 +60,27 @@ export interface Circuit {
   correction: number;
   /** Limite de queda de tensão do circuito (%). */
   dropLimit: number;
+  /** Resultado do cálculo de Quadros Terminais do SmartEasyWEB (vale sobre o cálculo local). */
+  web?: CircuitWebResult;
+}
+
+/** Dimensionamento feito no SmartEasyWEB (Quadros Terminais) e trazido para o modelo. */
+export interface CircuitWebResult {
+  calculadoEm: string;
+  quadro: string;
+  /** Potência ativa considerada lá (W): se as cargas mudarem aqui, o resultado fica desatualizado. */
+  potenciaW: number;
+  correnteA: number;
+  disjuntorA: number;
+  curva: string;
+  bitolaFaseMm2: number | null;
+  bitolaTerraMm2: number | null;
+  temNeutro: boolean;
+  quedaPercent: number;
+  quedaOk: boolean;
+  curtoOk: boolean;
+  /** Eletroduto sugerido (bitola nominal, ex.: "20 (1/2\")"). */
+  eletroduto: string | null;
 }
 
 let circuitSerial = 1;
@@ -179,7 +200,7 @@ export interface CircuitCalc {
   breaker: number | null;
   section: number | null;
   /** Critério que definiu a seção. */
-  criterion: "mínima" | "capacidade" | "queda" | null;
+  criterion: "mínima" | "capacidade" | "queda" | "SmartEasyWEB" | null;
   /** Capacidade de condução corrigida da seção escolhida (A). */
   iz: number | null;
   drop: number | null;
@@ -209,7 +230,7 @@ export function calcCircuit(c: Circuit, sys: PanelSystem, panelPosition: Vec3 | 
 
   const loaded: 2 | 3 = c.poles === 3 ? 3 : 2;
   const minimum = SECAO_MINIMA_COBRE[c.type === "iluminacao" ? "iluminacao" : "forca"];
-  const breaker = BREAKERS.find((b) => b >= current - 1e-9) ?? null;
+  let breaker = BREAKERS.find((b) => b >= current - 1e-9) ?? null;
   if (breaker == null) warnings.push("Corrente acima dos disjuntores da lista.");
   const sistema: SistemaEletrico = c.poles === 1 ? "monofasico" : c.poles === 2 ? "bifasico" : "trifasico";
 
@@ -218,13 +239,14 @@ export function calcCircuit(c: Circuit, sys: PanelSystem, panelPosition: Vec3 | 
   let iz: number | null = null;
   let drop: number | null = null;
   if (breaker != null) {
+    const In = breaker;
     const dropAt = (sec: number) =>
       powerVA > 0 && length > 0
         ? quedaDeTensao({ sistema, tensao: voltage, corrente: current, comprimento: length, secao: sec, fatorPotencia: c.powerFactor }).quedaPercentual
         : 0;
     const candidates = SECOES_PADRAO.filter((s) => s >= minimum && ampacity(s, loaded) != null);
     // Menor seção por critério: capacidade de condução (Iz corrigida ≥ In) e queda de tensão.
-    const byAmpacity = candidates.find((s) => ampacity(s, loaded)! * c.correction + 1e-9 >= breaker);
+    const byAmpacity = candidates.find((s) => ampacity(s, loaded)! * c.correction + 1e-9 >= In);
     const byDrop = candidates.find((s) => dropAt(s) <= c.dropLimit + 1e-9);
     if (byAmpacity != null && byDrop != null) {
       section = Math.max(minimum, byAmpacity, byDrop);
@@ -232,6 +254,21 @@ export function calcCircuit(c: Circuit, sys: PanelSystem, panelPosition: Vec3 | 
       iz = ampacity(section, loaded)! * c.correction;
       drop = dropAt(section);
     } else warnings.push("Nenhuma seção da tabela atende: divida o circuito ou aumente o FCA.");
+  }
+  if (c.web) {
+    // O dimensionamento do SmartEasyWEB (proteção, curto-circuito, agrupamento revistos lá) prevalece.
+    const w = c.web;
+    const watts = powerVA * c.powerFactor;
+    if (Math.abs(watts - w.potenciaW) > Math.max(5, 0.02 * w.potenciaW)) warnings.push("As cargas mudaram depois do cálculo do SmartEasyWEB: envie os circuitos e traga os resultados de novo.");
+    if (!w.quedaOk) warnings.push("SmartEasyWEB: queda de tensão acima do limite.");
+    if (!w.curtoOk) warnings.push("SmartEasyWEB: a bitola não atende ao curto-circuito.");
+    breaker = w.disjuntorA;
+    if (w.bitolaFaseMm2 != null) {
+      section = w.bitolaFaseMm2;
+      iz = (ampacity(section, loaded) ?? 0) * c.correction;
+    }
+    criterion = "SmartEasyWEB";
+    drop = w.quedaPercent;
   }
   return { circuit: c, points, powerVA, voltage, current, length, lengthSource, breaker, section, criterion, iz, drop, warnings };
 }

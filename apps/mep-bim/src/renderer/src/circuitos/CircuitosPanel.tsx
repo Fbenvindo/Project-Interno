@@ -22,6 +22,9 @@ import { applySlope, autoRoute, newRunId, nextRunTag, RUN_TYPES, RUN_TYPE_BY_ID,
 import type { LoadedModel } from "../../../ifc/loadIfc";
 import type { PointsStore } from "../locacao/usePointsStore";
 import { saveFile } from "../platform";
+import { WebSyncBar } from "../gestao/WebSyncBar";
+import { web } from "../gestao/webData";
+import { conduitSizeLabel, panelsForWeb, webResultFor } from "./webCircuits";
 
 interface Props {
   model: LoadedModel;
@@ -111,7 +114,9 @@ export function CircuitosPanel({ model, fileName, store, selection, onSelect }: 
     const pts = store.points.filter((p) => p.circuit === c.uid);
     if (!pts.length) return;
     const t = RUN_TYPE_BY_ID[conduitType];
-    const size = t.sizes.find((s) => s.label === conduitSize) ?? t.sizes.find((s) => s.label === t.defaultSize)!;
+    // Eletroduto dimensionado no SmartEasyWEB, quando há (e o tipo escolhido tem a bitola).
+    const fromWeb = conduitSizeLabel(c.web?.eletroduto ?? null, t.sizes);
+    const size = t.sizes.find((s) => s.label === (fromWeb ?? conduitSize)) ?? t.sizes.find((s) => s.label === t.defaultSize)!;
     const floorName = storeyAt(panel.position[1], model.storeyLevels);
     const floor = model.storeyLevels.find((s) => s.name === floorName)?.level ?? 0;
     const paths = autoRoute(
@@ -276,6 +281,35 @@ export function CircuitosPanel({ model, fileName, store, selection, onSelect }: 
             ))}
             {sys.phases > 1 && <span>Desequilíbrio: {formatNumber(imbalance(loads, sys.phases) * 100, 0)}%</span>}
           </div>
+          <WebSyncBar
+            servidor={store.cde.servidor}
+            what="os quadros e circuitos (cargas de cada ponto e comprimento pelo traçado) com os Quadros Terminais; de lá vêm bitolas, disjuntor, queda de tensão e eletroduto"
+            pushLabel="Enviar quadros e circuitos"
+            pullLabel="Trazer resultados dos cálculos"
+            push={async (l) => {
+              const r = await web.putPanels(l, panelsForWeb(store.points, store.circuits, store.runs));
+              return `Enviado ao cálculo "Quadros (SmartEasyBIM)": ${r.quadrosCriados + r.quadrosAtualizados} quadro(s), ${r.circuitosCriados} circuito(s) novo(s), ${r.circuitosAtualizados} atualizado(s), ${r.cargas} carga(s)${r.circuitosRemovidos ? `, ${r.circuitosRemovidos} removido(s)` : ""}. Revise proteção e instalação no SmartEasyWEB e traga os resultados.`;
+            }}
+            pull={async (l) => {
+              const r = await web.results(l);
+              const byUid = new Map(r.circuitos.map((c) => [c.uid, c]));
+              const ids = store.circuits.filter((c) => byUid.has(c.uid) || c.web).map((c) => c.id);
+              if (!ids.length) throw new Error("Nenhum circuito deste modelo foi calculado no SmartEasyWEB ainda: envie os circuitos primeiro.");
+              store.mutate((cur) => ({
+                ...cur,
+                circuits: cur.circuits.map((c) => {
+                  if (!ids.includes(c.id)) return c;
+                  const w = webResultFor(byUid.get(c.uid), r.calculadoEm);
+                  if (w) return { ...c, web: w };
+                  const { web: _old, ...rest } = c;
+                  return rest;
+                }),
+              }));
+              const n = r.circuitos.length;
+              const bad = r.circuitos.filter((c) => !c.quedaOk || !c.curtoOk).length;
+              return `${n} circuito(s) com bitola, disjuntor e queda do SmartEasyWEB${bad ? ` (${bad} com pendência de queda ou curto-circuito)` : ""}.`;
+            }}
+          />
           <div className="btn-row wrap">
             {sys.phases > 1 && (
               <button className="btn" onClick={balance}>
@@ -347,8 +381,15 @@ function CircuitEditor({ circuit: c, calc, panelPhases, store, selectedCount, on
       </h3>
       <div className="muted small">
         {calc.points.length} ponto(s) · {formatNumber(calc.powerVA, 0)} VA · {calc.voltage} V · {fmtA(calc.current)} A
-        {calc.section != null && ` · ${formatNumber(calc.section, calc.section % 1 ? 1 : 0)} mm² (${calc.criterion}) · Iz ${fmtA(calc.iz!)} A · disjuntor ${calc.breaker} A`}
+        {calc.section != null && ` · ${formatNumber(calc.section, calc.section % 1 ? 1 : 0)} mm² (${calc.criterion}) · Iz ${fmtA(calc.iz ?? 0)} A · disjuntor ${calc.breaker} A`}
       </div>
+      {c.web && (
+        <div className="muted small">
+          SmartEasyWEB ({c.web.quadro}): disjuntor {c.web.disjuntorA} A curva {c.web.curva} · fase {c.web.bitolaFaseMm2 ?? "—"} mm²
+          {c.web.temNeutro ? ` · neutro ${c.web.bitolaFaseMm2 ?? "—"} mm²` : ""} · terra {c.web.bitolaTerraMm2 ?? "—"} mm² · queda {formatNumber(c.web.quedaPercent, 2)}%
+          {c.web.eletroduto ? ` · eletroduto ${c.web.eletroduto}` : ""} · calculado em {new Date(c.web.calculadoEm).toLocaleString("pt-BR")}
+        </div>
+      )}
       {calc.warnings.map((w) => (
         <div key={w} className="status warn small">
           {w}

@@ -74,6 +74,7 @@ interface StoredCircuit {
   fatorPotencia: number;
   fca: number;
   quedaMaxima: number;
+  smarteasyweb?: import("./circuits").CircuitWebResult;
 }
 
 interface StoredRun {
@@ -144,6 +145,7 @@ export function serializeProject(data: ProjectData, cs: CoordinateSystem, modelN
       fatorPotencia: c.powerFactor,
       fca: c.correction,
       quedaMaxima: c.dropLimit,
+      ...(c.web ? { smarteasyweb: c.web } : {}),
     })),
     ...(data.program && Object.keys(data.program.rooms).length ? { programa: data.program } : {}),
     ...(data.georef ? { georreferenciamento: data.georef } : {}),
@@ -196,6 +198,7 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
     powerFactor: c.fatorPotencia ?? 0.92,
     correction: c.fca ?? 1,
     dropLimit: c.quedaMaxima ?? 4,
+    ...(c.smarteasyweb && typeof c.smarteasyweb === "object" ? { web: c.smarteasyweb } : {}),
   }));
   const program: ProgramState = file.programa && typeof file.programa === "object" && file.programa.rooms ? file.programa : EMPTY_PROGRAM;
   const links: LinkMeta[] = (file.vinculos ?? []).map((v) => ({

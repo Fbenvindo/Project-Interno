@@ -4,6 +4,7 @@
 import type { BuildingProfile } from "../../../core/building";
 import { json, loadSession, type CdeSession } from "./cdeClient";
 import type { WebRoomIn, WebRoomOut } from "../programa/webRooms";
+import type { WebCircuitResult, WebPanelOut } from "../circuitos/webCircuits";
 
 export interface WebLink {
   session: CdeSession;
@@ -29,4 +30,13 @@ export const web = {
   rooms: (l: WebLink) => json<WebRoomIn[]>(l.session, "GET", `/api/app/dados/${enc(l.empId)}/ambientes`),
   putRooms: (l: WebLink, ambientes: WebRoomOut[]) =>
     json<{ ambientesCriados: number; ambientesAtualizados: number; pavimentosCriados: number; equipamentos: number; removidos: number }>(l.session, "PUT", `/api/app/dados/${enc(l.empId)}/ambientes`, { ambientes }),
+  putPanels: (l: WebLink, quadros: WebPanelOut[]) =>
+    json<{ quadrosCriados: number; quadrosAtualizados: number; circuitosCriados: number; circuitosAtualizados: number; circuitosRemovidos: number; cargas: number }>(
+      l.session,
+      "PUT",
+      `/api/app/dados/${enc(l.empId)}/quadros`,
+      { quadros },
+    ),
+  results: (l: WebLink) =>
+    json<{ quadros: { guid: string; nome: string; calculo: string }[]; circuitos: WebCircuitResult[]; calculadoEm: string }>(l.session, "GET", `/api/app/dados/${enc(l.empId)}/resultados`),
 };
