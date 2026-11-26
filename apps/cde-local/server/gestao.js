@@ -55,11 +55,11 @@ function createGestao({ app, db, dataDir }) {
     db.run("DELETE FROM ajustes WHERE chave IN ('gestao_url', 'gestao_chave', 'gestao_ligado_em')");
   }
 
-  /** Confere o vale: assinatura do SmartEasyWEB, finalidade, operação, chave e validade. */
-  function grantFor(req, op, key) {
+  /** Confere uma autorização do SmartEasyWEB: assinatura, finalidade (aud) e validade. */
+  function verifyClaims(token, aud) {
     const pem = db.setting('gestao_chave');
     if (!pem) throw Object.assign(new Error('Servidor CDE ainda não ligado a um SmartEasyWEB.'), { status: 503 });
-    const [payload, sig] = String(req.query.g || '').split('.');
+    const [payload, sig] = String(token || '').split('.');
     let c = null;
     try {
       if (payload && sig && crypto.verify(null, Buffer.from(payload), crypto.createPublicKey(pem), Buffer.from(sig, 'base64url')))
@@ -67,8 +67,14 @@ function createGestao({ app, db, dataDir }) {
     } catch {
       c = null;
     }
-    if (!c || c.aud !== 'cde-arquivo' || c.emissor !== 'smarteasyweb') throw Object.assign(new Error('Vale inválido.'), { status: 403 });
+    if (!c || c.aud !== aud || c.emissor !== 'smarteasyweb') throw Object.assign(new Error('Vale inválido.'), { status: 403 });
     if (!(c.exp > Date.now() / 1000)) throw Object.assign(new Error('Vale vencido: peça de novo ao SmartEasyWEB.'), { status: 403 });
+    return c;
+  }
+
+  /** Confere o vale de arquivo: além da assinatura, a operação e a chave. */
+  function grantFor(req, op, key) {
+    const c = verifyClaims(req.query.g, 'cde-arquivo');
     if (c.op !== op || c.key !== key) throw Object.assign(new Error('Vale de outra operação ou arquivo.'), { status: 403 });
     return c;
   }
@@ -182,7 +188,7 @@ function createGestao({ app, db, dataDir }) {
     }
   });
 
-  return { state, link, unlink };
+  return { state, link, unlink, verifyClaims, fileOf, grantFor };
 }
 
 module.exports = { createGestao, fingerprint };

@@ -11,7 +11,7 @@ function lanAddresses() {
 }
 
 async function startServer({ dataDir, port = 4000, host = '0.0.0.0', webDir }) {
-  const { app, db, clash, gestao } = await createApp({ dataDir, webDir });
+  const { app, db, clash, gestao, clashV2 } = await createApp({ dataDir, webDir });
   const server = await new Promise((resolve, reject) => {
     const s = app.listen(port, host, () => resolve(s));
     s.on('error', reject);
@@ -25,6 +25,7 @@ async function startServer({ dataDir, port = 4000, host = '0.0.0.0', webDir }) {
     hostUrl: `http://${os.hostname()}:${actualPort}`,
     close: async () => {
       await clash.stop();
+      await clashV2.stop();
       return new Promise((resolve) => {
         server.close(() => {
           db.close();

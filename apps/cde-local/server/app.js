@@ -11,6 +11,7 @@ const { openDb } = require('./db');
 const { createStorage } = require('./storage');
 const { createClash } = require('./clash');
 const { createGestao } = require('./gestao');
+const { createClashV2 } = require('./clash/v2');
 
 const DOC_FIELDS = ['volume', 'nivel', 'tipo', 'disciplina', 'numero'];
 const VERSION = require('../package.json').version;
@@ -376,6 +377,7 @@ async function createApp({ dataDir, webDir = path.join(__dirname, '..', 'web-dis
 
   // ---- SmartEasyWEB (servidor como cofre de arquivos dos empreendimentos) -------------------------
   const gestao = createGestao({ app, db, dataDir });
+  const clashV2 = createClashV2({ app, db, dataDir, gestao });
 
   // ---- Interferências (clash) -------------------------------------------------------------------
   const clash = createClash({ app, db, storage, dataDir, rules, login, wrap, fail, isApprover, config, empOf });
@@ -388,7 +390,7 @@ async function createApp({ dataDir, webDir = path.join(__dirname, '..', 'web-dis
     app.get('*', (req, res) => res.sendFile(path.join(webDir, 'index.html')));
   }
 
-  return { app, db, storage, clash, gestao };
+  return { app, db, storage, clash, gestao, clashV2 };
 }
 
 module.exports = { createApp, VERSION };
