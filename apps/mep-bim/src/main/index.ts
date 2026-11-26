@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell } from 
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join, normalize, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { ensureLicense, showLicenseDialog } from "./license";
 import type { FileFilter, HttpRequest, HttpResponse, OpenedFile, OpenedTextFile, PdfRequest, SaveRequest } from "../shared/ipc";
 
 // Em produção o renderer é servido por um protocolo próprio (app://), com
@@ -94,6 +95,10 @@ function buildMenu() {
           { role: "toggleDevTools", label: "Ferramentas do desenvolvedor" },
           { role: "togglefullscreen", label: "Tela cheia" },
         ],
+      },
+      {
+        label: "Ajuda",
+        submenu: [{ label: "Licença…", click: () => void showLicenseDialog(mainWindow) }],
       },
     ]),
   );
@@ -218,9 +223,10 @@ app.whenReady().then(() => {
   });
 
   buildMenu();
-  createWindow();
+  // O app só abre com licença válida (no app instalado); sem ela, a janela de ativação.
+  void ensureLicense(createWindow);
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) void ensureLicense(createWindow);
   });
 });
 

@@ -57,5 +57,10 @@ export interface DesktopApi {
   /** PDF da prancha em memória (para enviar ao CDE). */
   pdfBytes(req: PdfRequest): Promise<Uint8Array>;
   http(req: HttpRequest): Promise<HttpResponse>;
+  /** Licença: ativação (janela de ativação) e sair. */
+  license: {
+    activate(server: string, key: string): Promise<{ cliente: string }>;
+    quit(): void;
+  };
   on(channel: "menu:open" | "menu:fit" | "ifc:pending-available", cb: () => void): () => void;
 }
