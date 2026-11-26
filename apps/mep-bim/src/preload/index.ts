@@ -13,6 +13,10 @@ const api: DesktopApi = {
   savePdf: (req) => ipcRenderer.invoke("file:savePdf", req),
   pdfBytes: (req) => ipcRenderer.invoke("file:pdfBytes", req),
   http: (req) => ipcRenderer.invoke("net:http", req),
+  license: {
+    activate: (server, key) => ipcRenderer.invoke("license:activate", server, key),
+    quit: () => ipcRenderer.send("license:quit"),
+  },
   on(channel, cb) {
     if (!ALLOWED.has(channel)) throw new Error(`Canal não permitido: ${channel}`);
     const listener = () => cb();
