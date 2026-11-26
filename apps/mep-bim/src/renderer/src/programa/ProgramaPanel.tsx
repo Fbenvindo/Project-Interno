@@ -27,6 +27,9 @@ import { saveFile, openTextFile } from "../platform";
 import type { Viewer } from "../viewer/Viewer";
 import { catalogFromJson, catalogToJson, resetCatalog, saveCatalog, useCatalog } from "./catalogStore";
 import { generateProgramPoints } from "./generate";
+import { WebSyncBar } from "../gestao/WebSyncBar";
+import { web } from "../gestao/webData";
+import { applyWebRooms, roomsForWeb } from "./webRooms";
 import { ReqTable, reqSummary, TechEditor, techSummary } from "./ReqTable";
 import { COMPONENT_BY_ID } from "../../../core/library";
 
@@ -257,6 +260,20 @@ function AmbientesSection({ model, store, viewer, elementById, resolveCeiling, o
         </button>
       </div>
       <TotalsLine t={overall} />
+      <WebSyncBar
+        servidor={store.cde.servidor}
+        what="os ambientes (pavimento, nome, área, pé-direito) e os equipamentos incluídos, com potência e tensão"
+        push={async (l) => {
+          const r = await web.putRooms(l, roomsForWeb(model.spaces, program, inventory, catalog));
+          return `Enviado: ${r.ambientesCriados} ambiente(s) novo(s), ${r.ambientesAtualizados} atualizado(s), ${r.equipamentos} equipamento(s)${r.pavimentosCriados ? `, ${r.pavimentosCriados} pavimento(s) criado(s) no cadastro` : ""}${r.removidos ? `, ${r.removidos} equipamento(s) que saíram do modelo removido(s)` : ""}.`;
+        }}
+        pull={async (l) => {
+          const w = await web.rooms(l);
+          const r = applyWebRooms(model.spaces, program, w, inventory, catalog);
+          store.setProgram(() => r.program, null);
+          return `Trazido: ${r.novos} equipamento(s) cadastrado(s) no SmartEasyWEB, ${r.revistos} com potência/tensão revista(s), em ${r.ambientes} ambiente(s)${r.foraDoModelo ? `; ${r.foraDoModelo} ambiente(s) de lá não estão neste modelo` : ""}.`;
+        }}
+      />
       {message && (
         <div className="status small">
           {message.text}

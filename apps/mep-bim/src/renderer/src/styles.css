@@ -2920,3 +2920,15 @@ h3 {
   padding: 2px 4px;
   border-top: 1px solid var(--border);
 }
+
+/* ---- Troca de dados com o SmartEasyWEB ------------------------------------ */
+.web-sync .inline-row {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ok-text {
+  color: var(--ok);
+}
+.fail-text {
+  color: var(--fail);
+}

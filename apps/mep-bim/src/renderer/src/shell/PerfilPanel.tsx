@@ -1,6 +1,8 @@
 // Perfil do empreendimento: torres, pavimentos (comuns ou por torre), altura piso a piso,
 // repetição dos pavimentos tipo e cotas. Base dos fluxogramas (faixas e colunas).
 import { useState } from "react";
+import { WebSyncBar } from "../gestao/WebSyncBar";
+import { web } from "../gestao/webData";
 import {
   checkProfile,
   EMPTY_PROFILE,
@@ -22,6 +24,8 @@ interface Props {
   /** Fluxogramas que podem receber o perfil. */
   flowCount: number;
   onApplyToFlows: () => void;
+  /** Ligação do projeto com o SmartEasyWEB (para trocar o perfil). */
+  servidor?: { url: string; empreendimentoId: string; empreendimento: string };
 }
 
 const num = (v: string, d: number) => {
@@ -29,7 +33,7 @@ const num = (v: string, d: number) => {
   return Number.isFinite(n) ? n : d;
 };
 
-export function PerfilPanel({ profile, onChange, modelStoreys, flowCount, onApplyToFlows }: Props) {
+export function PerfilPanel({ profile, onChange, modelStoreys, flowCount, onApplyToFlows, servidor }: Props) {
   const p = profile ?? EMPTY_PROFILE;
   const set = (fn: (p: BuildingProfile) => BuildingProfile, key: string | null = "perfil") => onChange((cur) => fn(cur ?? EMPTY_PROFILE), key);
   const setFloor = (id: string, patch: Partial<BuildingFloor>, key?: string) => set((x) => ({ ...x, floors: x.floors.map((f) => (f.id === id ? { ...f, ...patch } : f)) }), key ?? `pav:${id}`);
@@ -55,6 +59,24 @@ export function PerfilPanel({ profile, onChange, modelStoreys, flowCount, onAppl
         Torres, pavimentos e alturas do empreendimento. Os fluxogramas usam este perfil para as faixas de pavimento (com a cota) e as colunas das torres.
         Fica salvo no projeto (.seb).
       </p>
+
+      <WebSyncBar
+        servidor={servidor}
+        what="as torres e os pavimentos (nome, altura piso a piso, repetição e torres)"
+        pull={async (l) => {
+          const w = await web.profile(l);
+          if (!w.floors.length) throw new Error("O empreendimento ainda não tem pavimentos no SmartEasyWEB.");
+          onChange(() => ({ towers: w.towers, floors: w.floors, baseElevation: w.baseElevation }), null);
+          return `Perfil trazido: ${w.towers.length} torre(s) e ${w.floors.length} pavimento(s).`;
+        }}
+        push={async (l) => {
+          if (!p.floors.length) throw new Error("O perfil ainda não tem pavimentos.");
+          const r = await web.putProfile(l, p);
+          // Ids dos pavimentos que só existiam no SmartEasyWEB passam a valer aqui também.
+          onChange(() => ({ towers: r.perfil.towers, floors: r.perfil.floors, baseElevation: r.perfil.baseElevation }), null);
+          return `Enviado: ${r.criados} pavimento(s) novo(s), ${r.atualizados} atualizado(s)${r.mantidos ? `, ${r.mantidos} que só existe(m) no SmartEasyWEB foi(ram) mantido(s) e trazido(s)` : ""}.`;
+        }}
+      />
 
       <section className="card">
         <div className="panel-head">

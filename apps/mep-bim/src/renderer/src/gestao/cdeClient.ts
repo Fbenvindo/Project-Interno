@@ -72,7 +72,7 @@ async function http(url: string, method: string, headers: Record<string, string>
 const text = (b: Uint8Array) => new TextDecoder().decode(b);
 const trimUrl = (u: string) => u.trim().replace(/\/+$/, "");
 
-async function json<T>(s: Pick<CdeSession, "url"> & { token?: string }, method: string, path: string, body?: unknown): Promise<T> {
+export async function json<T>(s: Pick<CdeSession, "url"> & { token?: string }, method: string, path: string, body?: unknown): Promise<T> {
   const r = await http(`${trimUrl(s.url)}${path}`, method, { "Content-Type": "application/json", ...(s.token ? { Authorization: `Bearer ${s.token}` } : {}) }, body ? JSON.stringify(body) : undefined);
   const t = text(r.body);
   let data: unknown = null;

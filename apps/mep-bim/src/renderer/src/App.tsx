@@ -1741,6 +1741,7 @@ export function App() {
               : []
           }
           flowCount={store.views.filter((v) => v.kind === "fluxograma").length}
+          servidor={store.cde.servidor}
           onApplyToFlows={() => {
             const p = store.profile;
             if (!p) return;
