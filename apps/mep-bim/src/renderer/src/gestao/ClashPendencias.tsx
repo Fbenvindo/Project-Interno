@@ -1,4 +1,4 @@
-// Interferências do projeto no CDE do servidor: as pendências em aberto (colisões e folgas) das
+// Interferências do projeto no SmartEasyWEB: as pendências em aberto (colisões e folgas) das
 // análises mais recentes que envolvem os modelos deste projeto. "Ver" seleciona os elementos no
 // 3D pelo GlobalId (deste projeto e dos vínculos); dá para comentar e marcar como resolvida.
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -6,9 +6,9 @@ import { clash, type CdeSession, type ClashItem, type ClashPending } from "./cde
 
 interface Props {
   session: CdeSession;
-  empreendimentoId: number;
+  empreendimentoId: string;
   /** Documentos do CDE que são deste projeto (para filtrar as interferências). */
-  docIds: number[];
+  docIds: string[];
   /** Seleciona e enquadra no 3D os elementos com esses GlobalIds; devolve quantos achou. */
   onGoTo: (globalIds: string[]) => number;
 }
@@ -20,14 +20,14 @@ export function ClashPendencias({ session, empreendimentoId, docIds, onGoTo }: P
   const [data, setData] = useState<ClashPending | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [open, setOpen] = useState<number | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const key = docIds.join(",");
 
   const load = useCallback(async () => {
     try {
-      setData(await clash.pending(session, empreendimentoId, key ? key.split(",").map(Number) : []));
+      setData(await clash.pending(session, empreendimentoId, key ? key.split(",") : []));
       setErr(null);
     } catch (e) {
       setErr((e as Error).message);
@@ -41,7 +41,7 @@ export function ClashPendencias({ session, empreendimentoId, docIds, onGoTo }: P
   const mine = (c: ClashItem) => (docIds.includes(c.a.documento_id) ? c.a : c.b);
   const other = (c: ClashItem) => (docIds.includes(c.a.documento_id) ? c.b : c.a);
 
-  const update = async (analiseId: number, c: ClashItem, estado?: string) => {
+  const update = async (analiseId: string, c: ClashItem, estado?: string) => {
     setBusy(true);
     setMsg(null);
     try {

@@ -41,9 +41,9 @@ namespace SmartEasyBIM.Revit
             var cdePanel = application.CreateRibbonPanel(TabName, "CDE");
             cdePanel.AddItem(new PushButtonData("SmartEasyBIM.PublicarCde", "Publicar\nno CDE", assembly, typeof(PublishCommand).FullName)
             {
-                ToolTip = "Exporta o IFC deste modelo e envia como nova revisão do documento no SmartEasyBIM CDE.",
+                ToolTip = "Exporta o IFC deste modelo e envia como nova revisão do documento no CDE do SmartEasyWEB.",
                 LongDescription =
-                    "Na primeira vez, entre no CDE (endereço do servidor do escritório, e-mail e senha) e escolha o empreendimento e o documento (ou crie um). " +
+                    "Na primeira vez, entre com seu usuário do SmartEasyWEB (endereço, e-mail e senha) e escolha o empreendimento e o documento (ou crie um). " +
                     "O IFC sai com as coordenadas compartilhadas e os GUIDs fixos; compartilhado, ele faz as análises de interferências rodarem de novo no CDE.",
                 LargeImage = Icons.Logo(32),
                 Image = Icons.Logo(16),

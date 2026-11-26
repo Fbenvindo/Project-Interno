@@ -241,11 +241,11 @@ Em **Pranchas › Documentos e emissões**:
 - **Carimbo e arquivos:** o carimbo mostra o código, a revisão, o estado e a finalidade (campos `{{codigo}}`, `{{estado}}` e `{{finalidade}}` nos carimbos personalizados). O PDF, o SVG e o DXF das folhas e o IFC por disciplina saem com o nome padronizado (`código_revisão`).
 - **No projeto:** tudo fica gravado no `.seb`.
 
-### CDE do servidor (sistema de gestão)
+### CDE do SmartEasyWEB (gestão de projetos)
 
-Em **Pranchas › Documentos e emissões › CDE do servidor**:
+Em **Pranchas › Documentos e emissões › CDE do SmartEasyWEB** (o cadastro fica no SmartEasyWEB, pela API `/api/app`; os arquivos vão direto para o servidor CDE do escritório, com vales assinados pelo SmartEasyWEB):
 
-- **Entrar:** com o usuário do sistema de gestão (endereço do servidor, e-mail e senha). A sessão fica guardada neste computador.
+- **Entrar:** com o usuário do SmartEasyWEB (endereço, e-mail e senha; por enquanto `http://localhost:3000`). A sessão (12 h) fica guardada neste computador. Projetos ligados ao antigo CDE local precisam ser ligados de novo ao empreendimento.
 - **Ligar o projeto a um empreendimento:** a codificação (projeto, originador, volume) passa a vir do CDE. Os documentos do projeto se ligam aos do servidor pelo código.
 - **Enviar ao CDE:** os documentos marcados vão como nova versão.
   - As folhas vão em PDF (no app instalado; no navegador, em SVG).

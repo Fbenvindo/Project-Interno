@@ -5,7 +5,7 @@ O plugin acrescenta a aba "SmartEasyBIM" ao Revit, com três painéis:
 
   Biblioteca   Exportar famílias     famílias do Revit para a biblioteca do SmartEasyBIM
   Modelo       Exportar modelo       o modelo do projeto para abrir ou vincular no SmartEasyBIM
-  CDE          Publicar no CDE       o modelo em IFC como nova revisão no SmartEasyBIM CDE
+  CDE          Publicar no CDE       o modelo em IFC como nova revisão no CDE do SmartEasyWEB
                Interferências        as interferências do CDE, mostradas no próprio modelo
 
 Funciona no Revit 2022, 2023, 2024, 2025, 2026 e 2027.
@@ -52,17 +52,19 @@ Plantas, vistas e folhas não são exportadas: o SmartEasyBIM monta as suas.
 
 4. Publicar no CDE (painel CDE)
 -------------------------------
-Exporta o modelo em IFC e envia como nova revisão de um documento no SmartEasyBIM CDE
-(o servidor do CDE do escritório). Com o modelo compartilhado, as análises de
-interferências que usam este modelo rodam de novo sozinhas no CDE.
+Exporta o modelo em IFC e envia como nova revisão de um documento no CDE do
+SmartEasyWEB (gestão de projetos). O cadastro fica no SmartEasyWEB e o arquivo vai
+direto para o servidor CDE do escritório. Com o modelo compartilhado, as análises de
+interferências que usam este modelo rodam de novo sozinhas.
 
 Antes da primeira vez, tenha em mãos:
-  - o endereço do servidor do CDE (aparece no painel do servidor, ex.: http://SERVIDOR:4000);
-  - o seu e-mail e senha do CDE (cadastrados pelo administrador do CDE).
+  - o endereço do SmartEasyWEB (por enquanto o local: http://localhost:3000);
+  - o seu e-mail e senha do SmartEasyWEB (os mesmos da gestão de projetos).
+  Você só vê os empreendimentos a que tem acesso no SmartEasyWEB.
 
 Passo a passo:
 1. Abra o projeto e clique em "Publicar no CDE".
-2. Servidor do CDE: informe o endereço, o e-mail e a senha e clique em "Entrar".
+2. SmartEasyWEB: informe o endereço, o e-mail e a senha e clique em "Entrar".
    A sessão fica guardada; nas próximas vezes já aparece "Conectado como …".
 3. Destino: escolha o empreendimento e o documento que recebe o modelo.
    - Se o modelo ainda não existe no CDE, escolha "(novo documento — modelo 3D)" e
@@ -128,7 +130,7 @@ os dois).
 - Interferências: só cria (ou ajusta a caixa de corte de) a vista 3D
   "SmartEasyBIM — Interferências". Pode apagá-la quando quiser; é recriada se preciso.
 
-A sessão do CDE e as escolhas de cada projeto ficam em
+A sessão do SmartEasyWEB e as escolhas de cada projeto ficam em
 %APPDATA%\SmartEasyBIM\revit-cde.json (do seu usuário do Windows).
 
 
@@ -139,17 +141,18 @@ A aba SmartEasyBIM não aparece
   - Se o Revit perguntou sobre o plugin e você escolheu "Não carregar", rode o
     Instalar.bat de novo e escolha "Sempre carregar".
 
-"Não foi possível falar com o CDE"
-  - Confira o endereço (com http:// e a porta, ex.: http://SERVIDOR:4000) abrindo-o no
-    navegador: deve aparecer a página de login do CDE.
-  - O computador do servidor precisa estar ligado e com o SmartEasyBIM CDE aberto (ícone
-    na bandeja). Na primeira vez, o Firewall do Windows do servidor precisa permitir o
-    acesso à rede.
-  - Fora do escritório, o CDE só é acessível por VPN ou túnel.
+"Não foi possível falar com o SmartEasyWEB"
+  - Confira o endereço abrindo-o no navegador: deve aparecer a página de login do
+    SmartEasyWEB.
+"Falha no envio do arquivo"
+  - O arquivo vai para o servidor CDE do escritório: o computador do servidor precisa
+    estar ligado, com o SmartEasyBIM CDE aberto (ícone na bandeja) e ligado ao
+    SmartEasyWEB (página Servidor CDE do SmartEasyWEB mostra se está tudo certo).
+  - Fora do escritório, o servidor CDE só é acessível por VPN ou túnel.
 
-"Sessão do CDE expirada" ou "E-mail ou senha incorretos"
-  - Entre de novo pelo "Publicar no CDE". Esqueceu a senha: peça ao administrador do CDE
-    para trocá-la (CDE > Usuários).
+"Sessão do SmartEasyWEB expirada" ou "E-mail ou senha incorretos"
+  - Entre de novo pelo "Publicar no CDE" (a sessão vale 12 horas). Esqueceu a senha:
+    peça ao administrador do SmartEasyWEB para trocá-la (Usuários).
 
 "Este modelo ainda não está ligado a um documento do CDE"
   - Use "Publicar no CDE" uma vez neste projeto.

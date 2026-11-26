@@ -206,7 +206,7 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
     visible: v.visivel !== false,
     translucent: !!v.transparente,
     ...(v.alinhamento ? { align: v.alinhamento } : {}),
-    ...(v.cde && typeof v.cde.docId === "number" ? { cde: v.cde } : {}),
+    ...(v.cde && typeof v.cde.docId === "string" ? { cde: v.cde } : {}),
   }));
   const drafts = Array.isArray(file.desenhos) ? file.desenhos : [];
   syncDraftIds(drafts);
@@ -224,10 +224,17 @@ export function deserializeProject(json: unknown, cs: CoordinateSystem): Project
       file.gestao && typeof file.gestao === "object"
         ? {
             coding: { ...EMPTY_CODING, ...(file.gestao.coding ?? {}) },
-            modelos: file.gestao.modelos ?? {},
+            modelos: dropOldCdeIds(file.gestao.modelos ?? {}),
             emissoes: Array.isArray(file.gestao.emissoes) ? file.gestao.emissoes : [],
-            ...(file.gestao.servidor?.empreendimentoId ? { servidor: file.gestao.servidor } : {}),
+            ...(typeof file.gestao.servidor?.empreendimentoId === "string" ? { servidor: file.gestao.servidor } : {}),
           }
         : EMPTY_CDE,
   };
+}
+
+/** Ids do antigo CDE local eram números; no SmartEasyWEB são texto (o documento é achado de novo pelo código). */
+function dropOldCdeIds<T extends Record<string, { cdeId?: unknown } | undefined>>(m: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(m)) out[k] = v && typeof v.cdeId !== "string" ? (({ cdeId: _old, ...rest }) => rest)(v) : v;
+  return out as T;
 }

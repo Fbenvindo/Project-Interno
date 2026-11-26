@@ -22,7 +22,7 @@ export interface LinkMeta {
    */
   align?: LinkAlign;
   /** Vínculo vindo do CDE do servidor: documento, revisão carregada e código. */
-  cde?: { docId: number; revisao: string; codigo: string };
+  cde?: { docId: string; revisao: string; codigo: string };
 }
 
 export interface LinkAlign {

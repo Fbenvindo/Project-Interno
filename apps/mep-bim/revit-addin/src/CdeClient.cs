@@ -14,9 +14,9 @@ namespace SmartEasyBIM.Revit
     internal sealed class CdeLink
     {
         public string Url;
-        public long EmpId;
+        public string EmpId;
         public string EmpNome;
-        public long DocId;
+        public string DocId;
         public string DocCodigo;
         public bool Ifc4;
         public bool OnlyView;
@@ -27,15 +27,16 @@ namespace SmartEasyBIM.Revit
     /// <summary>Documento do CDE (resumo).</summary>
     internal sealed class CdeDoc
     {
-        public long Id;
+        public string Id;
         public string Codigo, Titulo, Tipo, Disciplina, Revisao, Estado, ArquivoNome;
         public override string ToString() => $"{Codigo} · {Revisao} · {Titulo}";
     }
 
     /// <summary>
-    /// Cliente do SmartEasyBIM CDE (servidor do escritório): login, empreendimentos, documentos,
-    /// envio de arquivo como nova revisão, estados e interferências. A sessão e as ligações de cada
-    /// projeto ficam em %APPDATA%\SmartEasyBIM\revit-cde.json.
+    /// Cliente do CDE do SmartEasyWEB (API dos aplicativos, /api/app): login com o usuário do
+    /// SmartEasyWEB, empreendimentos, documentos, envio do arquivo direto ao servidor CDE do escritório
+    /// (com vale do SmartEasyWEB) como nova revisão, estados e interferências. A sessão e as ligações
+    /// de cada projeto ficam em %APPDATA%\SmartEasyBIM\revit-cde.json.
     /// </summary>
     internal sealed class CdeClient
     {
@@ -49,9 +50,12 @@ namespace SmartEasyBIM.Revit
         public bool LoggedIn => !string.IsNullOrEmpty(Token);
         private readonly Dictionary<string, CdeLink> _links = new Dictionary<string, CdeLink>();
 
+        /// <summary>Endereço padrão do SmartEasyWEB (por enquanto o local, em desenvolvimento).</summary>
+        public const string DefaultUrl = "http://localhost:3000";
+
         public static CdeClient Load()
         {
-            var c = new CdeClient { Url = "http://localhost:4000" };
+            var c = new CdeClient { Url = DefaultUrl };
             try
             {
                 if (!File.Exists(StoreFile)) return c;
@@ -64,12 +68,14 @@ namespace SmartEasyBIM.Revit
                 foreach (var key in (o["projetos"] as Dictionary<string, object> ?? new Dictionary<string, object>()).Keys)
                 {
                     var l = links.Obj(key);
+                    // Ligações do antigo CDE local (ids numéricos) não valem no SmartEasyWEB: escolhe de novo.
+                    if (!(l["empId"] is string) || !(l["docId"] is string)) continue;
                     c._links[key] = new CdeLink
                     {
                         Url = l.Str("url"),
-                        EmpId = l.Long("empId"),
+                        EmpId = l.Str("empId"),
                         EmpNome = l.Str("empNome"),
-                        DocId = l.Long("docId"),
+                        DocId = l.Str("docId"),
                         DocCodigo = l.Str("docCodigo"),
                         Ifc4 = l.Bool("ifc4"),
                         OnlyView = l.Bool("soVista"),
@@ -96,7 +102,7 @@ namespace SmartEasyBIM.Revit
             {
                 var l = kv.Value;
                 w.Name(kv.Key).BeginObject()
-                    .Prop("url", l.Url).Name("empId").Value(l.EmpId).Prop("empNome", l.EmpNome).Name("docId").Value(l.DocId).Prop("docCodigo", l.DocCodigo)
+                    .Prop("url", l.Url).Prop("empId", l.EmpId).Prop("empNome", l.EmpNome).Prop("docId", l.DocId).Prop("docCodigo", l.DocCodigo)
                     .Prop("ifc4", l.Ifc4).Prop("soVista", l.OnlyView).Prop("compartilhar", l.Share).Prop("finalidade", l.Finalidade)
                     .EndObject();
             }
@@ -136,20 +142,20 @@ namespace SmartEasyBIM.Revit
                     }
                     catch (Exception ex)
                     {
-                        throw new Exception($"Não foi possível falar com o CDE em {Url}: {ex.GetBaseException().Message}");
+                        throw new Exception($"Não foi possível falar com o SmartEasyWEB em {Url}: {ex.GetBaseException().Message}");
                     }
                     var text = await r.Content.ReadAsStringAsync().ConfigureAwait(false);
                     object data = null;
                     try { data = string.IsNullOrEmpty(text) ? null : JsonReader.Parse(text); }
                     catch { data = null; }
-                    if ((int)r.StatusCode == 401 && path != "/api/auth/login")
+                    if ((int)r.StatusCode == 401 && path != "/api/app/login")
                     {
                         Token = null;
                         Save();
-                        throw new Exception("Sessão do CDE expirada: entre de novo.");
+                        throw new Exception("Sessão do SmartEasyWEB expirada: entre de novo.");
                     }
                     if (!r.IsSuccessStatusCode)
-                        throw new Exception(new JObj(data).Str("error") ?? $"Erro {(int)r.StatusCode} no CDE.");
+                        throw new Exception(new JObj(data).Str("error") ?? $"Erro {(int)r.StatusCode} no SmartEasyWEB.");
                     return data;
                 }
             });
@@ -170,22 +176,22 @@ namespace SmartEasyBIM.Revit
         {
             Url = Trim(url);
             Token = null;
-            var r = new JObj(Call("POST", "/api/auth/login", Body(w => w.Prop("email", email).Prop("password", password))));
+            var r = new JObj(Call("POST", "/api/app/login", Body(w => w.Prop("email", email).Prop("password", password))));
             Token = r.Str("token");
             UserName = r.Obj("user").Str("name");
             UserEmail = r.Obj("user").Str("email");
             Save();
         }
 
-        public List<KeyValuePair<long, string>> Empreendimentos() =>
-            ((List<object>)Call("GET", "/api/empreendimentos")).Select(o => new JObj(o)).Select(o => new KeyValuePair<long, string>(o.Long("id"), o.Str("nome"))).ToList();
+        public List<KeyValuePair<string, string>> Empreendimentos() =>
+            ((List<object>)Call("GET", "/api/app/empreendimentos")).Select(o => new JObj(o)).Select(o => new KeyValuePair<string, string>(o.Str("id"), o.Str("nome"))).ToList();
 
-        public List<CdeDoc> Documentos(long empId) =>
-            new JObj(Call("GET", $"/api/cde/{empId}")).Arr("documentos").Select(Doc).ToList();
+        public List<CdeDoc> Documentos(string empId) =>
+            new JObj(Call("GET", $"/api/app/cde/{Uri.EscapeDataString(empId)}")).Arr("documentos").Select(Doc).ToList();
 
         private static CdeDoc Doc(JObj d) => new CdeDoc
         {
-            Id = d.Long("id"),
+            Id = d.Str("id"),
             Codigo = d.Str("codigo"),
             Titulo = d.Str("titulo"),
             Tipo = d.Str("tipo"),
@@ -195,15 +201,15 @@ namespace SmartEasyBIM.Revit
             ArquivoNome = d.Str("arquivo_nome"),
         };
 
-        public CdeDoc CriarDocumento(long empId, string titulo, string disciplina, string nivel) =>
-            Doc(new JObj(Call("POST", $"/api/cde/{empId}/documentos", Body(w => w.Prop("titulo", titulo).Prop("tipo", "M3").Prop("disciplina", disciplina).Prop("nivel", string.IsNullOrWhiteSpace(nivel) ? "ZZ" : nivel).Prop("origem", "revit")))));
+        public CdeDoc CriarDocumento(string empId, string titulo, string disciplina, string nivel) =>
+            Doc(new JObj(Call("POST", $"/api/app/cde/{Uri.EscapeDataString(empId)}/documentos", Body(w => w.Prop("titulo", titulo).Prop("tipo", "M3").Prop("disciplina", disciplina).Prop("nivel", string.IsNullOrWhiteSpace(nivel) ? "ZZ" : nivel).Prop("origem", "revit")))));
 
         /// <summary>Envia o arquivo como nova versão do documento (link assinado → PUT → confirmação).</summary>
-        public CdeDoc Enviar(long docId, string file, string descricao, Action<string> progress = null)
+        public CdeDoc Enviar(string docId, string file, string descricao, Action<string> progress = null)
         {
             var name = Path.GetFileName(file);
             var size = new FileInfo(file).Length;
-            var u = new JObj(Call("POST", $"/api/cde/documentos/{docId}/upload", Body(w => w.Prop("nome", name).Prop("content_type", "application/x-step").Name("tamanho").Value(size))));
+            var u = new JObj(Call("POST", $"/api/app/cde/documentos/{Uri.EscapeDataString(docId)}/upload", Body(w => w.Prop("nome", name).Prop("content_type", "application/x-step").Name("tamanho").Value(size))));
             progress?.Invoke($"Enviando {name} ({size / 1048576.0:0.0} MB)…");
             Run(async () =>
             {
@@ -217,27 +223,27 @@ namespace SmartEasyBIM.Revit
                     return true;
                 }
             });
-            return Doc(new JObj(Call("POST", $"/api/cde/documentos/{docId}/arquivo", Body(w => w.Prop("key", u.Str("key")).Prop("nome", name).Prop("content_type", "application/x-step").Prop("descricao", descricao)))));
+            return Doc(new JObj(Call("POST", $"/api/app/cde/documentos/{Uri.EscapeDataString(docId)}/arquivo", Body(w => w.Prop("key", u.Str("key")).Prop("nome", name).Prop("content_type", "application/x-step").Prop("descricao", descricao)))));
         }
 
-        public CdeDoc MudarEstado(long docId, string estado, string finalidade, string descricao) =>
-            Doc(new JObj(Call("POST", $"/api/cde/documentos/{docId}/estado", Body(w => w.Prop("estado", estado).Prop("finalidade", finalidade).Prop("descricao", descricao)))));
+        public CdeDoc MudarEstado(string docId, string estado, string finalidade, string descricao) =>
+            Doc(new JObj(Call("POST", $"/api/app/cde/documentos/{Uri.EscapeDataString(docId)}/estado", Body(w => w.Prop("estado", estado).Prop("finalidade", finalidade).Prop("descricao", descricao)))));
 
         /// <summary>Interferências em aberto das análises mais recentes que envolvem o documento.</summary>
-        public List<ClashItem> Pendencias(long empId, long docId)
+        public List<ClashItem> Pendencias(string empId, string docId)
         {
-            var r = new JObj(Call("GET", $"/api/clash/{empId}/pendencias?documentos={docId}"));
+            var r = new JObj(Call("GET", $"/api/app/clash/{Uri.EscapeDataString(empId)}/pendencias?documentos={Uri.EscapeDataString(docId)}"));
             var list = new List<ClashItem>();
             foreach (var a in r.Arr("analises"))
             {
                 var an = a.Obj("analise");
-                foreach (var c in a.Arr("interferencias")) list.Add(ClashItem.From(c, an.Long("id"), an.Str("nome"), docId));
+                foreach (var c in a.Arr("interferencias")) list.Add(ClashItem.From(c, an.Str("id"), an.Str("nome"), docId));
             }
             return list;
         }
 
-        public void AtualizarInterferencia(long analiseId, long clashId, string estado, string comentario) =>
-            Call("PATCH", $"/api/clash/analises/{analiseId}/interferencias", Body(w =>
+        public void AtualizarInterferencia(string analiseId, string clashId, string estado, string comentario) =>
+            Call("PATCH", $"/api/app/clash/analises/{Uri.EscapeDataString(analiseId)}/interferencias", Body(w =>
             {
                 w.Name("ids").BeginArray().Value(clashId).EndArray();
                 if (estado != null) w.Prop("estado", estado);
@@ -249,8 +255,7 @@ namespace SmartEasyBIM.Revit
     /// <summary>Elemento de uma interferência.</summary>
     internal sealed class ClashElement
     {
-        public string GlobalId, Tipo, Nome, Pavimento, Codigo;
-        public long DocId;
+        public string GlobalId, Tipo, Nome, Pavimento, Codigo, DocId;
         public static ClashElement From(JObj e) => new ClashElement
         {
             GlobalId = e.Str("globalId"),
@@ -258,14 +263,14 @@ namespace SmartEasyBIM.Revit
             Nome = e.Str("nome"),
             Pavimento = e.Str("pavimento"),
             Codigo = e.Str("codigo"),
-            DocId = e.Long("documento_id"),
+            DocId = e.Str("documento_id"),
         };
     }
 
     /// <summary>Interferência em aberto (do ponto de vista do documento deste projeto).</summary>
     internal sealed class ClashItem
     {
-        public long Id, AnaliseId;
+        public string Id, AnaliseId;
         public string AnaliseNome;
         public int Numero;
         public string Tipo, Estado, Situacao, Pavimento, Responsavel;
@@ -278,14 +283,14 @@ namespace SmartEasyBIM.Revit
 
         public string Medida => Tipo == "colisao" ? $"sobreposição ~{Math.Abs(Distancia) * 100:0.0} cm" : $"distância {Distancia * 100:0.0} cm";
 
-        public static ClashItem From(JObj c, long analiseId, string analiseNome, long myDoc)
+        public static ClashItem From(JObj c, string analiseId, string analiseNome, string myDoc)
         {
             var a = ClashElement.From(c.Obj("a"));
             var b = ClashElement.From(c.Obj("b"));
             var p = c.Raw("ponto").Select(x => x is double d ? d : 0).ToArray();
             var item = new ClashItem
             {
-                Id = c.Long("id"),
+                Id = c.Str("id"),
                 AnaliseId = analiseId,
                 AnaliseNome = analiseNome,
                 Numero = (int)c.Num("numero"),

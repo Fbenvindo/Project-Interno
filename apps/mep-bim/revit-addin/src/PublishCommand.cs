@@ -10,7 +10,7 @@ namespace SmartEasyBIM.Revit
 {
     /// <summary>
     /// Publicar no CDE: exporta o IFC com o exportador do Revit (coordenadas compartilhadas, GUIDs
-    /// fixos) e envia como nova revisão do documento no SmartEasyBIM CDE; opcionalmente compartilha.
+    /// fixos) e envia como nova revisão do documento no CDE do SmartEasyWEB; opcionalmente compartilha.
     /// No CDE, a análise de interferências que usa este modelo roda de novo sozinha.
     /// </summary>
     [Transaction(TransactionMode.Manual)]

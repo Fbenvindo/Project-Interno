@@ -43,7 +43,7 @@ namespace SmartEasyBIM.Revit
         private readonly Panel _novoPanel = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
         private List<CdeDoc> _docs = new List<CdeDoc>();
 
-        public long EmpId { get; private set; }
+        public string EmpId { get; private set; }
         public string EmpNome { get; private set; }
         public CdeDoc Documento { get; private set; }
         public bool NovoDocumento => _doc.SelectedIndex == 0;
@@ -84,7 +84,7 @@ namespace SmartEasyBIM.Revit
                 root.SetColumnSpan(l, 2);
             }
 
-            Title("Servidor do CDE");
+            Title("SmartEasyWEB (gestão de projetos)");
             _url.Width = 420;
             _url.Text = cde.Url;
             Row("Endereço", _url);
@@ -194,7 +194,7 @@ namespace SmartEasyBIM.Revit
                 foreach (var e in list) _emp.Items.Add(new Item(e.Key, e.Value));
                 int idx = _saved != null ? list.FindIndex(e => e.Key == _saved.EmpId) : -1;
                 if (_emp.Items.Count > 0) _emp.SelectedIndex = Math.Max(0, idx);
-                if (_emp.Items.Count == 0) _status.Text = "Nenhum empreendimento no CDE: crie um pela página do CDE.";
+                if (_emp.Items.Count == 0) _status.Text = "Nenhum empreendimento disponível: crie um no SmartEasyWEB ou peça acesso.";
             });
         }
 
@@ -231,9 +231,9 @@ namespace SmartEasyBIM.Revit
 
         private sealed class Item
         {
-            public readonly long Id;
+            public readonly string Id;
             public readonly string Name;
-            public Item(long id, string name) { Id = id; Name = name; }
+            public Item(string id, string name) { Id = id; Name = name; }
             public override string ToString() => Name;
         }
     }

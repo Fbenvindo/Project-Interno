@@ -115,10 +115,10 @@ export function GestaoPanel({ store, modelDisciplines, sheetDefaults, onOpenShee
 
   const ready = hasCoding(c);
 
-  // ---- CDE do servidor (SmartEasyBIM CDE na rede do escritório) ------------------------------------------------------
+  // ---- CDE do SmartEasyWEB (arquivos no servidor CDE do escritório) ------------------------------------------------------
   const [session, setSession] = useState<CdeSession | null>(loadSession);
   const [overview, setOverview] = useState<Overview | null>(null);
-  const [emps, setEmps] = useState<{ id: number; nome: string }[] | null>(null);
+  const [emps, setEmps] = useState<{ id: string; nome: string }[] | null>(null);
   const [loginForm, setLoginForm] = useState({ url: session?.url ?? DEFAULT_CDE_URL, email: "", password: "" });
   const [srvBusy, setSrvBusy] = useState<string | null>(null);
   const link = cde_link(cde);
@@ -162,7 +162,7 @@ export function GestaoPanel({ store, modelDisciplines, sheetDefaults, onOpenShee
   };
 
   /** Garante o documento no servidor (cria com o mesmo código, ou acha o existente) e devolve o id. */
-  const ensureServerDoc = async (d: Doc, ov: Overview): Promise<number> => {
+  const ensureServerDoc = async (d: Doc, ov: Overview): Promise<string> => {
     if (d.meta.cdeId != null && ov.documentos.some((x) => x.id === d.meta.cdeId)) return d.meta.cdeId;
     const code = docCode({ ...c, ...ov.config }, d.meta);
     const found = ov.documentos.find((x) => x.codigo === code);
@@ -180,9 +180,9 @@ export function GestaoPanel({ store, modelDisciplines, sheetDefaults, onOpenShee
   };
 
   /** Envia a versão atual dos documentos marcados (PDF das folhas, IFC dos modelos). */
-  const sendToCde = async (ids: string[]): Promise<Map<string, number>> => {
+  const sendToCde = async (ids: string[]): Promise<Map<string, string>> => {
     const ov = await cdeServer.overview(session!, link!.empreendimentoId);
-    const sent = new Map<string, number>();
+    const sent = new Map<string, string>();
     for (const d of docs.filter((x) => ids.includes(x.id))) {
       setSrvBusy(`Enviando ${d.titulo}…`);
       const id = await ensureServerDoc(d, ov);
@@ -198,7 +198,7 @@ export function GestaoPanel({ store, modelDisciplines, sheetDefaults, onOpenShee
 
   const references = useMemo(() => {
     // Documentos deste projeto (pelo id no CDE ou pelo código): não são referências.
-    const mine = new Set(docs.map((d) => d.meta.cdeId).filter((x): x is number => x != null));
+    const mine = new Set(docs.map((d) => d.meta.cdeId).filter((x): x is string => x != null));
     const myCodes = new Set(docs.map((d) => docCode({ ...c, ...(overview?.config ?? {}) }, d.meta)));
     return (overview?.documentos ?? []).filter((d) => isModelFile(d.arquivo_nome) && (d.estado === "compartilhado" || d.estado === "publicado") && !mine.has(d.id) && !myCodes.has(d.codigo));
   }, [overview, docs, c]);
@@ -209,14 +209,14 @@ export function GestaoPanel({ store, modelDisciplines, sheetDefaults, onOpenShee
         <h3>Gestão da informação (ISO 19650)</h3>
       </div>
       <section className="card">
-        <h4>CDE do servidor</h4>
+        <h4>CDE do SmartEasyWEB</h4>
         {!session && (
           <>
-            <p className="muted small">Entre com seu usuário do SmartEasyBIM CDE (o servidor do escritório) para publicar folhas e modelos no CDE do empreendimento e vincular os modelos das outras disciplinas. O endereço aparece no painel do servidor do CDE (ex.: http://servidor:4000).</p>
+            <p className="muted small">Entre com seu usuário do SmartEasyWEB (gestão de projetos) para publicar folhas e modelos no CDE do empreendimento, vincular os modelos das outras disciplinas e ver as interferências. Os arquivos vão direto para o servidor CDE do escritório.</p>
             <div className="form-grid">
               <label style={{ gridColumn: "1 / -1" }}>
                 Endereço
-                <input value={loginForm.url} placeholder="http://servidor:4000" onChange={(e) => setLoginForm({ ...loginForm, url: e.target.value })} />
+                <input value={loginForm.url} placeholder="http://localhost:3000" onChange={(e) => setLoginForm({ ...loginForm, url: e.target.value })} />
               </label>
               <label>
                 E-mail
@@ -236,7 +236,7 @@ export function GestaoPanel({ store, modelDisciplines, sheetDefaults, onOpenShee
                   saveSession(s);
                   setSession(s);
                   setLoginForm({ ...loginForm, password: "" });
-                  return `Conectado ao CDE como ${s.user.name ?? s.user.email}.`;
+                  return `Conectado ao SmartEasyWEB como ${s.user.name ?? s.user.email}.`;
                 })
               }
             >
@@ -555,7 +555,7 @@ export function GestaoPanel({ store, modelDisciplines, sheetDefaults, onOpenShee
         <ClashPendencias
           session={session!}
           empreendimentoId={link!.empreendimentoId}
-          docIds={docs.map((d) => d.meta.cdeId).filter((x): x is number => x != null)}
+          docIds={docs.map((d) => d.meta.cdeId).filter((x): x is string => x != null)}
           onGoTo={onGoToElements}
         />
       )}

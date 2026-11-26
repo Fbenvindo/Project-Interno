@@ -1,5 +1,6 @@
-// Cliente do CDE do servidor (SmartEasyBIM CDE na rede do escritório, ou a versão em nuvem): login, empreendimentos, documentos, envio e
-// download de arquivos e emissões. No app desktop as requisições passam pelo processo principal
+// Cliente do CDE do SmartEasyWEB (API dos aplicativos, /api/app): login com o usuário do SmartEasyWEB,
+// empreendimentos, documentos, envio e download de arquivos (direto no servidor CDE do escritório, com
+// vales do SmartEasyWEB), emissões e interferências. No app desktop as requisições passam pelo processo principal
 // (a CSP do app não deixa o renderer acessar a rede, e o S3 exigiria CORS); no navegador, fetch.
 import { desktop } from "../platform";
 
@@ -10,7 +11,7 @@ export interface CdeSession {
 }
 
 export interface ServerDoc {
-  id: number;
+  id: string;
   codigo: string;
   titulo: string;
   tipo: string;
@@ -30,13 +31,13 @@ export interface ServerDoc {
 export interface Overview {
   config: { projeto: string; originador: string; volume: string };
   documentos: ServerDoc[];
-  emissoes: { id: number; numero: string; data: string; itens: unknown[] }[];
+  emissoes: { id: string; numero: string; data: string; itens: unknown[] }[];
   podeAprovar: boolean;
-  armazenamento: "s3" | "local";
+  armazenamento: string;
 }
 
-/** Endereço padrão: o servidor do CDE no próprio computador (troque pelo do servidor do escritório). */
-export const DEFAULT_CDE_URL = "http://localhost:4000";
+/** Endereço padrão do SmartEasyWEB (por enquanto o local, em desenvolvimento; troque pelo do escritório). */
+export const DEFAULT_CDE_URL = "http://localhost:3000";
 const KEY = "smarteasybim.cde";
 
 export function loadSession(): CdeSession | null {
@@ -80,34 +81,34 @@ async function json<T>(s: Pick<CdeSession, "url"> & { token?: string }, method: 
   } catch {
     data = { error: t.slice(0, 200) };
   }
-  if (r.status === 401) throw new Error("Sessão do CDE expirada: entre de novo.");
-  if (r.status < 200 || r.status >= 300) throw new Error((data as { error?: string })?.error || `Erro ${r.status} no CDE.`);
+  if (r.status === 401) throw new Error("Sessão do SmartEasyWEB expirada: entre de novo.");
+  if (r.status < 200 || r.status >= 300) throw new Error((data as { error?: string })?.error || `Erro ${r.status} no SmartEasyWEB.`);
   return data as T;
 }
 
 export const cde = {
   async login(url: string, email: string, password: string): Promise<CdeSession> {
-    const r = await json<{ token: string; user: CdeSession["user"] }>({ url }, "POST", "/api/auth/login", { email, password });
+    const r = await json<{ token: string; user: CdeSession["user"] }>({ url }, "POST", "/api/app/login", { email, password });
     return { url: trimUrl(url), token: r.token, user: r.user };
   },
-  empreendimentos: (s: CdeSession) => json<{ id: number; nome: string; status?: string }[]>(s, "GET", "/api/empreendimentos"),
-  overview: (s: CdeSession, empId: number) => json<Overview>(s, "GET", `/api/cde/${empId}`),
-  createDoc: (s: CdeSession, empId: number, doc: Partial<ServerDoc> & { titulo: string; origem?: string }) => json<ServerDoc>(s, "POST", `/api/cde/${empId}/documentos`, doc),
-  setState: (s: CdeSession, id: number, estado: string, finalidade: string, descricao: string) => json<ServerDoc>(s, "POST", `/api/cde/documentos/${id}/estado`, { estado, finalidade, descricao }),
-  emit: (s: CdeSession, empId: number, payload: { documento_ids: number[]; estado: string; finalidade: string; destinatario: string; observacoes: string }) =>
-    json<{ numero: string; itens: { documento_id: number; revisao: string }[] }>(s, "POST", `/api/cde/${empId}/emissoes`, payload),
+  empreendimentos: (s: CdeSession) => json<{ id: string; nome: string; status?: string }[]>(s, "GET", "/api/app/empreendimentos"),
+  overview: (s: CdeSession, empId: string) => json<Overview>(s, "GET", `/api/app/cde/${empId}`),
+  createDoc: (s: CdeSession, empId: string, doc: Partial<ServerDoc> & { titulo: string; origem?: string }) => json<ServerDoc>(s, "POST", `/api/app/cde/${empId}/documentos`, doc),
+  setState: (s: CdeSession, id: string, estado: string, finalidade: string, descricao: string) => json<ServerDoc>(s, "POST", `/api/app/cde/documentos/${id}/estado`, { estado, finalidade, descricao }),
+  emit: (s: CdeSession, empId: string, payload: { documento_ids: string[]; estado: string; finalidade: string; destinatario: string; observacoes: string }) =>
+    json<{ numero: string; itens: { documento_id: string; revisao: string }[] }>(s, "POST", `/api/app/cde/${empId}/emissoes`, payload),
 
   /** Envia um arquivo como nova versão do documento (URL assinada → PUT → confirmação). */
-  async upload(s: CdeSession, docId: number, name: string, bytes: Uint8Array, contentType: string, descricao?: string): Promise<ServerDoc> {
-    const u = await json<{ key: string; url: string; method: string; headers: Record<string, string> }>(s, "POST", `/api/cde/documentos/${docId}/upload`, { nome: name, content_type: contentType, tamanho: bytes.byteLength });
+  async upload(s: CdeSession, docId: string, name: string, bytes: Uint8Array, contentType: string, descricao?: string): Promise<ServerDoc> {
+    const u = await json<{ key: string; url: string; method: string; headers: Record<string, string> }>(s, "POST", `/api/app/cde/documentos/${docId}/upload`, { nome: name, content_type: contentType, tamanho: bytes.byteLength });
     const put = await http(u.url, u.method || "PUT", u.headers ?? { "Content-Type": contentType }, bytes);
     if (put.status < 200 || put.status >= 300) throw new Error(`Falha no envio do arquivo (${put.status}).`);
-    return json<ServerDoc>(s, "POST", `/api/cde/documentos/${docId}/arquivo`, { key: u.key, nome: name, content_type: contentType, descricao });
+    return json<ServerDoc>(s, "POST", `/api/app/cde/documentos/${docId}/arquivo`, { key: u.key, nome: name, content_type: contentType, descricao });
   },
 
   /** Baixa o arquivo atual do documento: bytes e o nome padronizado (código_revisão.ext). */
-  async download(s: CdeSession, docId: number): Promise<{ name: string; data: Uint8Array }> {
-    const r = await json<{ url: string; nome: string }>(s, "GET", `/api/cde/documentos/${docId}/download`);
+  async download(s: CdeSession, docId: string): Promise<{ name: string; data: Uint8Array }> {
+    const r = await json<{ url: string; nome: string }>(s, "GET", `/api/app/cde/documentos/${docId}/download`);
     const f = await http(r.url, "GET", {});
     if (f.status < 200 || f.status >= 300) throw new Error(`Falha no download (${f.status}).`);
     return { name: r.nome, data: f.body };
@@ -116,23 +117,24 @@ export const cde = {
 
 /** Elemento de uma interferência (análise de clash do CDE). */
 export interface ClashElement {
+  /** id do elemento no IFC (expressID). */
   id: number;
   globalId: string;
   tipo: string;
   nome: string;
   pavimento: string | null;
-  documento_id: number;
+  documento_id: string;
   codigo: string;
 }
 export interface ClashComment {
-  id: number;
+  id: string;
   autor: string | null;
   texto: string;
   origem: string;
   created_at: string;
 }
 export interface ClashItem {
-  id: number;
+  id: string;
   numero: number;
   tipo: "colisao" | "folga";
   distancia: number;
@@ -148,15 +150,15 @@ export interface ClashItem {
   comentarios?: ClashComment[];
 }
 export interface ClashPending {
-  analises: { analise: { id: number; nome: string; concluida_at: string; modelos: { documento_id: number; codigo: string; revisao: string }[] }; interferencias: ClashItem[] }[];
+  analises: { analise: { id: string; nome: string; concluida_at: string; modelos: { documento_id: string; codigo: string; revisao: string }[] }; interferencias: ClashItem[] }[];
   estados: Record<string, string>;
 }
 
 export const clash = {
   /** Interferências em aberto das análises mais recentes que envolvem estes documentos do CDE. */
-  pending: (s: CdeSession, empId: number, docIds: number[]) => json<ClashPending>(s, "GET", `/api/clash/${empId}/pendencias${docIds.length ? `?documentos=${docIds.join(",")}` : ""}`),
-  update: (s: CdeSession, analiseId: number, body: { ids: number[]; estado?: string; comentario?: string; origem?: string }) =>
-    json<ClashItem[]>(s, "PATCH", `/api/clash/analises/${analiseId}/interferencias`, body),
+  pending: (s: CdeSession, empId: string, docIds: string[]) => json<ClashPending>(s, "GET", `/api/app/clash/${empId}/pendencias${docIds.length ? `?documentos=${docIds.join(",")}` : ""}`),
+  update: (s: CdeSession, analiseId: string, body: { ids: string[]; estado?: string; comentario?: string; origem?: string }) =>
+    json<ClashItem[]>(s, "PATCH", `/api/app/clash/analises/${analiseId}/interferencias`, body),
 };
 
 /** Arquivos que entram como vínculo (modelos de outras disciplinas). */
