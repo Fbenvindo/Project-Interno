@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { checkLicense, machineHash, normalizeKey, type LicenseFile, type LicenseState, type LicenseToken } from "./licenseCore";
 
 /** Endereço do servidor de licenças (Gestão de Projetos). Pode ser trocado na janela de ativação. */
-export const DEFAULT_LICENSE_SERVER = process.env["SEB_LICENCA_URL"] ?? "";
+export const DEFAULT_LICENSE_SERVER = process.env["SEB_LICENCA_URL"] ?? "https://calculos-instalacoes.vercel.app";
 
 const FILE = () => join(app.getPath("userData"), "licenca.json");
 
