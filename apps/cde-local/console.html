@@ -56,6 +56,17 @@
       </div>
 
       <div class="card">
+        <h2>SmartEasyWEB</h2>
+        <div id="gestaoInfo" class="muted"></div>
+        <div class="row" style="margin-top: 8px">
+          <input id="gestaoUrl" placeholder="http://localhost:3000" style="flex: 1; font: inherit; padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 6px" />
+          <button id="linkGestao">Ligar ao SmartEasyWEB</button>
+          <button id="unlinkGestao">Desligar</button>
+        </div>
+        <p class="muted">Ligado, o servidor guarda os arquivos dos empreendimentos do SmartEasyWEB e só aceita operações autorizadas por ele (assinatura conferida com a chave pública buscada agora).</p>
+      </div>
+
+      <div class="card">
         <h2>Configuração</h2>
         <div class="row">
           <label>Porta <input type="number" id="port" min="1024" max="65535" /></label>
@@ -89,6 +100,10 @@
         if (document.activeElement !== $('port')) $('port').value = s.port;
         $('autostart').checked = s.autostart;
         $('version').textContent = `Versão ${s.version}`;
+        const g = s.gestao || {};
+        $('gestaoInfo').textContent = g.url ? `Ligado a ${g.url} · chave ${g.impressao} · desde ${new Date(g.ligadoEm).toLocaleString('pt-BR')}` : 'Não ligado a um SmartEasyWEB.';
+        if (document.activeElement !== $('gestaoUrl') && !$('gestaoUrl').value) $('gestaoUrl').value = g.url || '';
+        $('unlinkGestao').disabled = !g.url;
       }
       const act = (fn) => async () => {
         try {
@@ -103,6 +118,8 @@
       $('openFolder').onclick = act(() => window.cde.openFolder());
       $('chooseFolder').onclick = act(() => window.cde.chooseFolder());
       $('savePort').onclick = act(() => window.cde.setPort($('port').value));
+      $('linkGestao').onclick = act(() => window.cde.linkGestao($('gestaoUrl').value));
+      $('unlinkGestao').onclick = act(() => confirm('Desligar do SmartEasyWEB? O servidor deixa de aceitar os arquivos dele até ligar de novo.') && window.cde.unlinkGestao());
       $('autostart').onchange = act(() => window.cde.setAutostart($('autostart').checked));
       window.cde.onState(render);
       window.cde.state().then(render);

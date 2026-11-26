@@ -83,6 +83,23 @@ O plugin SmartEasyBIM para Revit (`apps/mep-bim/revit-addin`) tem o painel **CDE
 
 Para quem não usa Revit, continua valendo exportar o IFC e enviar pela página do CDE.
 
+## Ligação com o SmartEasyWEB (etapa 1 da integração)
+
+O servidor pode ser o "cofre" de arquivos dos empreendimentos do SmartEasyWEB (Gestão de
+Projetos). O SmartEasyWEB guarda o cadastro e decide quem pode o quê; o servidor guarda os
+arquivos e só aceita operações com um **vale** assinado pelo SmartEasyWEB (Ed25519). Cada vale
+vale para uma operação, num arquivo, por pouco tempo.
+
+- **Ligar:** no painel, use **Ligar ao SmartEasyWEB** com o endereço dele (ex.:
+  `http://localhost:3000`). O servidor busca e guarda a chave pública. Sem a janela:
+  `node server/standalone.js --gestao http://localhost:3000`.
+- **No SmartEasyWEB:** defina `CDE_SERVER_URL` (endereço deste servidor) no `.env`. A página
+  **Servidor CDE** (administrador) mostra a situação e tem o botão de teste.
+- **API v2:**
+  - `GET /api/v2/status`
+  - `PUT|GET|HEAD|DELETE /api/v2/arquivos/p/<empreendimento>/…?g=<vale>`
+- **Onde ficam:** os arquivos vão para `arquivos\p\<empreendimento>\…`, na pasta de dados.
+
 ## Dados e backup
 
 Por padrão os dados ficam em `Documentos\SmartEasyBIM CDE`; dá para trocar a pasta no painel. A

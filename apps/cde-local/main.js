@@ -51,6 +51,7 @@ function state() {
     dataDir: cfg.dataDir,
     port: cfg.port,
     autostart: app.getLoginItemSettings().openAtLogin,
+    gestao: server ? (({ url, impressao, ligadoEm }) => ({ url, impressao, ligadoEm }))(server.gestao.state()) : null,
     version: app.getVersion(),
   };
 }
@@ -150,6 +151,15 @@ ipcMain.handle('cde:setPort', async (_e, port) => {
 });
 ipcMain.handle('cde:setAutostart', (_e, on) => {
   app.setLoginItemSettings({ openAtLogin: !!on, args: ['--oculto'] });
+  return state();
+});
+ipcMain.handle('cde:linkGestao', async (_e, url) => {
+  if (!server) throw new Error('O servidor do CDE não está no ar.');
+  await server.gestao.link(url);
+  return state();
+});
+ipcMain.handle('cde:unlinkGestao', async () => {
+  if (server) server.gestao.unlink();
   return state();
 });
 ipcMain.handle('cde:restart', async () => {
