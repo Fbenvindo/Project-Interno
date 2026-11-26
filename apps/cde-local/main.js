@@ -78,7 +78,10 @@ function trayIcon() {
 }
 
 function openInBrowser() {
-  if (server) shell.openExternal(server.urls[0]);
+  if (!server) return;
+  // Ligado ao SmartEasyWEB, a interface do CDE é a de lá.
+  const g = server.gestao.state();
+  shell.openExternal(g.pem && /^https?:\/\//.test(g.url || '') ? g.url : server.urls[0]);
 }
 
 function updateTray() {
@@ -88,7 +91,7 @@ function updateTray() {
     Menu.buildFromTemplate([
       { label: server ? `CDE no ar: ${server.hostUrl}` : 'CDE parado', enabled: false },
       { type: 'separator' },
-      { label: 'Abrir o CDE no navegador', click: openInBrowser, enabled: !!server },
+      { label: server && server.gestao.state().pem ? 'Abrir o SmartEasyWEB' : 'Abrir o CDE no navegador', click: openInBrowser, enabled: !!server },
       { label: 'Painel do servidor', click: showWindow },
       { type: 'separator' },
       {

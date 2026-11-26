@@ -22,6 +22,17 @@ const isLoopback = (req) => /^(::1|127\.\d+\.\d+\.\d+|::ffff:127\.\d+\.\d+\.\d+)
  * Cria o servidor. `dataDir`: pasta do banco e dos arquivos. `webDir`: interface web compilada.
  * Devolve { app, db, storage, clash, gestao }.
  */
+const esc = (t) => String(t || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+/** Página no lugar da interface antiga quando o servidor está ligado ao SmartEasyWEB. */
+function legacyPage(url, msg) {
+  const link = /^https?:\/\//.test(url || '') ? `<p><a href="${esc(url)}">Abrir o SmartEasyWEB</a></p>` : '';
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SmartEasyBIM CDE</title>
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0b1b33;font-family:Inter,Segoe UI,Arial,sans-serif;color:#0f172a}
+main{background:#fff;border-radius:10px;padding:32px;max-width:440px;margin:16px}h1{font-size:20px;margin:0 0 8px}p{color:#475569;line-height:1.5}a{display:inline-block;background:#0b1b33;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none}</style></head>
+<body><main><h1>Servidor CDE do escritório</h1><p>${esc(msg)}</p>${link}</main></body></html>`;
+}
+
 async function createApp({ dataDir, webDir = path.join(__dirname, '..', 'web-dist') }) {
   const db = await openDb(dataDir);
   const storage = createStorage(dataDir, auth.secretOf(db));
@@ -35,6 +46,17 @@ async function createApp({ dataDir, webDir = path.join(__dirname, '..', 'web-dis
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     if (req.method === 'OPTIONS') return res.status(204).end();
     next();
+  });
+  // Ligado ao SmartEasyWEB, o servidor vira só o cofre de arquivos e o motor de interferências
+  // (/api/v2): a página e a API antigas do CDE local ficam desativadas (os dados antigos continuam
+  // na pasta). CDE_LEGADO=1 reativa, para consulta.
+  let gestaoRef = null;
+  app.use((req, res, next) => {
+    const s = gestaoRef && process.env.CDE_LEGADO !== '1' ? gestaoRef.state() : null;
+    if (!s || !s.pem || req.path.startsWith('/api/v2/') || req.path === '/api/status') return next();
+    const msg = `Este servidor CDE agora trabalha ligado ao SmartEasyWEB${s.url ? ` (${s.url})` : ''}: use o CDE, as interferências e os documentos de lá.`;
+    if (req.path.startsWith('/api/')) return res.status(410).json({ error: msg, smarteasyweb: s.url || null });
+    res.status(200).type('html').send(legacyPage(s.url, msg));
   });
   storage.register(app); // antes do JSON: o PUT do arquivo é o corpo bruto
   app.use(express.json({ limit: '2mb' }));
@@ -69,7 +91,8 @@ async function createApp({ dataDir, webDir = path.join(__dirname, '..', 'web-dis
 
   // ---- Situação, primeira configuração e login --------------------------------------------------
   app.get('/api/status', (req, res) => {
-    res.json({ app: 'SmartEasyBIM CDE', versao: VERSION, configurado: hasUsers(), nome: db.setting('nome') || 'CDE' });
+    const g = gestaoRef ? gestaoRef.state() : null;
+    res.json({ app: 'SmartEasyBIM CDE', versao: VERSION, configurado: hasUsers(), nome: db.setting('nome') || 'CDE', smarteasyweb: g && g.pem ? g.url : null, legado: !(g && g.pem) || process.env.CDE_LEGADO === '1' });
   });
 
   /** Cria o primeiro administrador. Só no próprio computador do servidor e só enquanto não há usuários. */
@@ -377,6 +400,7 @@ async function createApp({ dataDir, webDir = path.join(__dirname, '..', 'web-dis
 
   // ---- SmartEasyWEB (servidor como cofre de arquivos dos empreendimentos) -------------------------
   const gestao = createGestao({ app, db, dataDir });
+  gestaoRef = gestao;
   const clashV2 = createClashV2({ app, db, dataDir, gestao });
 
   // ---- Interferências (clash) -------------------------------------------------------------------

@@ -101,6 +101,7 @@
         $('autostart').checked = s.autostart;
         $('version').textContent = `Versão ${s.version}`;
         const g = s.gestao || {};
+        $('open').textContent = g.url ? 'Abrir o SmartEasyWEB' : 'Abrir o CDE no navegador';
         $('gestaoInfo').textContent = g.url ? `Ligado a ${g.url} · chave ${g.impressao} · desde ${new Date(g.ligadoEm).toLocaleString('pt-BR')}` : 'Não ligado a um SmartEasyWEB.';
         if (document.activeElement !== $('gestaoUrl') && !$('gestaoUrl').value) $('gestaoUrl').value = g.url || '';
         $('unlinkGestao').disabled = !g.url;
